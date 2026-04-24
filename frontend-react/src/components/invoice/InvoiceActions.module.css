@@ -1,0 +1,29 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.feedback {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.feedbackOk { color: var(--color-success); }
+.err        { color: var(--color-warning); cursor: help; }
+
+/* Na mobile przyciski pionowo */
+@media (max-width: 640px) {
+  .wrap {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .wrap .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

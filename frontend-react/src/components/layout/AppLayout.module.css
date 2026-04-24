@@ -1,0 +1,41 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-left: var(--sidebar-width);
+}
+
+.content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* Overlay ciemny za sidebar na mobile */
+.overlay {
+  display: none;
+}
+
+/* ---- Mobile ---- */
+@media (max-width: 640px) {
+  .main {
+    margin-left: 0;
+  }
+  .content {
+    padding: 12px;
+  }
+  .overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 90;
+  }
+}
