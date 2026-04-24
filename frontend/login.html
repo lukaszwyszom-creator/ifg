@@ -56,7 +56,7 @@
     const password = document.getElementById("password").value;
 
     try {
-      const res = await fetch(`${API_BASE}/auth/token`, {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),

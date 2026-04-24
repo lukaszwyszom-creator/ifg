@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 _FRONTEND = Path(__file__).parent.parent.parent.parent / "frontend"
@@ -22,10 +22,14 @@ _FRONTEND = Path(__file__).parent.parent.parent.parent / "frontend"
 router = APIRouter(prefix="/ui", include_in_schema=False)
 
 
-def _file(name: str) -> FileResponse:
-    return FileResponse(_FRONTEND / name)
+def _file(name: str, media_type: str | None = None) -> FileResponse:
+    path = _FRONTEND / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Frontend file not found: {name}")
+    return FileResponse(path, media_type=media_type)
 
 
+@router.get("")
 @router.get("/")
 @router.head("/")
 def ui_index() -> FileResponse:
@@ -50,15 +54,12 @@ def ui_payments() -> FileResponse:
 @router.get("/sw.js")
 def ui_sw() -> FileResponse:
     """Service Worker musi być serwowany z zakresu /ui/, nie /ui/static/."""
-    return FileResponse(_FRONTEND / "sw.js", media_type="application/javascript")
+    return _file("sw.js", media_type="application/javascript")
 
 
 @router.get("/manifest.webmanifest")
 def ui_manifest() -> FileResponse:
-    return FileResponse(
-        _FRONTEND / "manifest.webmanifest",
-        media_type="application/manifest+json",
-    )
+    return _file("manifest.webmanifest", media_type="application/manifest+json")
 
 
 # Favicon serwowany też poza prefixem /ui przez główny router aplikacji

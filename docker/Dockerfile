@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml README.md ./
 COPY app ./app
+COPY frontend /app/frontend
 
 COPY alembic.ini ./
 COPY alembic ./alembic

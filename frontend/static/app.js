@@ -63,7 +63,7 @@ async function apiFetch(path, options = {}) {
 export const api = {
   /* Auth */
   login: (username, password) =>
-    apiFetch("/auth/token", {
+    apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),

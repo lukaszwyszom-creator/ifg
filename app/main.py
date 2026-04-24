@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -63,7 +63,10 @@ def create_application() -> FastAPI:
 
     @application.get("/favicon.ico", include_in_schema=False)
     def favicon() -> FileResponse:
-        return FileResponse(get_favicon_path(), media_type="image/x-icon")
+        favicon_path = get_favicon_path()
+        if not favicon_path.is_file():
+            raise HTTPException(status_code=404, detail="favicon.ico not found")
+        return FileResponse(favicon_path, media_type="image/x-icon")
 
     application.include_router(contractors_router, prefix=settings.api_v1_prefix)
     application.include_router(invoices_router, prefix=settings.api_v1_prefix)
