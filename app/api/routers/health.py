@@ -31,8 +31,9 @@ def healthcheck(
 
     return {
         "status": "ok",
+        "app_name": settings.app_name,
+        "version": settings.app_version,
         "environment": settings.app_env,
-        "app_version": settings.app_version,
         "db_timezone": db_timezone,
         "db_timezone_utc": db_timezone_utc,
     }
