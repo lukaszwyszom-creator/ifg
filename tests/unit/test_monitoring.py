@@ -194,7 +194,9 @@ class TestHealthExtended:
 
     def test_health_contains_app_version(self, client_with_mock_db):
         r = client_with_mock_db.get("/health")
-        assert "app_version" in r.json()
+        data = r.json()
+        assert "version" in data
+        assert "app_name" in data
 
     def test_health_contains_db_timezone(self, client_with_mock_db):
         r = client_with_mock_db.get("/health")
