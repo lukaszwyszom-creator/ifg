@@ -39,12 +39,20 @@ a:hover { text-decoration: underline; }
   color: #fff;
   padding: 14px 16px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 100;
   box-shadow: 0 2px 4px rgba(0,0,0,.15);
+}
+
+.header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .app-header h1 {
@@ -59,48 +67,42 @@ a:hover { text-decoration: underline; }
   align-items: center;
 }
 
-.main-content {
-  padding: 16px;
-  max-width: 768px;
-  margin: 0 auto;
-}
-
-.top-nav {
+.header-view-nav {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 10px 16px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 56px;
-  z-index: 90;
 }
 
-.top-nav-link {
+.header-view-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   white-space: nowrap;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: #fff;
-  color: var(--color-text);
-  font-size: 13px;
+  border: 1px solid rgba(255,255,255,.45);
+  color: #fff;
+  font-size: 12px;
   font-weight: 600;
   text-decoration: none;
+  background: rgba(255,255,255,.08);
 }
 
-.top-nav-link:hover {
+.header-view-link:hover {
   text-decoration: none;
-  background: var(--color-bg);
+  background: rgba(255,255,255,.18);
 }
 
-.top-nav-link.is-active {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
+.header-view-link.is-active {
+  background: #fff;
+  color: var(--color-primary);
+  border-color: #fff;
+}
+
+.main-content {
+  padding: 16px;
+  max-width: 768px;
+  margin: 0 auto;
 }
 
 .view-hint {
@@ -353,6 +355,114 @@ a:hover { text-decoration: underline; }
   color: var(--color-muted);
 }
 
+/* ---- Desktop invoice compact list ---- */
+#invoice-list {
+  overflow-x: clip;
+}
+
+.compact-row {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: grid;
+  /* numer | data | klient | brutto | płatność | status */
+  grid-template-columns:
+    minmax(90px, 1.1fr)
+    82px
+    minmax(120px, 2fr)
+    96px
+    max-content
+    max-content;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.compact-col {
+  font-size: 13px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.compact-col-number {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.compact-col-date {
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.compact-col-client {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-col-amount {
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.compact-col-badge {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* ---- Mobile invoice compact cards (≤ 700px) ---- */
+@media (max-width: 700px) {
+  #invoice-list {
+    overflow-x: unset;
+  }
+
+  .compact-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    padding: 10px 14px;
+  }
+
+  .compact-col-number {
+    order: 1;
+    flex: 1 1 auto;
+    font-size: 14px;
+  }
+
+  .compact-col-date {
+    order: 2;
+    flex: 0 0 auto;
+    font-size: 12px;
+    align-self: center;
+  }
+
+  .compact-col-client {
+    order: 3;
+    flex: 1 1 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 12px;
+  }
+
+  .compact-col-amount {
+    order: 4;
+    flex: 1 1 auto;
+    font-size: 15px;
+    text-align: left;
+  }
+
+  .compact-col-badge {
+    order: 5;
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
+}
+
 .state-loading::after {
   content: " ⟳";
   animation: spin 1.2s linear infinite;
@@ -482,6 +592,8 @@ a:hover { text-decoration: underline; }
 @media (min-width: 480px) {
   .filter-group { flex: 1 1 180px; }
 }
+
+
 
 /* ====================================================
    Moduł płatności
