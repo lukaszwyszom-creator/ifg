@@ -18,7 +18,15 @@
   </div>
 </header>
 
+<nav class="top-nav" aria-label="Nawigacja faktur">
+  <a class="top-nav-link" data-view-link="current-month-sales" href="/ui/?view=current-month-sales">Sprzedaż w obecnym miesiącu</a>
+  <a class="top-nav-link" data-view-link="sales" href="/ui/?view=sales">Faktury sprzedaż</a>
+  <a class="top-nav-link" data-view-link="purchase" href="/ui/?view=purchase">Faktury zakup</a>
+</nav>
+
 <main class="main-content">
+  <div id="view-hint" class="view-hint" style="display:none;"></div>
+
   <!-- Filters -->
   <form class="filter-bar" id="filter-form" autocomplete="off">
     <div class="filter-group">
@@ -69,6 +77,15 @@
 
   requireAuth();
 
+  const VIEWS = {
+    CURRENT_MONTH_SALES: "current-month-sales",
+    SALES: "sales",
+    PURCHASE: "purchase",
+  };
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get("view");
+  const currentView = Object.values(VIEWS).includes(requestedView) ? requestedView : VIEWS.SALES;
+
   const PAGE_SIZE = 20;
   let currentPage = 1;
   let totalItems = 0;
@@ -79,6 +96,8 @@
   const paginationInfo = document.getElementById("pagination-info");
   const btnPrev = document.getElementById("btn-prev");
   const btnNext = document.getElementById("btn-next");
+  const filterForm = document.getElementById("filter-form");
+  const viewHint = document.getElementById("view-hint");
 
   /* ---- Logout ---- */
   document.getElementById("btn-logout").addEventListener("click", () => {
@@ -87,7 +106,7 @@
   });
 
   /* ---- Filters ---- */
-  document.getElementById("filter-form").addEventListener("submit", (e) => {
+  filterForm.addEventListener("submit", (e) => {
     e.preventDefault();
     currentPage = 1;
     loadInvoices();
@@ -96,6 +115,45 @@
   /* ---- Pagination ---- */
   btnPrev.addEventListener("click", () => { currentPage--; loadInvoices(); });
   btnNext.addEventListener("click", () => { currentPage++; loadInvoices(); });
+
+  function getCurrentMonthDateRange() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    return {
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+    };
+  }
+
+  function applyViewState() {
+    document.querySelectorAll("[data-view-link]").forEach((link) => {
+      if (link.dataset.viewLink === currentView) {
+        link.classList.add("is-active");
+        link.setAttribute("aria-current", "page");
+      } else {
+        link.classList.remove("is-active");
+        link.removeAttribute("aria-current");
+      }
+    });
+
+    const showFilters = currentView === VIEWS.SALES;
+    filterForm.style.display = showFilters ? "flex" : "none";
+
+    if (currentView === VIEWS.CURRENT_MONTH_SALES) {
+      const monthRange = getCurrentMonthDateRange();
+      viewHint.style.display = "block";
+      viewHint.textContent = `Pokazane są wyłącznie faktury sprzedaży z okresu ${monthRange.start} - ${monthRange.end}.`;
+    } else if (currentView === VIEWS.PURCHASE) {
+      viewHint.style.display = "block";
+      viewHint.textContent = "Widok prezentuje faktury zakupowe (jeśli są dostępne w systemie).";
+    } else {
+      viewHint.style.display = "none";
+      viewHint.textContent = "";
+    }
+  }
 
   /* ---- Load ---- */
   async function loadInvoices() {
@@ -110,6 +168,19 @@
       page: currentPage,
       size: PAGE_SIZE,
     };
+
+    if (currentView === VIEWS.CURRENT_MONTH_SALES) {
+      const monthRange = getCurrentMonthDateRange();
+      params.direction = "sale";
+      params.issue_date_from = monthRange.start;
+      params.issue_date_to = monthRange.end;
+    } else if (currentView === VIEWS.PURCHASE) {
+      params.direction = "purchase";
+      params.issue_date_from = "";
+      params.issue_date_to = "";
+      params.number_filter = "";
+      params.status = "";
+    }
 
     try {
       const data = await api.listInvoices(params);
@@ -138,7 +209,10 @@
               <div class="card-number">${escHtml(inv.number_local || "— Szkic —")}</div>
               <div class="card-date">Wystawiona: ${escHtml(inv.issue_date)}</div>
             </div>
-            ${badgeHtml(inv.status)}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              ${badgeHtml(inv.payment_status ?? "unpaid")}
+              ${badgeHtml(inv.status)}
+            </div>
           </div>
           <div class="card-body">
             ${escHtml(inv.buyer_snapshot?.name ?? "")}
@@ -176,6 +250,7 @@
   }
 
   /* ---- Initial load ---- */
+  applyViewState();
   loadInvoices();
 </script>
 </body>
