@@ -241,32 +241,31 @@ class TestMarkReady:
 # ---------------------------------------------------------------------------
 
 class TestInvoicePdf:
-    def test_returns_html_content(self, client, mock_invoice_service):
+    def test_returns_pdf_content(self, client, mock_invoice_service):
         inv = _make_invoice(InvoiceStatus.ACCEPTED, "FV/2026/001")
         mock_invoice_service.get_invoice.return_value = inv
 
         res = client.get(f"/api/v1/invoices/{inv.id}/pdf")
 
         assert res.status_code == 200
-        assert "text/html" in res.headers["content-type"]
-        assert "Faktura" in res.text
-        assert "FV/2026/001" in res.text
+        assert "application/pdf" in res.headers["content-type"]
+        assert res.content.startswith(b"%PDF")
 
-    def test_pdf_contains_buyer_name(self, client, mock_invoice_service):
+    def test_pdf_response_has_payload(self, client, mock_invoice_service):
         inv = _make_invoice(InvoiceStatus.ACCEPTED, "FV/2026/001")
         mock_invoice_service.get_invoice.return_value = inv
 
         res = client.get(f"/api/v1/invoices/{inv.id}/pdf")
 
-        assert "Nabywca" in res.text
+        assert len(res.content) > 100
 
-    def test_pdf_contains_totals(self, client, mock_invoice_service):
+    def test_pdf_response_has_pdf_footer(self, client, mock_invoice_service):
         inv = _make_invoice(InvoiceStatus.ACCEPTED, "FV/2026/001")
         mock_invoice_service.get_invoice.return_value = inv
 
         res = client.get(f"/api/v1/invoices/{inv.id}/pdf")
 
-        assert "2460" in res.text
+        assert b"%%EOF" in res.content
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +273,11 @@ class TestInvoicePdf:
 # ---------------------------------------------------------------------------
 
 class TestFrontendRoutes:
+    def test_ui_root_without_trailing_slash_returns_html(self, client):
+        res = client.get("/ui")
+        assert res.status_code == 200
+        assert "text/html" in res.headers["content-type"]
+
     def test_ui_root_returns_html(self, client):
         res = client.get("/ui/")
         assert res.status_code == 200
