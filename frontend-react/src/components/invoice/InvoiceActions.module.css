@@ -2,9 +2,34 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
+
+.sendBtn {
+  background: #ff6600 !important;
+  color: #fff !important;
+  border-color: #ff6600 !important;
+  white-space: nowrap;
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: #cc5200 !important;
+  border-color: #cc5200 !important;
+}
+
+.ksefBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .feedback {
   font-size: 0.72rem;
   white-space: nowrap;
@@ -12,8 +37,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.feedbackOk { color: var(--color-success); }
-.err        { color: var(--color-warning); cursor: help; }
+
+.state_processing {
+  background: #ffcc66;
+  color: #1f2937;
+}
+
+.state_rejected {
+  background: #ff0066;
+  color: #fff;
+}
+
+.state_upo {
+  background: #336600;
+  color: #fff;
+}
+
+.err {
+  color: var(--color-warning);
+  cursor: help;
+  white-space: nowrap;
+}
 
 /* Na mobile przyciski pionowo */
 @media (max-width: 640px) {

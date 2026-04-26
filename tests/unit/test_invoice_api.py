@@ -269,42 +269,6 @@ class TestInvoicePdf:
 
 
 # ---------------------------------------------------------------------------
-# Frontend routes
-# ---------------------------------------------------------------------------
-
-class TestFrontendRoutes:
-    def test_ui_root_without_trailing_slash_returns_html(self, client):
-        res = client.get("/ui")
-        assert res.status_code == 200
-        assert "text/html" in res.headers["content-type"]
-
-    def test_ui_root_returns_html(self, client):
-        res = client.get("/ui/")
-        assert res.status_code == 200
-        assert "text/html" in res.headers["content-type"]
-
-    def test_ui_login_returns_html(self, client):
-        res = client.get("/ui/login")
-        assert res.status_code == 200
-        assert "text/html" in res.headers["content-type"]
-
-    def test_ui_invoice_returns_html(self, client):
-        res = client.get("/ui/invoice")
-        assert res.status_code == 200
-        assert "text/html" in res.headers["content-type"]
-
-    def test_ui_manifest_returns_json(self, client):
-        res = client.get("/ui/manifest.webmanifest")
-        assert res.status_code == 200
-        assert "manifest" in res.headers["content-type"] or "json" in res.headers["content-type"]
-
-    def test_ui_sw_returns_js(self, client):
-        res = client.get("/ui/sw.js")
-        assert res.status_code == 200
-        assert "javascript" in res.headers["content-type"]
-
-
-# ---------------------------------------------------------------------------
 # FA(3) new fields: delivery_date, ksef_reference_number
 # ---------------------------------------------------------------------------
 

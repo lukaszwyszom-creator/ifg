@@ -26,12 +26,8 @@ export default function SimpleView() {
     <div className={styles.page}>
       {/* Header */}
       <div className={styles.header}>
-        <div>
-          <h2 className={styles.heading}>Faktury</h2>
-          <p className={styles.sub}>Tryb prosty — szybkie wystawianie i zarządzanie</p>
-        </div>
         <button
-          className="btn btn-primary"
+          className={`btn btn-primary ${styles.newInvoiceBtn}`}
           onClick={() => { setShowForm((v) => !v); setSaved(null); }}
         >
           {showForm ? '✕ Anuluj' : '+ Nowa faktura'}
@@ -53,12 +49,9 @@ export default function SimpleView() {
         </div>
       )}
 
-      {/* Lista ostatnich 10 */}
+      {/* Lista faktur */}
       {!showForm && (
         <div className={styles.section}>
-          <div className="card-header">
-            <span className="card-title">Ostatnie faktury</span>
-          </div>
           <InvoiceList
             key={refreshKey}
             limit={10}

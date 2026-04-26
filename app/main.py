@@ -1,15 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.contractors import router as contractors_router
-from app.api.routers.frontend import get_favicon_path
-from app.api.routers.frontend import router as frontend_router
 from app.api.routers.health import router as health_router
 from app.api.routers.invoices import router as invoices_router
 from app.api.routers.ksef_session import router as ksef_session_router
@@ -26,8 +21,6 @@ from app.core.middleware import RequestIdMiddleware
 from app.persistence.db import session_scope
 from app.persistence.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthService
-
-_FRONTEND_STATIC = Path(__file__).parent.parent / "frontend" / "static"
 
 
 @asynccontextmanager
@@ -58,16 +51,7 @@ def create_application() -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(metrics_router)
-    application.include_router(frontend_router)
     application.include_router(auth_router, prefix=settings.api_v1_prefix)
-
-    @application.get("/favicon.ico", include_in_schema=False)
-    def favicon() -> FileResponse:
-        favicon_path = get_favicon_path()
-        if not favicon_path.is_file():
-            raise HTTPException(status_code=404, detail="favicon.ico not found")
-        return FileResponse(favicon_path, media_type="image/x-icon")
-
     application.include_router(contractors_router, prefix=settings.api_v1_prefix)
     application.include_router(invoices_router, prefix=settings.api_v1_prefix)
     application.include_router(transmissions_router, prefix=settings.api_v1_prefix)
@@ -82,14 +66,6 @@ def create_application() -> FastAPI:
 
     if settings.enable_warehouse:
         application.include_router(stock_router, prefix=settings.api_v1_prefix)
-
-    # Statyczne pliki frontendu (CSS, JS)
-    if _FRONTEND_STATIC.exists():
-        application.mount(
-            "/ui/static",
-            StaticFiles(directory=_FRONTEND_STATIC),
-            name="frontend_static",
-        )
 
     return application
 

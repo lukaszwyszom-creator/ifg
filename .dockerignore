@@ -1,18 +1,43 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 .venv/
 .venv313/
+**/.coverage
+**/htmlcov/
+*.log
+
+# VCS / IDE
 .git/
+.github/
 .idea/
 .vscode/
-docs/*.pdf
+
+# Frontend
+frontend/
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/.vite/
+
+# Repo-only assets nie potrzebne w obrazie API
+docs/
+tests/
+scripts/
+rules_03_git_workflow.md
+alembic/versions/__pycache__/
+
+# Sekrety i artefakty
 *.zip
 test_check.db
 _tmp_session.py
 .env
 .env.production
 .env.staging
+.env.example
+.env.production.template
+
+# OS
 .DS_Store
 Thumbs.db

@@ -25,13 +25,15 @@ export default function App() {
             </PrivateRoute>
           }
         >
-          <Route index element={<Navigate to="/simple" replace />} />
-          <Route path="simple" element={<SimpleView />} />
-          <Route path="advanced" element={<AdvancedDashboard />} />
+          <Route index element={<Navigate to="/invoices" replace />} />
+          <Route path="invoices" element={<SimpleView />} />
+          <Route path="dashboard" element={<AdvancedDashboard />} />
+          <Route path="simple" element={<Navigate to="/invoices" replace />} />
+          <Route path="advanced" element={<Navigate to="/dashboard" replace />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="stock" element={<StockPage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/invoices" replace />} />
       </Routes>
     </BrowserRouter>
   );

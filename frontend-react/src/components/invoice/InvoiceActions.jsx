@@ -5,137 +5,106 @@ import styles from './InvoiceActions.module.css';
 
 /**
  * @param {object}   invoice      - pełny obiekt faktury
- * @param {object}   transmission - opcjonalny obiekt ostatniej transmisji (dla retry)
  * @param {Function} onRefresh    - callback po akcji
  */
-export default function InvoiceActions({ invoice, transmission, onRefresh, onUpdate }) {
-  const [busy, setBusy] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [msgType, setMsgType] = useState('error');
+const UNSENT_STATUSES = new Set([
+  '',
+  'draft',
+  'ready_for_submission',
+  'ready',
+  'gotowa',
+  'szkic',
+]);
 
-  const run = async (fn, successMsg, { updateInline = false } = {}) => {
+const PROCESSING_STATUSES = new Set([
+  'sending',
+  'in_progress',
+  'processing',
+  'queued',
+  'submitted',
+  'waiting_status',
+  'failed_temporary',
+]);
+
+const REJECTED_STATUSES = new Set([
+  'rejected',
+  'failed_permanent',
+  'failed_retryable',
+]);
+
+const UPO_STATUSES = new Set([
+  'accepted',
+  'upo_received',
+  'delivered',
+  'success',
+]);
+
+function resolveKsefState(status) {
+  const normalized = (status ?? '').toString().trim().toLowerCase();
+
+  if (UNSENT_STATUSES.has(normalized)) {
+    return { kind: 'send', label: 'Wyślij' };
+  }
+  if (PROCESSING_STATUSES.has(normalized)) {
+    return { kind: 'processing', label: 'W przetwarzaniu' };
+  }
+  if (REJECTED_STATUSES.has(normalized)) {
+    return { kind: 'rejected', label: 'Odrzucona' };
+  }
+  if (UPO_STATUSES.has(normalized)) {
+    return { kind: 'upo', label: 'Odebrano UPO' };
+  }
+
+  return { kind: 'send', label: 'Wyślij' };
+}
+
+export default function InvoiceActions({ invoice, onRefresh }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const ksefState = resolveKsefState(invoice.status);
+
+  const submitToKsef = async (e) => {
+    e.stopPropagation();
     setBusy(true);
     setMsg('');
+
     try {
-      const result = await fn();
-      if (successMsg) { setMsg(successMsg); setMsgType('success'); }
-      // Mark-ready: aktualizuj wiersz inline (nie przeładowuj listy) —
-      // przeładowanie z filtrem status=draft wykluczyłoby zatwierdzoną fakturę.
-      if (updateInline && onUpdate && result) {
-        onUpdate(result);
-      } else {
-        onRefresh?.();
+      if ((invoice.status ?? '').toString().trim().toLowerCase() === 'draft') {
+        await invoicesApi.markReady(invoice.id);
       }
+
+      await transmissionsApi.submit(invoice.id);
+      onRefresh?.();
     } catch (err) {
-      const detail =
+      setMsg(
         err.response?.data?.error?.message ??
         err.response?.data?.detail ??
         err.response?.data?.error?.code ??
-        'Błąd operacji';
-      setMsg(detail);
-      setMsgType('error');
+        'Błąd wysyłki do KSeF',
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const openPdf = async () => {
-    setPdfBusy(true);
-    setMsg('');
-    try {
-      const arrayBuffer = await invoicesApi.getPdf(invoice.id);
-      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `faktura-${invoice.number_local || invoice.id}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } catch {
-      setMsg('Błąd generowania PDF');
-      setMsgType('error');
-    } finally {
-      setPdfBusy(false);
-    }
-  };
-
-  const openPreview = async () => {
-    setPdfBusy(true);
-    setMsg('');
-    try {
-      const html = await invoicesApi.getPreview(invoice.id);
-      const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const win = window.open(url, '_blank');
-      if (!win) {
-        setMsg('Przeglądarka zablokowała popup — zezwól na otwieranie nowych okien');
-        setMsgType('error');
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } catch {
-      setMsg('Błąd generowania podglądu faktury');
-      setMsgType('error');
-    } finally {
-      setPdfBusy(false);
-    }
-  };
-
-  const canMarkReady = invoice.status === 'draft';
-  const canSubmit    = invoice.status === 'ready_for_submission';
-  const canRetry     = transmission?.status === 'failed_retryable';
-
   return (
     <div className={styles.wrap}>
-      {canMarkReady && (
+      {ksefState.kind === 'send' ? (
         <button
-          className="btn btn-secondary btn-sm"
+          className={`btn btn-sm ${styles.sendBtn}`}
           disabled={busy}
-          onClick={() => run(() => invoicesApi.markReady(invoice.id), 'Gotowa do wysyłki', { updateInline: true })}
+          onClick={submitToKsef}
         >
-          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Zatwierdź'}
+          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : ksefState.label}
         </button>
+      ) : (
+        <span className={`${styles.ksefBadge} ${styles[`state_${ksefState.kind}`]}`}>
+          {ksefState.label}
+        </span>
       )}
-      {canSubmit && (
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={busy}
-          onClick={() => run(() => transmissionsApi.submit(invoice.id), 'Wysłano do KSeF')}
-        >
-          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Wyślij KSeF'}
-        </button>
-      )}
-      {canRetry && (
-        <button
-          className="btn btn-secondary btn-sm"
-          disabled={busy}
-          onClick={() => run(() => transmissionsApi.retry(transmission.id), 'Ponowiono')}
-        >
-          Ponów
-        </button>
-      )}
-      <button
-        className="btn btn-ghost btn-sm"
-        disabled={pdfBusy}
-        onClick={openPreview}
-        title="Podgląd HTML w nowej karcie (Ctrl+P do druku)"
-      >
-        {pdfBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Podgląd'}
-      </button>
-      <button
-        className="btn btn-ghost btn-sm"
-        disabled={pdfBusy}
-        onClick={openPdf}
-        title="Pobierz jako plik PDF"
-      >
-        {pdfBusy ? null : 'PDF ↓'}
-      </button>
       {msg && (
-        <span
-          className={`${styles.feedback} ${msgType === 'success' ? styles.feedbackOk : styles.err}`}
-          title={msg}
-        >
-          {msgType === 'success' ? '✓' : '⚠'} {msg.length > 36 ? msg.slice(0, 36) + '…' : msg}
+        <span className={styles.err} title={msg}>
+          ⚠ {msg.length > 36 ? `${msg.slice(0, 36)}…` : msg}
         </span>
       )}
     </div>

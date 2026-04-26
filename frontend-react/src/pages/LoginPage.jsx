@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/auth';
 import { useAuthStore } from '../store/useAuthStore';
-import { useAppStore } from '../store/useAppStore';
 import styles from './LoginPage.module.css';
 import logo from '../assets/logo-ifg.png';
 
@@ -13,7 +12,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
 
   const setAuth = useAuthStore((s) => s.setAuth);
-  const mode = useAppStore((s) => s.mode);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -23,7 +21,7 @@ export default function LoginPage() {
     try {
       const data = await authApi.login(username, password);
       setAuth(data.access_token, { username });
-      navigate(`/${mode}`, { replace: true });
+      navigate('/invoices', { replace: true });
     } catch {
       setError('Nieprawidłowy login lub hasło');
     } finally {

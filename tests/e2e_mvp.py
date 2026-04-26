@@ -406,24 +406,6 @@ class TestE2EMvp:
         assert "2 460" in body or "2460" in body
         assert "1234567890" in body  # NIP sprzedawcy
 
-    # ── 8. UI strony frontendowe ────────────────────────────────────────
-
-    def test_08a_ui_index(self, client, seeded):
-        r = client.get("/ui/")
-        assert r.status_code == 200
-
-    def test_08b_ui_login(self, client, seeded):
-        r = client.get("/ui/login")
-        assert r.status_code == 200
-
-    def test_08c_ui_invoice(self, client, seeded):
-        r = client.get("/ui/invoice")
-        assert r.status_code == 200
-
-    def test_08d_ui_payments(self, client, seeded):
-        r = client.get("/ui/payments")
-        assert r.status_code == 200
-
     # ── 9. Swagger docs ─────────────────────────────────────────────────
 
     def test_09_swagger_docs(self, client, seeded):

@@ -11,8 +11,6 @@ function currentMonthValue() {
 export const useAppStore = create(
   persist(
     (set) => ({
-      mode: 'simple', // 'simple' | 'advanced'
-
       // NIP sprzedawcy zapamiętany do operacji KSeF
       sellerNip: '',
 
@@ -27,8 +25,6 @@ export const useAppStore = create(
 
       // Stan formularza faktury (Simple mode)
       draftInvoice: null,
-
-      setMode: (mode) => set({ mode }),
 
       setSellerNip: (nip) => set({ sellerNip: nip }),
 
@@ -46,7 +42,11 @@ export const useAppStore = create(
     }),
     {
       name: 'faktura-app',
-      partialize: (s) => ({ mode: s.mode, sellerNip: s.sellerNip }),
+      version: 2,
+      migrate: (persistedState) => ({
+        sellerNip: persistedState?.sellerNip ?? '',
+      }),
+      partialize: (s) => ({ sellerNip: s.sellerNip }),
     }
   )
 );

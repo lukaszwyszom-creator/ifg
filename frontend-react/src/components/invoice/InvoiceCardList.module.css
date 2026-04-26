@@ -1,0 +1,316 @@
+/* InvoiceCardList.module.css */
+
+.container {
+  --invoice-grid-columns: 86px 96px minmax(180px, 1fr) 96px 56px 96px 92px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.loadingState,
+.emptyState {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--color-text-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.headerRow {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: var(--invoice-grid-columns);
+  gap: 6px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.headerCell {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-2);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.headerCell:nth-child(4) {
+  text-align: right;
+}
+
+.headerCell:nth-child(6) {
+  text-align: right;
+}
+
+.scrollArea {
+  max-height: min(62vh, 680px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+}
+
+.card {
+  display: block;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  /* cursor: default — nie udajemy klikalności dopóki routing nie istnieje */
+  /* TODO: add cursor: pointer when invoice detail/edit routes are implemented */
+}
+
+.card:hover {
+  /* Delikatny efekt — nie sugeruje linku/przycisku */
+  background: var(--color-surface-2);
+}
+
+/* Główny wiersz z danymi */
+.cardContent {
+  display: grid;
+  grid-template-columns: var(--invoice-grid-columns);
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+/* Column 1: Numer */
+.cardContent > .cell:nth-child(1) {
+  justify-self: auto;
+  white-space: nowrap;
+}
+
+/* Column 2: Data — centered */
+.cardContent > .cell:nth-child(2) {
+  align-items: center;
+  text-align: center;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+/* Column 3: Nabywca — flexible, with ellipsis */
+.cardContent > .cell:nth-child(3) {
+  align-items: flex-start;
+  text-align: left;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.cardContent > .cell:nth-child(3) .value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Column 4: Brutto — right-aligned */
+.cardContent > .cell:nth-child(4) {
+  align-items: flex-end;
+  text-align: right;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.cardContent > .cell:nth-child(4) .value {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Column 5: Termin — centered */
+.cardContent > .cell:nth-child(5) {
+  align-items: center;
+  text-align: center;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+/* Column 6: Pozostało — right-aligned */
+.cardContent > .cell:nth-child(6) {
+  align-items: flex-end;
+  text-align: right;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+/* Column 7: Status KSeF — centered */
+.cardContent > .cell:nth-child(7) {
+  align-items: center;
+  text-align: center;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+/* Column 8: PDF — centered */
+.cardContent > .cell:nth-child(8) {
+  align-items: center;
+  text-align: center;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+.label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+  display: none; /* Ukryte na desktop */
+}
+
+.value {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.remainingAmountDue {
+  color: var(--color-danger, #c62828);
+  font-weight: 700;
+  text-align: right;
+}
+
+.remainingAmountZero {
+  color: var(--color-text-3);
+  font-weight: 700;
+  text-align: right;
+}
+
+.buyerValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ksefCell {
+  align-items: center;
+}
+
+.ksefCell :global(.wrap) {
+  flex-wrap: nowrap;
+}
+
+.pdfCell {
+  align-items: center;
+}
+
+.pdfButton {
+  width: fit-content;
+  justify-content: center;
+  white-space: nowrap;
+  padding: 2px 6px !important;
+  min-height: 24px !important;
+  background: transparent !important;
+  color: #fff !important;
+  border: 1px solid #ff3300 !important;
+}
+
+.ksefCell :global(.btn.btn-sm) {
+  padding: 2px 6px;
+  min-height: 24px;
+}
+
+.ksefCell :global(span[class*='ksefBadge']) {
+  min-height: 24px;
+  padding: 2px 8px;
+}
+
+.pdfButton:hover:not(:disabled) {
+  border-color: #cc2900 !important;
+  background: rgba(255, 51, 0, 0.15) !important;
+}
+
+/* ---- Mobile: <= 640px ---- */
+@media (max-width: 640px) {
+  .container {
+    border: none;
+    background: transparent;
+  }
+
+  .headerRow {
+    display: none;
+  }
+
+  .scrollArea {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .card {
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 10px;
+  }
+
+  .cardContent {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .label {
+    display: inline;
+  }
+
+  .cell {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .label {
+    grid-column: 1;
+  }
+
+  .value {
+    grid-column: 2;
+  }
+
+  .buyerValue {
+    white-space: normal;
+  }
+
+  .ksefCell :global(.wrap) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ---- Tablet: 641px - 1023px ---- */
+@media (max-width: 1023px) and (min-width: 641px) {
+  .container {
+    --invoice-grid-columns: 78px 88px minmax(130px, 1fr) 90px 56px 90px 84px 60px;
+  }
+
+  .cardContent {
+    gap: 4px;
+  }
+
+  .value {
+    font-size: 0.8rem;
+  }
+}

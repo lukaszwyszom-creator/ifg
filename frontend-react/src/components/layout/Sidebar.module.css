@@ -49,34 +49,6 @@
   margin-top: -25px;
 }
 
-/* --- Mode Toggle --- */
-.modeToggle {
-  display: flex;
-  margin: 14px 12px 6px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.modeBtn {
-  flex: 1;
-  padding: 6px 4px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-3);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.modeBtn.active {
-  background: var(--color-gold);
-  color: #000;
-  border-radius: calc(var(--radius) - 1px);
-}
-.modeBtn:hover:not(.active) { color: var(--color-gold); }
-
 /* --- Nav --- */
 .nav {
   flex: 1;

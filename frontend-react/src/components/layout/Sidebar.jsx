@@ -5,18 +5,22 @@ import { ksefApi } from '../../api/ksef';
 import styles from './Sidebar.module.css';
 import logo from '../../assets/logo-ifg.png';
 
-const NAV_ITEMS_SIMPLE   = [
-  { to: '/simple',   label: 'Faktury',   icon: '📄' },
-];
-const NAV_ITEMS_ADVANCED = [
-  { to: '/advanced', label: 'Dashboard', icon: '📊' },
+function formatCurrentMonthLabel() {
+  const monthYear = new Intl.DateTimeFormat('pl-PL', {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date());
+  return `Faktury - ${monthYear}`;
+}
+
+const NAV_ITEMS = [
+  { to: '/invoices', label: formatCurrentMonthLabel(), icon: '📄' },
+  { to: '/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
-  { to: '/stock',    label: 'Magazyn',   icon: '📦' },
+  { to: '/stock', label: 'Magazyn', icon: '📦' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
-  const mode = useAppStore((s) => s.mode);
-  const setMode = useAppStore((s) => s.setMode);
   const sellerNip = useAppStore((s) => s.sellerNip);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
@@ -45,23 +49,8 @@ export default function Sidebar({ open = false, onClose }) {
         <span className={styles.logoText}>Imperium Faktur G</span>
       </div>
 
-      <div className={styles.modeToggle}>
-        <button
-          className={`${styles.modeBtn} ${mode === 'simple' ? styles.active : ''}`}
-          onClick={() => { setMode('simple'); navigate('/simple'); handleNav(); }}
-        >
-          SIMPLE
-        </button>
-        <button
-          className={`${styles.modeBtn} ${mode === 'advanced' ? styles.active : ''}`}
-          onClick={() => { setMode('advanced'); navigate('/advanced'); handleNav(); }}
-        >
-          ADVANCED
-        </button>
-      </div>
-
       <nav className={styles.nav}>
-        {(mode === 'simple' ? NAV_ITEMS_SIMPLE : NAV_ITEMS_ADVANCED).map((item) => (
+        {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

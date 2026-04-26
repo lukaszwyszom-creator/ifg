@@ -9,15 +9,19 @@
 .header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
 }
 
-.heading {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--color-text);
-  margin-bottom: 4px;
+.newInvoiceBtn {
+  background: #ff3300 !important;
+  color: #fff !important;
+  border-color: #ff3300 !important;
+}
+
+.newInvoiceBtn:hover:not(:disabled) {
+  background: #cc2900 !important;
+  border-color: #cc2900 !important;
 }
 
 .sub {
