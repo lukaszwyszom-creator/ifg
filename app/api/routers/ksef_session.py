@@ -7,19 +7,33 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user, get_ksef_session_service
+from app.api.deps import get_current_user, get_ksef_session_service, get_settings_service
 from app.core.security import AuthenticatedUser
 from app.schemas.ksef_session import (
     CloseSessionResponse,
+    KSeFConnectionStatusResponse,
     KSeFSessionResponse,
     OpenSessionRequest,
 )
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/ksef/session", tags=["ksef-session"])
+router_status = APIRouter(prefix="/ksef", tags=["ksef-session"])
 
 # Alias REST-owy: /ksef-sessions/  (bardziej idiomatyczny URL)
 router_sessions = APIRouter(prefix="/ksef-sessions", tags=["ksef-session"])
+
+
+@router_status.get("/status", response_model=KSeFConnectionStatusResponse)
+def get_ksef_connection_status(
+    ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
+    settings_service: Annotated[SettingsService, Depends(get_settings_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> KSeFConnectionStatusResponse:
+    settings_data = settings_service.get_settings()
+    payload = ksef_session_service.get_connection_status(settings_data.get("seller_nip"))
+    return KSeFConnectionStatusResponse.model_validate(payload)
 
 
 @router.post("/open", response_model=KSeFSessionResponse, status_code=201)

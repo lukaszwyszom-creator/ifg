@@ -1,18 +1,8 @@
 import React, { useState } from 'react';
 import { invoicesApi } from '../../api/invoices';
 import InvoiceActions from './InvoiceActions';
+import { getInvoiceOpenMode } from './invoiceOpenMode';
 import styles from './InvoiceCardList.module.css';
-
-const COLUMN_LABELS = [
-  'Numer',
-  'Data',
-  'Nabywca',
-  'Brutto',
-  'Termin',
-  'Pozostało',
-  'Status KSeF',
-  'PDF',
-];
 
 const DIRECT_REMAINING_FIELDS = [
   'remaining_amount',
@@ -111,27 +101,66 @@ const getRemainingAmountInfo = (invoice) => {
 
 const formatMoney = (amount, currency) => `${amount.toFixed(2)} ${currency || 'PLN'}`;
 
+const formatDateDDMMYYYY = (dateStr) => {
+  if (!dateStr) return '—';
+  const iso = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    return `${iso[3]}-${iso[2]}-${iso[1]}`;
+  }
+  const parsed = new Date(dateStr);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${pad2(parsed.getDate())}-${pad2(parsed.getMonth() + 1)}-${parsed.getFullYear()}`;
+  }
+  return '—';
+};
+
 const getGrossAmount = (invoice) => {
   const gross = resolveFieldAmount(invoice, GROSS_FIELDS);
   return gross ? gross.amount : 0;
 };
 
+const getContractorName = (invoice, direction) => {
+  if (direction === 'purchase') {
+    return (
+      invoice.seller_snapshot?.name
+      ?? invoice.contractor_snapshot?.name
+      ?? invoice.buyer_snapshot?.name
+      ?? '—'
+    );
+  }
+  return invoice.buyer_snapshot?.name ?? '—';
+};
+
+const getContractorNip = (invoice, direction) => {
+  if (direction === 'purchase') {
+    return (
+      invoice.seller_snapshot?.nip
+      ?? invoice.contractor_snapshot?.nip
+      ?? invoice.buyer_snapshot?.nip
+      ?? '—'
+    );
+  }
+  return invoice.buyer_snapshot?.nip ?? '—';
+};
+
 /**
  * Render listy faktur jako kafelków zamiast tabeli.
  * @param {Array}       items      - faktury do wyświetlenia
+ * @param {string}      direction  - 'sale' | 'purchase'
  * @param {bool}        loading    - stan ładowania
- * @param {Function}    onRefresh  - callback przeładowania
- * @param {Function}    onUpdate   - callback aktualizacji pojedynczej faktury
  * @param {string}      emptyMsg   - wiadomość gdy brak danych
  */
 export default function InvoiceCardList({
   items = [],
+  direction = 'sale',
+  showKsefStatus = true,
   loading = false,
   onRefresh,
-  onUpdate,
+  onOpenInvoice,
   emptyMsg = 'Brak faktur',
 }) {
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const contractorHeader = direction === 'purchase' ? 'Sprzedawca' : 'Nabywca';
 
   const preparedItems = React.useMemo(() => {
     const entries = items.map((invoice, idx) => {
@@ -266,13 +295,25 @@ export default function InvoiceCardList({
   }
 
   return (
-    <div className={styles.container}>
-      <div className={styles.headerRow}>
-        {COLUMN_LABELS.map((label) => (
-          <div key={label} className={styles.headerCell}>
-            {label}
-          </div>
-        ))}
+    <div className={`${styles.container} ${showKsefStatus ? '' : styles.noKsef}`}>
+      <div className={`${styles.headerRow} ${styles.invoiceGrid}`}>
+        <div className={`${styles.headerCell} ${styles.invoiceCellNumber}`}>Numer</div>
+        <div className={`${styles.headerCell} ${styles.invoiceCellDate}`}>Data</div>
+        <div className={`${styles.headerCell} ${styles.invoiceCellBuyer}`}>{contractorHeader}</div>
+        <div className={`${styles.headerCell} ${styles.invoiceCellNip}`}>NIP</div>
+        <div
+          className={`${styles.headerCell} ${styles.invoiceHeaderAmount} ${styles.invoiceCellGross}`}
+        >
+          Brutto
+        </div>
+        <div className={`${styles.headerCell} ${styles.invoiceCellTerm}`}>Termin</div>
+        <div
+          className={`${styles.headerCell} ${styles.invoiceHeaderAmount} ${styles.invoiceCellRemaining}`}
+        >
+          Pozostało
+        </div>
+        {showKsefStatus && <div className={`${styles.headerCell} ${styles.invoiceCellKsef}`}>Status KSeF</div>}
+        <div className={`${styles.headerCell} ${styles.invoiceCellPdf}`}>PDF</div>
       </div>
 
       <div className={styles.scrollArea}>
@@ -282,40 +323,60 @@ export default function InvoiceCardList({
 
           return (
             <div key={invoice.id} className={styles.card}>
-              {/* TODO: enable row navigation when invoice detail/edit routes are implemented */}
-              <div className={styles.cardContent}>
-                <div className={styles.cell}>
+              <div
+                className={`${styles.cardContent} ${styles.invoiceGrid}`}
+                role={onOpenInvoice ? 'button' : undefined}
+                tabIndex={onOpenInvoice ? 0 : undefined}
+                onClick={() => onOpenInvoice?.(invoice, getInvoiceOpenMode(invoice.status))}
+                onKeyDown={(e) => {
+                  if (!onOpenInvoice) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onOpenInvoice(invoice, getInvoiceOpenMode(invoice.status));
+                  }
+                }}
+              >
+                <div className={`${styles.cell} ${styles.invoiceCellNumber}`}>
                   <span className={styles.label}>Numer</span>
                   <span className={styles.value} title={`Źródło numeru: ${item.numberSource}`}>
                     {item.displayNumber}
                   </span>
                 </div>
 
-                <div className={styles.cell}>
+                <div className={`${styles.cell} ${styles.invoiceCellDate}`}>
                   <span className={styles.label}>Data</span>
-                  <span className={styles.value}>{invoice.issue_date}</span>
+                  <span className={styles.value}>{formatDateDDMMYYYY(invoice.issue_date)}</span>
                 </div>
 
-                <div className={styles.cell}>
-                  <span className={styles.label}>Nabywca</span>
+                <div className={`${styles.cell} ${styles.invoiceCellBuyer}`}>
+                  <span className={styles.label}>{contractorHeader}</span>
                   <span className={`${styles.value} ${styles.buyerValue}`}>
-                    {invoice.buyer_snapshot?.name ?? '—'}
+                    {getContractorName(invoice, direction)}
                   </span>
                 </div>
 
-                <div className={styles.cell}>
+                <div className={`${styles.cell} ${styles.invoiceCellNip}`}>
+                  <span className={styles.label}>NIP</span>
+                  <span className={styles.value}>{getContractorNip(invoice, direction)}</span>
+                </div>
+
+                <div
+                  className={`${styles.cell} ${styles.invoiceCellAmount} ${styles.invoiceCellGross}`}
+                >
                   <span className={styles.label}>Brutto</span>
                   <span className={styles.value}>
                     {formatMoney(grossAmount, invoice.currency)}
                   </span>
                 </div>
 
-                <div className={styles.cell}>
+                <div className={`${styles.cell} ${styles.invoiceCellTerm}`}>
                   <span className={styles.label}>Termin</span>
                   <span className={styles.value}>{getPaymentTermLabel(invoice)}</span>
                 </div>
 
-                <div className={styles.cell}>
+                <div
+                  className={`${styles.cell} ${styles.invoiceCellAmount} ${styles.invoiceCellRemaining}`}
+                >
                   <span className={styles.label}>Pozostało</span>
                   {(() => {
                     const remaining = getRemainingAmountInfo(invoice);
@@ -334,12 +395,14 @@ export default function InvoiceCardList({
                   })()}
                 </div>
 
-                <div className={`${styles.cell} ${styles.ksefCell}`}>
-                  <span className={styles.label}>Status KSeF</span>
-                  <InvoiceActions invoice={invoice} onRefresh={onRefresh} onUpdate={onUpdate} />
-                </div>
+                {showKsefStatus && (
+                  <div className={`${styles.cell} ${styles.invoiceCellKsef} ${styles.ksefCell}`}>
+                    <span className={styles.label}>Status KSeF</span>
+                    <InvoiceActions invoice={invoice} onRefresh={onRefresh} />
+                  </div>
+                )}
 
-                <div className={`${styles.cell} ${styles.pdfCell}`}>
+                <div className={`${styles.cell} ${styles.invoiceCellPdf} ${styles.pdfCell}`}>
                   <span className={styles.label}>PDF</span>
                   <button
                     className={`btn btn-sm ${styles.pdfButton}`}

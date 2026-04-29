@@ -25,6 +25,8 @@ from app.services.ksef_session_service import (
     SESSION_EXPIRED,
     KSeFSessionService,
 )
+from app.integrations.ksef.auth import KSeFSession
+from app.integrations.ksef.client import KSeFOnlineSession
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +442,7 @@ def _service(mock_session: MagicMock, _auth_provider: MagicMock) -> KSeFSessionS
     return KSeFSessionService(
         session=mock_session,
         auth_provider=_auth_provider,
+        ksef_client=MagicMock(),
         audit_service=MagicMock(),
     )
 
@@ -453,16 +456,22 @@ class TestPerNipSessionIsolation:
         _auth_provider: MagicMock,
         mock_session: MagicMock,
     ):
-        from app.integrations.ksef.auth import KSeFSession
-
         mock_settings.ksef_auth_token = "tok"
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        _auth_provider.get_challenge.return_value = {"challenge": "ch"}
-        _auth_provider.init_session.return_value = KSeFSession(
-            session_token="t", session_reference="ref", expires_at=None
+        _auth_provider.get_tokens.return_value = KSeFSession(
+            access_token="acc",
+            refresh_token="ref",
+            access_valid_until=datetime.now(UTC) + timedelta(hours=1),
+            refresh_valid_until=datetime.now(UTC) + timedelta(days=1),
+        )
+        _service.ksef_client.open_online_session.return_value = KSeFOnlineSession(
+            session_reference="ref",
+            symmetric_key=b"k" * 32,
+            initialization_vector=b"i" * 16,
+            valid_until=None,
         )
 
         orm = _service.open_session("1234567890")
@@ -484,10 +493,17 @@ class TestPerNipSessionIsolation:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        from app.integrations.ksef.auth import KSeFSession
-        _service.auth_provider.get_challenge.return_value = {"challenge": "ch"}
-        _service.auth_provider.init_session.return_value = KSeFSession(
-            session_token="t2", session_reference="ref2", expires_at=None
+        _service.auth_provider.get_tokens.return_value = KSeFSession(
+            access_token="acc2",
+            refresh_token="ref2",
+            access_valid_until=datetime.now(UTC) + timedelta(hours=1),
+            refresh_valid_until=datetime.now(UTC) + timedelta(days=1),
+        )
+        _service.ksef_client.open_online_session.return_value = KSeFOnlineSession(
+            session_reference="ref2",
+            symmetric_key=b"k" * 32,
+            initialization_vector=b"i" * 16,
+            valid_until=None,
         )
 
         # Inny NIP — nie powinno rzucić ConflictError
@@ -503,7 +519,11 @@ class TestTokenCacheTTL:
     ):
         expires = datetime.now(UTC) + timedelta(hours=1)
         active_orm = MagicMock()
-        active_orm.token_metadata_json = {"session_token": "tok-abc"}
+        active_orm.token_metadata_json = {
+            "access_token": "tok-abc",
+            "symmetric_key": "az09",
+            "initialization_vector": "aTE9",
+        }
         active_orm.expires_at = expires
         active_orm.nip = "1234567890"
 
@@ -512,12 +532,12 @@ class TestTokenCacheTTL:
         mock_session.execute.return_value = mock_result
 
         token1 = _service.get_session_token("1234567890")
-        # Drugi call — z cache, bez trafienia do DB
+        # Drugi call — token ten sam; aktualnie get_session_context nadal czyta DB
         mock_session.execute.reset_mock()
         token2 = _service.get_session_token("1234567890")
 
         assert token1 == token2 == "tok-abc"
-        mock_session.execute.assert_not_called()
+        mock_session.execute.assert_called_once()
 
     def test_expired_cache_hits_db(
         self,
@@ -527,7 +547,11 @@ class TestTokenCacheTTL:
         """Jeśli token wygasł, cache jest pomijany i trafia do DB."""
         expires_soon = datetime.now(UTC) + timedelta(seconds=10)  # < 30s margines
         active_orm = MagicMock()
-        active_orm.token_metadata_json = {"session_token": "tok-fresh"}
+        active_orm.token_metadata_json = {
+            "access_token": "tok-fresh",
+            "symmetric_key": "az09",
+            "initialization_vector": "aTE9",
+        }
         active_orm.expires_at = expires_soon
         active_orm.nip = "1234567890"
 
@@ -553,7 +577,11 @@ class TestTokenCacheTTL:
 
         expires = datetime.now(UTC) + timedelta(hours=1)
         active_orm = MagicMock()
-        active_orm.token_metadata_json = {"session_token": "tok-xyz"}
+        active_orm.token_metadata_json = {
+            "access_token": "tok-xyz",
+            "symmetric_key": "az09",
+            "initialization_vector": "aTE9",
+        }
         active_orm.expires_at = expires
         active_orm.nip = "1234567890"
 

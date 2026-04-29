@@ -19,7 +19,7 @@ import pytest
 
 from app.core.exceptions import NotFoundError
 from app.domain.enums import InvoiceStatus, TransmissionStatus
-from app.domain.exceptions import InvalidInvoiceError, NoKSeFSessionError
+from app.domain.exceptions import InvalidInvoiceError, KSeFNotConnectedError, NoKSeFSessionError
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.client import (
     KSeFClientError,
@@ -108,12 +108,36 @@ def _make_handler(
     invoice_repo.get_by_id.return_value = inv
 
     ksef_session_svc = MagicMock(spec=KSeFSessionService)
+    session_ctx = MagicMock(
+        access_token=session_token or "tok-123",
+        session_reference="sess-ref",
+        symmetric_key=b"k" * 32,
+        initialization_vector=b"i" * 16,
+    )
     if session_token is None:
-        ksef_session_svc.get_session_token.side_effect = NotFoundError(
+        ksef_session_svc.get_connection_status.return_value = {
+            "ui_status": "DISCONNECTED",
+            "details": {
+                "reason": "NO_SESSION",
+                "has_session": False,
+                "session_expires_at": None,
+                "last_error": None,
+            },
+        }
+        ksef_session_svc.get_session_context.side_effect = NotFoundError(
             "Brak aktywnej sesji KSeF dla NIP 1111111111."
         )
     else:
-        ksef_session_svc.get_session_token.return_value = session_token
+        ksef_session_svc.get_connection_status.return_value = {
+            "ui_status": "CONNECTED",
+            "details": {
+                "reason": "UNKNOWN",
+                "has_session": True,
+                "session_expires_at": None,
+                "last_error": None,
+            },
+        }
+        ksef_session_svc.get_session_context.return_value = session_ctx
 
     handler = SubmitInvoiceJobHandler(
         session=MagicMock(),
@@ -169,6 +193,14 @@ class TestNoKSeFSession:
         assert tr.error_message is not None
         assert "sesji" in tr.error_message.lower() or "session" in tr.error_message.lower()
 
+    def test_missing_session_returns_invoice_to_ready_for_submission(self):
+        handler, tr, inv = _make_handler(session_token=None)
+
+        payload = {"transmission_id": str(tr.id), "invoice_id": str(inv.id)}
+        handler.handle(payload)
+
+        assert inv.status == InvoiceStatus.READY_FOR_SUBMISSION
+
 
 # ---------------------------------------------------------------------------
 # 2. Poprawna sesja → submit przechodzi do KSeFClient
@@ -192,7 +224,11 @@ class TestValidSession:
             payload = {"transmission_id": str(tr.id), "invoice_id": str(inv.id)}
             handler.handle(payload)
 
-        mock_client.send_invoice.assert_called_once_with("valid-token", b"<xml/>")
+        mock_client.send_invoice.assert_called_once()
+        call_args = mock_client.send_invoice.call_args[0]
+        assert call_args[0] == "valid-token"
+        assert call_args[1] == "sess-ref"
+        assert call_args[4] == b"<xml/>"
 
     def test_valid_session_sets_submitted_status(self):
         """Po udanym send_invoice → status=SUBMITTED."""
@@ -301,6 +337,7 @@ class TestMarkSessionExpired:
         service = KSeFSessionService(
             session=session,
             auth_provider=MagicMock(),
+            ksef_client=MagicMock(),
             audit_service=MagicMock(),
         )
         service._get_active_db_session = MagicMock(return_value=active_orm)
@@ -352,9 +389,15 @@ class TestTransmissionServiceSessionCheck:
 
         ksef_session_svc = MagicMock(spec=KSeFSessionService)
         if not session_active:
-            ksef_session_svc.get_active_session.side_effect = NotFoundError(
-                "Brak aktywnej sesji KSeF dla NIP 1111111111."
-            )
+            ksef_session_svc.get_connection_status.return_value = {
+                "ui_status": "DISCONNECTED",
+                "details": {"reason": "NO_SESSION", "has_session": False, "session_expires_at": None, "last_error": None},
+            }
+        else:
+            ksef_session_svc.get_connection_status.return_value = {
+                "ui_status": "CONNECTED",
+                "details": {"reason": "UNKNOWN", "has_session": True, "session_expires_at": None, "last_error": None},
+            }
 
         svc = TransmissionService(
             session=session,
@@ -378,6 +421,21 @@ class TestTransmissionServiceSessionCheck:
         with pytest.raises(NoKSeFSessionError, match="ksef-sessions"):
             svc.submit_invoice(inv.id, actor)
 
+    def test_network_error_raises_ksef_not_connected_error(self):
+        inv = _make_invoice(status=InvoiceStatus.READY_FOR_SUBMISSION)
+        svc = self._make_service(inv, session_active=True)
+        svc._ksef_session_service.get_connection_status.return_value = {
+            "ui_status": "ERROR",
+            "details": {"reason": "NETWORK_ERROR", "has_session": False, "session_expires_at": None, "last_error": "timeout"},
+        }
+
+        actor = MagicMock()
+        actor.user_id = str(uuid4())
+        actor.role = "admin"
+
+        with pytest.raises(KSeFNotConnectedError, match="KSeF not connected"):
+            svc.submit_invoice(inv.id, actor)
+
     def test_active_session_does_not_raise(self):
         """submit_invoice → brak wyjątku gdy sesja aktywna."""
         inv = _make_invoice(status=InvoiceStatus.READY_FOR_SUBMISSION)
@@ -394,6 +452,28 @@ class TestTransmissionServiceSessionCheck:
             pytest.fail("NoKSeFSessionError rzucony mimo aktywnej sesji")
         except Exception:
             pass  # Inne błędy (mock flush/commit) są OK
+
+
+class TestSubmitInvoiceWorkerRollback:
+    def test_network_error_returns_sending_invoice_to_ready_for_submission(self):
+        inv = _make_invoice(status=InvoiceStatus.SENDING)
+        handler, tr, inv = _make_handler(invoice=inv)
+        handler._ksef_session_service.get_connection_status.return_value = {
+            "ui_status": "ERROR",
+            "details": {
+                "reason": "NETWORK_ERROR",
+                "has_session": True,
+                "session_expires_at": None,
+                "last_error": "timeout",
+            },
+        }
+
+        payload = {"transmission_id": str(tr.id), "invoice_id": str(inv.id)}
+        handler.handle(payload)
+
+        assert inv.status == InvoiceStatus.READY_FOR_SUBMISSION
+        assert tr.status == TransmissionStatus.FAILED_RETRYABLE
+        assert tr.error_code == "KSEF_NOT_CONNECTED"
 
 
 # ---------------------------------------------------------------------------

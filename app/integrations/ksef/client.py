@@ -368,6 +368,10 @@ class KSeFClient:
                 transient=True,
             ) from exc
 
+    def check_connectivity(self) -> None:
+        """Lekki probe dostępności KSeF bez wymagania aktywnej sesji."""
+        self._fetch_symmetric_key_encryption_cert()
+
     # -------------------------------------------------------------------------
     # ENCRYPTION HELPERS
     # -------------------------------------------------------------------------

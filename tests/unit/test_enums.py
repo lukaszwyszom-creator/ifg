@@ -4,14 +4,13 @@ from app.domain.enums import InvoiceStatus, TransmissionStatus, UserRole
 
 class TestInvoiceStatus:
     def test_values(self):
-        assert InvoiceStatus.DRAFT == "draft"
         assert InvoiceStatus.READY_FOR_SUBMISSION == "ready_for_submission"
         assert InvoiceStatus.SENDING == "sending"
         assert InvoiceStatus.ACCEPTED == "accepted"
         assert InvoiceStatus.REJECTED == "rejected"
 
     def test_all_values_count(self):
-        assert len(InvoiceStatus) == 5
+        assert len(InvoiceStatus) == 4
 
 
 class TestTransmissionStatus:

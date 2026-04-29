@@ -10,21 +10,20 @@ import InvoiceCardList from './InvoiceCardList';
  * @param {number}  limit      - max wierszy (Simple mode: 10)
  * @param {bool}    hidePager  - ukryj paginację
  */
-export default function InvoiceList({ filters = {}, direction = 'sale', limit, hidePager = false }) {
+export default function InvoiceList({
+  filters = {},
+  direction = 'sale',
+  showKsefStatus = true,
+  limit,
+  hidePager = false,
+  onItemsChange,
+  onOpenInvoice,
+}) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
   const size = limit ?? 20;
-
-  // Aktualizacja pojedynczej faktury bez przeładowania listy (użyteczne po mark-ready
-  // gdy filtr statusu by ją wykluczył po przeładowaniu).
-  const updateItem = useCallback((updatedInvoice) => {
-    setData(prev => ({
-      ...prev,
-      items: prev.items.map(item => item.id === updatedInvoice.id ? updatedInvoice : item),
-    }));
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,10 +48,13 @@ export default function InvoiceList({ filters = {}, direction = 'sale', limit, h
       };
       const res = await invoicesApi.list(params);
       setData(res);
+      if (onItemsChange) {
+        onItemsChange(Array.isArray(res?.items) ? res.items : []);
+      }
     } finally {
       setLoading(false);
     }
-  }, [page, size, filters, direction]);
+  }, [page, size, filters, direction, onItemsChange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -70,9 +72,11 @@ export default function InvoiceList({ filters = {}, direction = 'sale', limit, h
     <div>
       <InvoiceCardList
         items={data.items}
+        direction={direction}
+        showKsefStatus={showKsefStatus}
         loading={loading}
         onRefresh={load}
-        onUpdate={updateItem}
+        onOpenInvoice={onOpenInvoice}
         emptyMsg="Brak faktur"
       />
       {!hidePager && (

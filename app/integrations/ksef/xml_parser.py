@@ -101,17 +101,16 @@ _P13_FIELDS = ["P_13_1", "P_13_2", "P_13_3", "P_13_4", "P_13_6", "P_13_7", "P_13
 _P14_FIELDS = ["P_14_1", "P_14_2", "P_14_3", "P_14_4", "P_14_5"]
 
 
-def parse_fa3_xml(xml_bytes: bytes) -> dict[str, Any]:
-    """Parsuje XML FA(3) → dict gotowy do tworzenia Invoice w bazie.
-
-    Zwraca słownik z kluczami pasującymi do Invoice ORM / domain model.
-    Raises ValueError jeśli XML jest niepoprawny lub brakuje wymaganych pól.
-    """
+def _parse_xml_root(xml_bytes: bytes) -> etree._Element:
     try:
-        root = etree.fromstring(xml_bytes)
+        return etree.fromstring(xml_bytes)
     except etree.XMLSyntaxError as exc:
         raise ValueError(f"Błędny XML FA(3): {exc}") from exc
 
+
+def _extract_required_structure(
+    root: etree._Element,
+) -> tuple[etree._Element, etree._Element, etree._Element]:
     fa_el = _find(root, "fa:Fa")
     if fa_el is None:
         raise ValueError("Brak elementu <Fa> w dokumencie FA(3)")
@@ -126,59 +125,77 @@ def parse_fa3_xml(xml_bytes: bytes) -> dict[str, Any]:
     if sprzedawca_el is None or nabywca_el is None:
         raise ValueError("Brak danych sprzedawcy/nabywcy w dokumencie FA(3)")
 
-    seller_snapshot = _parse_subject(sprzedawca_el)
-    buyer_snapshot = _parse_subject(nabywca_el)
+    return fa_el, sprzedawca_el, nabywca_el
 
+
+def _extract_basic_fields(fa_el: etree._Element) -> tuple[str, str, str, str]:
     issue_date_txt = _txt(_find(fa_el, "fa:P_1"))
     sale_date_txt = _txt(_find(fa_el, "fa:P_1M")) or issue_date_txt
     number_local = _txt(_find(fa_el, "fa:P_2"))
     currency = _txt(_find(fa_el, "fa:KodWaluty")) or "PLN"
+    return issue_date_txt, sale_date_txt, number_local, currency
 
-    # Sumy — sumujemy wszystkie pola P_13_x (netto) i P_14_x (VAT)
-    total_net = sum(
-        _dec(_find(fa_el, f"fa:{f}")) for f in _P13_FIELDS
-    )
-    total_vat = sum(
-        _dec(_find(fa_el, f"fa:{f}")) for f in _P14_FIELDS
-    )
+
+def _extract_totals(fa_el: etree._Element) -> tuple[Decimal, Decimal, Decimal]:
+    total_net = sum(_dec(_find(fa_el, f"fa:{field}")) for field in _P13_FIELDS)
+    total_vat = sum(_dec(_find(fa_el, f"fa:{field}")) for field in _P14_FIELDS)
     total_gross = _dec(_find(fa_el, "fa:P_15"))
     if total_gross == Decimal("0") and total_net > Decimal("0"):
         total_gross = total_net + total_vat
+    return total_net, total_vat, total_gross
 
-    # Adnotacje
-    use_split_payment = _txt(_find(fa_el, "fa:P_16")) == "true"
-    self_billing = _txt(_find(fa_el, "fa:P_17")) == "true"
-    reverse_charge = _txt(_find(fa_el, "fa:P_18")) == "true"
-    reverse_charge_art = _txt(_find(fa_el, "fa:P_18A")) == "true"
-    reverse_charge_flag = _txt(_find(fa_el, "fa:P_18B")) == "true"
-    cash_accounting_method = _txt(_find(fa_el, "fa:P_19")) == "true"
 
-    # Kurs wymiany
-    exchange_rate: Decimal | None = None
-    exchange_rate_date: str | None = None
+def _extract_annotations(fa_el: etree._Element) -> dict[str, bool]:
+    return {
+        "use_split_payment": _txt(_find(fa_el, "fa:P_16")) == "true",
+        "self_billing": _txt(_find(fa_el, "fa:P_17")) == "true",
+        "reverse_charge": _txt(_find(fa_el, "fa:P_18")) == "true",
+        "reverse_charge_art": _txt(_find(fa_el, "fa:P_18A")) == "true",
+        "reverse_charge_flag": _txt(_find(fa_el, "fa:P_18B")) == "true",
+        "cash_accounting_method": _txt(_find(fa_el, "fa:P_19")) == "true",
+    }
+
+
+def _extract_exchange_rate(fa_el: etree._Element) -> tuple[Decimal | None, str | None]:
     kurs_el = _find(fa_el, "fa:KursWaluty")
-    if kurs_el is not None:
-        exchange_rate = _dec(_find(kurs_el, "fa:KursWalutyZ")) or None
-        exchange_rate_date = _txt(_find(kurs_el, "fa:DataKursuWaluty")) or None
+    if kurs_el is None:
+        return None, None
 
-    # Rodzaj faktury → InvoiceType
+    exchange_rate = _dec(_find(kurs_el, "fa:KursWalutyZ")) or None
+    exchange_rate_date = _txt(_find(kurs_el, "fa:DataKursuWaluty")) or None
+    return exchange_rate, exchange_rate_date
+
+
+def _extract_invoice_type(fa_el: etree._Element) -> str:
     rodzaj = _txt(_find(fa_el, "fa:RodzajFaktury")) or "VAT"
-    invoice_type = rodzaj  # przechowujemy jako string; enum konwertuje serwis
+    return rodzaj
 
-    # Pozycje
-    items = []
+
+def _parse_items(fa_el: etree._Element) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     for idx, row_el in enumerate(_findall(fa_el, "fa:FaWiersz"), start=1):
         try:
             items.append(_parse_item(row_el, idx))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Błąd parsowania pozycji %d: %s", idx, exc)
+    return items
 
+
+def _build_parsed_invoice_payload(
+    fa_el: etree._Element,
+    seller_snapshot: dict[str, Any],
+    buyer_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    issue_date_txt, sale_date_txt, number_local, currency = _extract_basic_fields(fa_el)
     if not issue_date_txt:
         raise ValueError("Brak daty wystawienia (P_1) w dokumencie FA(3)")
 
+    total_net, total_vat, total_gross = _extract_totals(fa_el)
+    exchange_rate, exchange_rate_date = _extract_exchange_rate(fa_el)
+
     return {
         "number_local": number_local or None,
-        "issue_date": issue_date_txt,       # "YYYY-MM-DD"
+        "issue_date": issue_date_txt,
         "sale_date": sale_date_txt,
         "currency": currency,
         "seller_snapshot": seller_snapshot,
@@ -186,14 +203,26 @@ def parse_fa3_xml(xml_bytes: bytes) -> dict[str, Any]:
         "total_net": total_net,
         "total_vat": total_vat,
         "total_gross": total_gross,
-        "invoice_type": invoice_type,
-        "items": items,
-        "use_split_payment": use_split_payment,
-        "self_billing": self_billing,
-        "reverse_charge": reverse_charge,
-        "reverse_charge_art": reverse_charge_art,
-        "reverse_charge_flag": reverse_charge_flag,
-        "cash_accounting_method": cash_accounting_method,
+        "invoice_type": _extract_invoice_type(fa_el),
+        "items": _parse_items(fa_el),
+        **_extract_annotations(fa_el),
         "exchange_rate": exchange_rate,
         "exchange_rate_date": exchange_rate_date,
     }
+
+
+def parse_fa3_xml(xml_bytes: bytes) -> dict[str, Any]:
+    """Parsuje XML FA(3) → dict gotowy do tworzenia Invoice w bazie.
+
+    Zwraca słownik z kluczami pasującymi do Invoice ORM / domain model.
+    Raises ValueError jeśli XML jest niepoprawny lub brakuje wymaganych pól.
+    """
+    root = _parse_xml_root(xml_bytes)
+    fa_el, sprzedawca_el, nabywca_el = _extract_required_structure(root)
+    seller_snapshot = _parse_subject(sprzedawca_el)
+    buyer_snapshot = _parse_subject(nabywca_el)
+    return _build_parsed_invoice_payload(
+        fa_el=fa_el,
+        seller_snapshot=seller_snapshot,
+        buyer_snapshot=buyer_snapshot,
+    )

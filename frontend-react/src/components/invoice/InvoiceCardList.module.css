@@ -1,7 +1,8 @@
 /* InvoiceCardList.module.css */
 
 .container {
-  --invoice-grid-columns: 86px 96px minmax(180px, 1fr) 96px 56px 96px 92px 64px;
+  --invoice-grid-columns: 62px 86px minmax(168px, 1fr) 112px 86px 56px 86px 92px 64px;
+  --invoice-grid-gap: 6px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -9,6 +10,10 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-surface);
+}
+
+.noKsef {
+  --invoice-grid-columns: 62px 86px minmax(212px, 1fr) 112px 86px 56px 86px 64px;
 }
 
 .loadingState,
@@ -25,13 +30,16 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: grid;
-  grid-template-columns: var(--invoice-grid-columns);
-  gap: 6px;
-  align-items: center;
   padding: 8px 10px;
   background: var(--color-surface-2);
   border-bottom: 1px solid var(--color-border);
+}
+
+.invoiceGrid {
+  display: grid;
+  grid-template-columns: var(--invoice-grid-columns);
+  column-gap: var(--invoice-grid-gap);
+  align-items: center;
 }
 
 .headerCell {
@@ -39,17 +47,15 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-text-2);
+  color: #edb439;
   white-space: nowrap;
   text-align: center;
+  min-width: 0;
 }
 
-.headerCell:nth-child(4) {
-  text-align: right;
-}
-
-.headerCell:nth-child(6) {
-  text-align: right;
+.headerRow .headerCell {
+  justify-self: stretch;
+  text-align: center;
 }
 
 .scrollArea {
@@ -78,10 +84,6 @@
 
 /* Główny wiersz z danymi */
 .cardContent {
-  display: grid;
-  grid-template-columns: var(--invoice-grid-columns);
-  gap: 6px;
-  align-items: center;
   margin-bottom: 0;
 }
 
@@ -95,14 +97,41 @@
   overflow: visible;
 }
 
+.invoiceCellNumber,
+.invoiceCellDate,
+.invoiceCellBuyer,
+.invoiceCellNip,
+.invoiceCellGross,
+.invoiceCellTerm,
+.invoiceCellRemaining,
+.invoiceCellKsef,
+.invoiceCellPdf {
+  min-width: 0;
+}
+
+.invoiceHeaderAmount,
+.invoiceCellAmount {
+  justify-self: end;
+  text-align: right;
+  width: 100%;
+  min-width: 0;
+}
+
+.invoiceCellGross,
+.invoiceCellRemaining {
+  justify-self: stretch;
+  text-align: right;
+  white-space: nowrap;
+}
+
 /* Column 1: Numer */
-.cardContent > .cell:nth-child(1) {
+.invoiceCellNumber {
   justify-self: auto;
   white-space: nowrap;
 }
 
 /* Column 2: Data — centered */
-.cardContent > .cell:nth-child(2) {
+.invoiceCellDate {
   align-items: center;
   text-align: center;
   justify-self: center;
@@ -110,7 +139,7 @@
 }
 
 /* Column 3: Nabywca — flexible, with ellipsis */
-.cardContent > .cell:nth-child(3) {
+.invoiceCellBuyer {
   align-items: flex-start;
   text-align: left;
   min-width: 0;
@@ -118,27 +147,36 @@
   overflow: hidden;
 }
 
-.cardContent > .cell:nth-child(3) .value {
+.invoiceCellBuyer .value {
   overflow: hidden;
   text-overflow: ellipsis;
+  text-overflow: "(...)";
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.invoiceCellNip {
+  align-items: center;
+  text-align: center;
+  justify-self: center;
   white-space: nowrap;
 }
 
 /* Column 4: Brutto — right-aligned */
-.cardContent > .cell:nth-child(4) {
+.invoiceCellGross {
   align-items: flex-end;
-  text-align: right;
-  justify-self: end;
   white-space: nowrap;
 }
 
-.cardContent > .cell:nth-child(4) .value {
+.invoiceCellGross .value {
+  display: block;
+  width: 100%;
   text-align: right;
   white-space: nowrap;
 }
 
 /* Column 5: Termin — centered */
-.cardContent > .cell:nth-child(5) {
+.invoiceCellTerm {
   align-items: center;
   text-align: center;
   justify-self: center;
@@ -146,15 +184,20 @@
 }
 
 /* Column 6: Pozostało — right-aligned */
-.cardContent > .cell:nth-child(6) {
+.invoiceCellRemaining {
   align-items: flex-end;
+  white-space: nowrap;
+}
+
+.invoiceCellRemaining .value {
+  display: block;
+  width: 100%;
   text-align: right;
-  justify-self: end;
   white-space: nowrap;
 }
 
 /* Column 7: Status KSeF — centered */
-.cardContent > .cell:nth-child(7) {
+.invoiceCellKsef {
   align-items: center;
   text-align: center;
   justify-self: center;
@@ -162,7 +205,7 @@
 }
 
 /* Column 8: PDF — centered */
-.cardContent > .cell:nth-child(8) {
+.invoiceCellPdf {
   align-items: center;
   text-align: center;
   justify-self: center;
@@ -298,12 +341,17 @@
     flex-direction: column;
     align-items: stretch;
   }
+
 }
 
 /* ---- Tablet: 641px - 1023px ---- */
 @media (max-width: 1023px) and (min-width: 641px) {
   .container {
-    --invoice-grid-columns: 78px 88px minmax(130px, 1fr) 90px 56px 90px 84px 60px;
+    --invoice-grid-columns: 78px 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 60px;
+  }
+
+  .noKsef {
+    --invoice-grid-columns: 78px 88px minmax(160px, 1fr) 96px 90px 56px 90px 60px;
   }
 
   .cardContent {

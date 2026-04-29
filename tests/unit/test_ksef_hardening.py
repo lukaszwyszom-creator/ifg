@@ -119,8 +119,8 @@ class TestTransmissionUniqueConstraint:
 # ---------------------------------------------------------------------------
 
 class TestValidateForKsefStatusGuard:
-    def test_draft_status_raises(self):
-        inv = _make_invoice(status=InvoiceStatus.DRAFT)
+    def test_non_ready_status_raises(self):
+        inv = _make_invoice(status=InvoiceStatus.ACCEPTED)
         with pytest.raises(InvalidInvoiceError, match="ready_for_submission"):
             inv.validate_for_ksef()
 

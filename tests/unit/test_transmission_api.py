@@ -280,7 +280,7 @@ class TestInvoiceResponseKSeFNumber:
         assert body["ksef_reference_number"] == "KSeF-2026-RESP"
         assert body["status"] == "accepted"
 
-    def test_draft_invoice_has_null_ksef_number(self, actor):
+    def test_ready_invoice_has_null_ksef_number(self, actor):
         from decimal import Decimal
         from datetime import date
         from unittest import mock
@@ -296,7 +296,7 @@ class TestInvoiceResponseKSeFNumber:
         invoice = Invoice(
             id=uuid4(),
             number_local=None,
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=date(2026, 4, 5),
             sale_date=date(2026, 4, 5),
             currency="PLN",

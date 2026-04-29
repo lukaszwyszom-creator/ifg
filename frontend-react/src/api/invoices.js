@@ -14,6 +14,9 @@ export const invoicesApi = {
       })
       .then((r) => r.data),
 
+  update: (id, body) =>
+    client.put(`/invoices/${id}`, body).then((r) => r.data),
+
   markReady: (id) =>
     client.post(`/invoices/${id}/mark-ready`).then((r) => r.data),
 

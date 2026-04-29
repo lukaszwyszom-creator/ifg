@@ -90,8 +90,8 @@ def sample_invoice(sample_invoice_item: InvoiceItem) -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
-        number_local=None,
-        status=InvoiceStatus.DRAFT,
+        number_local="FV/1/04/2026",
+        status=InvoiceStatus.READY_FOR_SUBMISSION,
         issue_date=date(2026, 4, 5),
         sale_date=date(2026, 4, 5),
         currency="PLN",

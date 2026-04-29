@@ -15,7 +15,7 @@ function formatCurrentMonthLabel() {
 
 const NAV_ITEMS = [
   { to: '/invoices', label: formatCurrentMonthLabel(), icon: '📄' },
-  { to: '/dashboard', label: 'Dashboard', icon: '📊' },
+  { to: '/dashboard', label: 'Sprzedaż / Zakup', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
   { to: '/stock', label: 'Magazyn', icon: '📦' },
 ];
@@ -60,7 +60,7 @@ export default function Sidebar({ open = false, onClose }) {
             }
           >
             <span className={styles.navIcon}>{item.icon}</span>
-            <span>{item.label}</span>
+            <span className={styles.navLabel}>{item.label}</span>
           </NavLink>
         ))}
       </nav>

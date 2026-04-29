@@ -147,7 +147,7 @@ class TestRollbackAtomicity:
 
         inv_orm = InvoiceORM(
             id=invoice_id,
-            status="draft",
+            status="ready_for_submission",
             payment_status="unpaid",
             seller_snapshot_json={"nip": "9876543210"},
             buyer_snapshot_json={"nip": "2222222222"},
@@ -326,7 +326,7 @@ class TestImportCsvDirtyData:
 
 
 class TestInvoiceNumberSequential:
-    """Verify that sequential calls to mark_as_ready produce unique numbers."""
+    """mark_as_ready jest zablokowane dla READY_FOR_SUBMISSION w nowym modelu."""
 
     def _seed_user_and_buyer(self, db) -> tuple[UserORM, ContractorORM]:
         user = UserORM(
@@ -340,10 +340,10 @@ class TestInvoiceNumberSequential:
         db.flush()
         return user, buyer
 
-    def _make_draft_invoice(self, db, user: UserORM) -> InvoiceORM:
+    def _make_ready_invoice(self, db, user: UserORM) -> InvoiceORM:
         inv = InvoiceORM(
             id=uuid.uuid4(),
-            status="draft",
+            status="ready_for_submission",
             payment_status="unpaid",
             seller_snapshot_json={"nip": "1234567890"},
             buyer_snapshot_json={"nip": "9876543210"},
@@ -374,21 +374,15 @@ class TestInvoiceNumberSequential:
             audit_service=audit,
         )
 
-    def test_two_sequential_mark_ready_get_different_numbers(self, db, actor):
+    def test_mark_ready_on_ready_raises(self, db, actor):
         svc = self._invoice_service(db)
         user, _ = self._seed_user_and_buyer(db)
 
-        inv1 = self._make_draft_invoice(db, user)
-        inv2 = self._make_draft_invoice(db, user)
+        inv = self._make_ready_invoice(db, user)
 
-        result1 = svc.mark_as_ready(inv1.id, actor)
-        result2 = svc.mark_as_ready(inv2.id, actor)
-
-        assert result1.number_local != result2.number_local, (
-            f"Duplicate invoice numbers: {result1.number_local}"
-        )
-        assert result1.number_local is not None
-        assert result2.number_local is not None
+        from app.domain.exceptions import InvalidStatusTransitionError
+        with pytest.raises(InvalidStatusTransitionError):
+            svc.mark_as_ready(inv.id, actor)
 
     def test_same_invoice_mark_ready_idempotent_via_status_guard(self, db, actor):
         """Attempting mark_as_ready twice raises InvalidStatusTransitionError."""
@@ -396,9 +390,7 @@ class TestInvoiceNumberSequential:
 
         svc = self._invoice_service(db)
         user, _ = self._seed_user_and_buyer(db)
-        inv = self._make_draft_invoice(db, user)
-
-        svc.mark_as_ready(inv.id, actor)
+        inv = self._make_ready_invoice(db, user)
 
         with pytest.raises(InvalidStatusTransitionError):
             svc.mark_as_ready(inv.id, actor)

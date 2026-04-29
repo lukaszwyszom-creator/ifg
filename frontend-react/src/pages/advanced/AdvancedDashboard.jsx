@@ -3,7 +3,6 @@ import { useAppStore } from '../../store/useAppStore';
 import DashboardSummary from '../../components/dashboard/DashboardSummary';
 import VATSummary from '../../components/dashboard/VATSummary';
 import TransmissionTable from '../../components/dashboard/TransmissionTable';
-import KSeFSessionBar from '../../components/dashboard/KSeFSessionBar';
 import InvoiceList from '../../components/invoice/InvoiceList';
 import Filters from '../../components/common/Filters';
 import styles from './AdvancedDashboard.module.css';
@@ -23,14 +22,16 @@ export default function AdvancedDashboard() {
 
   return (
     <div className={styles.page}>
-      {/* Sesja KSeF */}
-      <KSeFSessionBar />
-
       {/* Statystyki */}
-      <DashboardSummary filters={filters} tab={tab} />
+      <DashboardSummary filters={filters} />
 
       {/* Filtry */}
-      <Filters filters={filters} onChange={setFilters} onReset={resetFilters} />
+      <Filters
+        filters={filters}
+        onChange={setFilters}
+        onReset={resetFilters}
+        vatMode={tab === 'vat'}
+      />
 
       {/* Tabsy */}
       <div className={styles.tabs}>
@@ -48,11 +49,11 @@ export default function AdvancedDashboard() {
       {/* Zawartość */}
       <div className={styles.panel}>
         {tab === 'invoices' && (
-          <InvoiceList filters={filters} direction="sale" />
+          <InvoiceList filters={filters} direction="sale" showKsefStatus={false} />
         )}
 
         {tab === 'purchase' && (
-          <InvoiceList filters={filters} direction="purchase" />
+          <InvoiceList filters={filters} direction="purchase" showKsefStatus={false} />
         )}
 
         {tab === 'vat' && (

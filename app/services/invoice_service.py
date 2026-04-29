@@ -54,6 +54,24 @@ class InvoiceService:
     # PUBLIC API
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def is_invoice_editable(status: InvoiceStatus | str) -> bool:
+        """
+        Sprawdza, czy faktura w danym statusie może być edytowana.
+
+        Edytowalne:
+        - READY_FOR_SUBMISSION (gotowa do wysyłki)
+        - REJECTED (odrzucona, wymaga poprawy)
+
+        Nieedytowalne:
+        - SENDING (analiza w KSeF, tylko podgląd)
+        - ACCEPTED (zaakceptowana, tylko podgląd)
+        """
+        if isinstance(status, str):
+            status = InvoiceStatus(status)
+
+        return status in (InvoiceStatus.READY_FOR_SUBMISSION, InvoiceStatus.REJECTED)
+
     def create_invoice(self, data: dict, actor: AuthenticatedUser) -> Invoice:
         buyer_id: UUID | None = data.get("buyer_id")
         if buyer_id is None:
@@ -96,7 +114,7 @@ class InvoiceService:
         invoice = Invoice(
             id=uuid4(),
             number_local=None,
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             direction=data.get("direction", "sale"),
             issue_date=issue_date,
             sale_date=sale_date,
@@ -148,6 +166,75 @@ class InvoiceService:
         if invoice is None:
             raise NotFoundError(f"Nie znaleziono faktury {invoice_id}.")
         return invoice
+
+    def update_invoice(
+        self, invoice_id: UUID, data: dict, actor: AuthenticatedUser
+    ) -> Invoice:
+        invoice = self.invoice_repository.lock_for_update(invoice_id)
+        if invoice is None:
+            raise NotFoundError(f"Nie znaleziono faktury {invoice_id}.")
+
+        # Sprawdzenie edytowalności na podstawie statusu
+        if not self.is_invoice_editable(invoice.status):
+            status_label = {
+                InvoiceStatus.SENDING: "Analiza",
+                InvoiceStatus.ACCEPTED: "Zaakceptowana",
+            }.get(invoice.status, invoice.status.value)
+            raise InvalidStatusTransitionError(
+                f"Faktura w statusie '{status_label}' nie może być edytowana."
+            )
+
+        buyer_id: UUID | None = data.get("buyer_id")
+        if buyer_id is None:
+            raise InvalidInvoiceError("Nabywca (buyer_id) jest wymagany.")
+
+        raw_items: list[dict] = data.get("items", [])
+        if not raw_items:
+            raise InvalidInvoiceError(
+                "Faktura musi zawierać co najmniej jedną pozycję."
+            )
+
+        issue_date = data["issue_date"]
+        sale_date = data["sale_date"]
+        delivery_date: date | None = data.get("delivery_date")
+
+        if sale_date > issue_date:
+            raise InvalidInvoiceError(
+                "Data sprzedaży nie może być późniejsza niż data wystawienia."
+            )
+
+        buyer_snapshot = self._resolve_buyer_snapshot(buyer_id)
+        items = self._build_items(raw_items)
+        total_net, total_vat, total_gross = self._calculate_totals(items)
+
+        invoice.buyer_snapshot = buyer_snapshot
+        invoice.issue_date = issue_date
+        invoice.sale_date = sale_date
+        invoice.delivery_date = delivery_date
+        invoice.currency = data.get("currency", invoice.currency)
+        invoice.items = items
+        invoice.total_net = total_net
+        invoice.total_vat = total_vat
+        invoice.total_gross = total_gross
+        invoice.updated_at = datetime.now(UTC)
+
+        updated = self.invoice_repository.update(invoice_id, invoice)
+        self.session.flush()
+
+        self.audit_service.record(
+            actor_user_id=actor.user_id,
+            actor_role=actor.role,
+            event_type="invoice.updated",
+            entity_type="invoice",
+            entity_id=str(invoice_id),
+            after={
+                "status": updated.status.value,
+                "number_local": updated.number_local,
+                "issue_date": str(updated.issue_date),
+            },
+        )
+
+        return updated
 
     def list_invoices(
         self,

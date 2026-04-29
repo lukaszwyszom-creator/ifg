@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 
 _ALLOWED_TRANSITIONS: dict[InvoiceStatus, frozenset[InvoiceStatus]] = {
-    InvoiceStatus.DRAFT: frozenset({InvoiceStatus.READY_FOR_SUBMISSION}),
     InvoiceStatus.READY_FOR_SUBMISSION: frozenset({InvoiceStatus.SENDING}),
     InvoiceStatus.SENDING: frozenset({InvoiceStatus.ACCEPTED, InvoiceStatus.REJECTED}),
     InvoiceStatus.ACCEPTED: frozenset(),

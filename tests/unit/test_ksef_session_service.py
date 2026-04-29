@@ -9,6 +9,7 @@ import pytest
 
 from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.integrations.ksef.auth import KSeFSession
+from app.integrations.ksef.client import KSeFOnlineSession
 from app.services.ksef_session_service import (
     SESSION_ACTIVE,
     SESSION_EXPIRED,
@@ -29,6 +30,7 @@ def service(mock_session: MagicMock, auth_provider: MagicMock) -> KSeFSessionSer
     return KSeFSessionService(
         session=mock_session,
         auth_provider=auth_provider,
+        ksef_client=MagicMock(),
         audit_service=MagicMock(),
     )
 
@@ -63,11 +65,17 @@ class TestOpenSession:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        auth_provider.get_challenge.return_value = {"challenge": "ch-1", "timestamp": "ts"}
-        auth_provider.init_session.return_value = KSeFSession(
-            session_token="sess-tok",
+        auth_provider.get_tokens.return_value = KSeFSession(
+            access_token="acc-tok",
+            refresh_token="ref-tok",
+            access_valid_until=datetime.now(UTC) + timedelta(hours=1),
+            refresh_valid_until=datetime.now(UTC) + timedelta(days=1),
+        )
+        service.ksef_client.open_online_session.return_value = KSeFOnlineSession(
             session_reference="ref-new",
-            expires_at=None,
+            symmetric_key=b"k" * 32,
+            initialization_vector=b"i" * 16,
+            valid_until=None,
         )
 
         result = service.open_session("1234567890")
@@ -104,7 +112,11 @@ class TestGetSessionToken:
     def test_returns_token(self, service: KSeFSessionService, mock_session: MagicMock):
         orm = MagicMock()
         orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
-        orm.token_metadata_json = {"session_token": "tok-123"}
+        orm.token_metadata_json = {
+            "access_token": "tok-123",
+            "symmetric_key": "az09",  # base64(k/=)
+            "initialization_vector": "aTE9",  # base64(i1=)
+        }
         orm.nip = "1234567890"
 
         mock_result = MagicMock()
@@ -116,14 +128,17 @@ class TestGetSessionToken:
     def test_no_token_in_metadata_raises(self, service: KSeFSessionService, mock_session: MagicMock):
         orm = MagicMock()
         orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
-        orm.token_metadata_json = {}
+        orm.token_metadata_json = {
+            "symmetric_key": "az09",
+            "initialization_vector": "aTE9",
+        }
         orm.nip = "1234567890"
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = orm
         mock_session.execute.return_value = mock_result
 
-        with pytest.raises(AppError, match="tokenu"):
+        with pytest.raises(AppError, match="Niekompletny kontekst"):
             service.get_session_token("1234567890")
 
 
@@ -131,7 +146,11 @@ class TestCloseSession:
     def test_success(self, service: KSeFSessionService, auth_provider: MagicMock, mock_session: MagicMock):
         orm = MagicMock()
         orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
-        orm.token_metadata_json = {"session_token": "tok"}
+        orm.token_metadata_json = {
+            "access_token": "tok",
+            "symmetric_key": "az09",
+            "initialization_vector": "aTE9",
+        }
         orm.session_reference = "ref"
         orm.nip = "1234567890"
 
@@ -141,7 +160,7 @@ class TestCloseSession:
 
         result = service.close_session("1234567890")
         assert result.status == SESSION_TERMINATED
-        auth_provider.terminate_session.assert_called_once_with("tok")
+        service.ksef_client.close_online_session.assert_called_once_with("tok", "ref")
 
 
 class TestGetSessionById:

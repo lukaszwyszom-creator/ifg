@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.models.invoice import Invoice
@@ -74,8 +74,13 @@ class InvoiceRepository:
         if issue_date_to is not None:
             base_stmt = base_stmt.where(InvoiceORM.issue_date <= issue_date_to)
         if number_filter is not None:
+            pattern = f"%{number_filter}%"
             base_stmt = base_stmt.where(
-                InvoiceORM.number_local.ilike(f"%{number_filter}%")
+                or_(
+                    InvoiceORM.number_local.ilike(pattern),
+                    cast(InvoiceORM.buyer_snapshot_json, String).ilike(pattern),
+                    cast(InvoiceORM.seller_snapshot_json, String).ilike(pattern),
+                )
             )
         if direction is not None:
             base_stmt = base_stmt.where(InvoiceORM.direction == direction)

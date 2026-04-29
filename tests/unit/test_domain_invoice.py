@@ -10,7 +10,7 @@ from app.domain.exceptions import InvalidInvoiceError
 from app.domain.models.invoice import Invoice, InvoiceItem
 
 
-def _make_invoice(status: InvoiceStatus = InvoiceStatus.DRAFT) -> Invoice:
+def _make_invoice(status: InvoiceStatus = InvoiceStatus.READY_FOR_SUBMISSION) -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
@@ -30,14 +30,6 @@ def _make_invoice(status: InvoiceStatus = InvoiceStatus.DRAFT) -> Invoice:
 
 
 class TestInvoiceStatusTransitions:
-    def test_draft_can_transition_to_ready(self):
-        inv = _make_invoice(InvoiceStatus.DRAFT)
-        assert inv.can_transition_to(InvoiceStatus.READY_FOR_SUBMISSION) is True
-
-    def test_draft_cannot_transition_to_accepted(self):
-        inv = _make_invoice(InvoiceStatus.DRAFT)
-        assert inv.can_transition_to(InvoiceStatus.ACCEPTED) is False
-
     def test_ready_can_transition_to_sending(self):
         inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
         assert inv.can_transition_to(InvoiceStatus.SENDING) is True
@@ -45,6 +37,10 @@ class TestInvoiceStatusTransitions:
     def test_ready_cannot_transition_to_accepted(self):
         inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
         assert inv.can_transition_to(InvoiceStatus.ACCEPTED) is False
+
+    def test_ready_cannot_transition_to_rejected(self):
+        inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
+        assert inv.can_transition_to(InvoiceStatus.REJECTED) is False
 
     def test_sending_can_transition_to_accepted(self):
         inv = _make_invoice(InvoiceStatus.SENDING)
@@ -167,7 +163,7 @@ class TestFA3NewFields:
         now = datetime.now(UTC)
         inv = Invoice(
             id=uuid4(),
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=date(2026, 4, 6),
             sale_date=date(2026, 4, 5),
             delivery_date=date(2026, 4, 4),
@@ -193,7 +189,7 @@ class TestFA3NewFields:
         now = datetime.now(UTC)
         inv = Invoice(
             id=uuid4(),
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=date(2026, 4, 10),
             sale_date=date(2026, 4, 8),
             delivery_date=date(2026, 4, 7),

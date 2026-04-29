@@ -11,6 +11,11 @@ class NoKSeFSessionError(InvalidInvoiceError):
     code = "no_ksef_session"
 
 
+class KSeFNotConnectedError(InvalidInvoiceError):
+    """KSeF nie jest aktualnie osiągalny lub nie ma ważnej sesji."""
+    code = "ksef_not_connected"
+
+
 class InvalidStatusTransitionError(AppError):
     status_code = 409
     code = "invalid_status_transition"

@@ -32,6 +32,15 @@ class InvoiceCreateRequest(BaseModel):
     correction_reason: str | None = None
 
 
+class InvoiceUpdateRequest(BaseModel):
+    buyer_id: UUID
+    issue_date: date
+    sale_date: date
+    delivery_date: date | None = None
+    currency: str = "PLN"
+    items: list[InvoiceItemInput]
+
+
 class InvoiceItemResponse(BaseModel):
     id: UUID | None = None
     name: str

@@ -19,7 +19,6 @@ class ContractorLookupStatus(StrEnum):
 
 
 class InvoiceStatus(StrEnum):
-    DRAFT = "draft"
     READY_FOR_SUBMISSION = "ready_for_submission"
     SENDING = "sending"
     ACCEPTED = "accepted"

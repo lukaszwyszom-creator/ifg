@@ -39,17 +39,20 @@
 }
 
 .state_processing {
-  background: #ffcc66;
+  background: #00ffff;
   color: #1f2937;
 }
 
 .state_rejected {
-  background: #ff0066;
+  background: #c20000;
   color: #fff;
+  border-radius: 0;
+  border: 1px solid #fff;
+  margin: 1px;
 }
 
 .state_upo {
-  background: #336600;
+  background: #0f471d;
   color: #fff;
 }
 

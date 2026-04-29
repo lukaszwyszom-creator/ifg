@@ -1,67 +1,24 @@
 import { useState } from 'react';
-import { invoicesApi } from '../../api/invoices';
 import { transmissionsApi } from '../../api/transmissions';
+import { useAppStore } from '../../store/useAppStore';
+import { resolveKsefState } from './invoiceOpenMode';
 import styles from './InvoiceActions.module.css';
+
+const REFRESH_EVENT = 'ksef:status-refresh';
 
 /**
  * @param {object}   invoice      - pełny obiekt faktury
  * @param {Function} onRefresh    - callback po akcji
  */
-const UNSENT_STATUSES = new Set([
-  '',
-  'draft',
-  'ready_for_submission',
-  'ready',
-  'gotowa',
-  'szkic',
-]);
-
-const PROCESSING_STATUSES = new Set([
-  'sending',
-  'in_progress',
-  'processing',
-  'queued',
-  'submitted',
-  'waiting_status',
-  'failed_temporary',
-]);
-
-const REJECTED_STATUSES = new Set([
-  'rejected',
-  'failed_permanent',
-  'failed_retryable',
-]);
-
-const UPO_STATUSES = new Set([
-  'accepted',
-  'upo_received',
-  'delivered',
-  'success',
-]);
-
-function resolveKsefState(status) {
-  const normalized = (status ?? '').toString().trim().toLowerCase();
-
-  if (UNSENT_STATUSES.has(normalized)) {
-    return { kind: 'send', label: 'Wyślij' };
-  }
-  if (PROCESSING_STATUSES.has(normalized)) {
-    return { kind: 'processing', label: 'W przetwarzaniu' };
-  }
-  if (REJECTED_STATUSES.has(normalized)) {
-    return { kind: 'rejected', label: 'Odrzucona' };
-  }
-  if (UPO_STATUSES.has(normalized)) {
-    return { kind: 'upo', label: 'Odebrano UPO' };
-  }
-
-  return { kind: 'send', label: 'Wyślij' };
-}
-
 export default function InvoiceActions({ invoice, onRefresh }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const ksefState = resolveKsefState(invoice.status);
+  const ksefConnectionStatus = useAppStore((s) => s.ksefConnection.ui_status);
+  const sendBlocked = busy || ksefConnectionStatus !== 'CONNECTED';
+  const sendBlockedTitle = sendBlocked && !busy
+    ? 'Aby wysłać fakturę, połącz się z KSeF'
+    : undefined;
 
   const submitToKsef = async (e) => {
     e.stopPropagation();
@@ -69,10 +26,6 @@ export default function InvoiceActions({ invoice, onRefresh }) {
     setMsg('');
 
     try {
-      if ((invoice.status ?? '').toString().trim().toLowerCase() === 'draft') {
-        await invoicesApi.markReady(invoice.id);
-      }
-
       await transmissionsApi.submit(invoice.id);
       onRefresh?.();
     } catch (err) {
@@ -83,6 +36,7 @@ export default function InvoiceActions({ invoice, onRefresh }) {
         'Błąd wysyłki do KSeF',
       );
     } finally {
+      window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
       setBusy(false);
     }
   };
@@ -92,8 +46,9 @@ export default function InvoiceActions({ invoice, onRefresh }) {
       {ksefState.kind === 'send' ? (
         <button
           className={`btn btn-sm ${styles.sendBtn}`}
-          disabled={busy}
+          disabled={sendBlocked}
           onClick={submitToKsef}
+          title={sendBlockedTitle}
         >
           {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : ksefState.label}
         </button>

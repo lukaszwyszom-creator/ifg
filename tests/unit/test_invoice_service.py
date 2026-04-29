@@ -90,7 +90,7 @@ class TestCreateInvoice:
         now = datetime.now(UTC)
         expected = Invoice(
             id=uuid4(),
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=data["issue_date"],
             sale_date=data["sale_date"],
             currency="PLN",
@@ -205,7 +205,7 @@ class TestCreateInvoiceFA3Fields:
         now = datetime.now(UTC)
         captured = Invoice(
             id=uuid4(),
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=data["issue_date"],
             sale_date=data["sale_date"],
             delivery_date=date(2026, 4, 3),
@@ -244,7 +244,7 @@ class TestCreateInvoiceFA3Fields:
         now = datetime.now(UTC)
         returned = Invoice(
             id=uuid4(),
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=data["issue_date"],
             sale_date=data["sale_date"],
             delivery_date=None,
@@ -284,30 +284,43 @@ class TestMarkAsReady:
         with pytest.raises(InvalidStatusTransitionError):
             service.mark_as_ready(uuid4(), actor)
 
-    def test_success(self, service: InvoiceService, actor: AuthenticatedUser, sample_invoice: Invoice):
-        sample_invoice.status = InvoiceStatus.DRAFT
+    def test_ready_for_submission_raises(self, service: InvoiceService, actor: AuthenticatedUser, sample_invoice: Invoice):
+        sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
         service.invoice_repository.lock_for_update.return_value = sample_invoice
-        service.invoice_repository.get_next_sequence_number.return_value = 1
-        service.invoice_repository.exists_by_number.return_value = False
 
-        updated = Invoice(
-            id=sample_invoice.id,
-            status=InvoiceStatus.READY_FOR_SUBMISSION,
-            issue_date=sample_invoice.issue_date,
-            sale_date=sample_invoice.sale_date,
-            currency="PLN",
-            seller_snapshot={},
-            buyer_snapshot={},
-            items=[],
-            total_net=Decimal("0"),
-            total_vat=Decimal("0"),
-            total_gross=Decimal("0"),
-            created_at=sample_invoice.created_at,
-            updated_at=sample_invoice.updated_at,
-            number_local="FV/1/04/2026",
-        )
-        service.invoice_repository.update.return_value = updated
+        with pytest.raises(InvalidStatusTransitionError):
+            service.mark_as_ready(sample_invoice.id, actor)
 
-        result = service.mark_as_ready(sample_invoice.id, actor)
-        assert result.status == InvoiceStatus.READY_FOR_SUBMISSION
-        assert result.number_local == "FV/1/04/2026"
+
+class TestIsInvoiceEditable:
+    """Testy logiki edytowalności faktury."""
+
+    def test_ready_for_submission_is_editable(self):
+        """READY_FOR_SUBMISSION (gotowa do wysyłki) - edytowalna."""
+        assert InvoiceService.is_invoice_editable(InvoiceStatus.READY_FOR_SUBMISSION) is True
+        assert InvoiceService.is_invoice_editable("ready_for_submission") is True
+
+    def test_rejected_is_editable(self):
+        """REJECTED (odrzucona, wymaga poprawy) - edytowalna."""
+        assert InvoiceService.is_invoice_editable(InvoiceStatus.REJECTED) is True
+        assert InvoiceService.is_invoice_editable("rejected") is True
+
+    def test_sending_is_not_editable(self):
+        """SENDING (analiza w KSeF) - nieedytowalna."""
+        assert InvoiceService.is_invoice_editable(InvoiceStatus.SENDING) is False
+        assert InvoiceService.is_invoice_editable("sending") is False
+
+    def test_accepted_is_not_editable(self):
+        """ACCEPTED (zaakceptowana) - nieedytowalna."""
+        assert InvoiceService.is_invoice_editable(InvoiceStatus.ACCEPTED) is False
+        assert InvoiceService.is_invoice_editable("accepted") is False
+
+    def test_invalid_status_raises(self):
+        """Próba użycia nieistniejącego statusu rzuca błąd."""
+        with pytest.raises(ValueError):
+            InvoiceService.is_invoice_editable("invalid_status")
+
+    def test_draft_status_raises(self):
+        """Próba użycia usuniętego statusu draft rzuca błąd."""
+        with pytest.raises(ValueError):
+            InvoiceService.is_invoice_editable("draft")

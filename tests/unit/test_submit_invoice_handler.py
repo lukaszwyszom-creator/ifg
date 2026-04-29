@@ -60,6 +60,15 @@ def _make_invoice() -> Invoice:
     )
 
 
+def _make_session_context():
+    return MagicMock(
+        access_token="tok",
+        session_reference="sess-ref",
+        symmetric_key=b"k" * 32,
+        initialization_vector=b"i" * 16,
+    )
+
+
 class TestSubmitInvoiceHandler:
     def test_missing_transmission_skips(self, handler: SubmitInvoiceJobHandler):
         handler._transmission_repo.lock_for_update.return_value = None
@@ -79,7 +88,7 @@ class TestSubmitInvoiceHandler:
         transmission.attempt_no = 1
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.send_invoice.side_effect = KSeFClientError(
             "HTTP 500", status_code=500, transient=True
         )
@@ -93,7 +102,7 @@ class TestSubmitInvoiceHandler:
         transmission = MagicMock()
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         send_result = MagicMock()
         send_result.reference_number = "REF-123"
@@ -112,7 +121,7 @@ class TestSubmitInvoiceHandler:
         transmission = MagicMock()
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.send_invoice.side_effect = KSeFMappingError(
             "Brak NIP sprzedawcy"
         )
@@ -130,7 +139,7 @@ class TestSubmitInvoiceHandlerCommit10:
         """Handler ustawia PROCESSING zanim odpyta KSeF."""
         processing_status_at_call = []
 
-        def capture_call(session_token, xml_bytes):
+        def capture_call(access_token, session_reference, symmetric_key, iv, xml_bytes):
             processing_status_at_call.append(transmission.status)
             raise KSeFClientError("fail", status_code=500, transient=True)
 
@@ -138,7 +147,7 @@ class TestSubmitInvoiceHandlerCommit10:
         transmission.attempt_no = 1
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.send_invoice.side_effect = capture_call
 
         handler.handle(_make_payload())
@@ -150,7 +159,7 @@ class TestSubmitInvoiceHandlerCommit10:
         transmission = MagicMock()
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.send_invoice.side_effect = KSeFClientError(
             "HTTP 400", status_code=400, transient=False
         )
@@ -166,7 +175,7 @@ class TestSubmitInvoiceHandlerCommit10:
         transmission.attempt_no = 1
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.send_invoice.side_effect = RuntimeError("internal")
 
         handler.handle(_make_payload())
@@ -179,7 +188,7 @@ class TestSubmitInvoiceHandlerCommit10:
         transmission = MagicMock()
         handler._transmission_repo.lock_for_update.return_value = transmission
         handler._invoice_repo.get_by_id.return_value = _make_invoice()
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         send_result = MagicMock()
         send_result.reference_number = "REF-XYZ"

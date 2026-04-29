@@ -40,11 +40,11 @@ class TestAcquire:
     def test_completed_returns_cached(self, service: IdempotencyService, repo: MagicMock):
         existing = MagicMock()
         existing.status = STATUS_COMPLETED
-        existing.response_snapshot_json = {"id": "abc", "status": "draft"}
+        existing.response_snapshot_json = {"id": "abc", "status": "ready_for_submission"}
         repo.get_by_scope_and_key.return_value = existing
 
         result = service.acquire("create_invoice", "key-1")
-        assert result == {"id": "abc", "status": "draft"}
+        assert result == {"id": "abc", "status": "ready_for_submission"}
 
     def test_pending_raises_duplicate(self, service: IdempotencyService, repo: MagicMock):
         existing = MagicMock()

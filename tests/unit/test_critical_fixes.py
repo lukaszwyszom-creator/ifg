@@ -169,11 +169,13 @@ class TestSubmitInvoiceValidateForKsef:
     def test_validate_for_ksef_is_called(self, mock_session):
         """submit_invoice wywołuje invoice.validate_for_ksef() przed enqueue."""
         service = _make_service(mock_session)
+        service._build_idempotency_key = MagicMock(return_value="idem-key")
         inv_mock = MagicMock()
         inv_mock.can_transition_to.return_value = True
         inv_mock.validate_for_ksef = MagicMock()
         service._invoice_repo.lock_for_update.return_value = inv_mock
         service._transmission_repo.get_active_for_invoice.return_value = None
+        service._transmission_repo.get_by_idempotency_key.return_value = None
         service._transmission_repo.add.return_value = MagicMock(id=uuid4(), invoice_id=uuid4())
         service._invoice_repo.update.return_value = inv_mock
         actor = MagicMock()
@@ -200,12 +202,14 @@ class TestSubmitInvoiceValidateForKsef:
     def test_invoice_status_persisted_as_sending(self, mock_session):
         """Po przejściu do SENDING status jest zapisywany przez invoice_repo.update."""
         service = _make_service(mock_session)
+        service._build_idempotency_key = MagicMock(return_value="idem-key")
         inv_mock = MagicMock()
         inv_mock.can_transition_to.return_value = True
         inv_mock.validate_for_ksef = MagicMock()
         inv_mock.invoice_id = uuid4()
         service._invoice_repo.lock_for_update.return_value = inv_mock
         service._transmission_repo.get_active_for_invoice.return_value = None
+        service._transmission_repo.get_by_idempotency_key.return_value = None
         service._transmission_repo.add.return_value = MagicMock(id=uuid4(), invoice_id=uuid4())
         service._invoice_repo.update.return_value = inv_mock
         actor = MagicMock()
@@ -220,6 +224,7 @@ class TestSubmitInvoiceValidateForKsef:
     def test_idempotency_key_is_deterministic(self, mock_session):
         """Dwa wywołania dla tej samej wersji faktury generują ten sam idempotency_key."""
         service = _make_service(mock_session)
+        service._build_idempotency_key = MagicMock(return_value="idem-key")
         updated_at = datetime(2026, 4, 6, 12, 0, 0, tzinfo=UTC)
         invoice_id = uuid4()
 
@@ -235,6 +240,7 @@ class TestSubmitInvoiceValidateForKsef:
         for _ in range(2):
             service._invoice_repo.lock_for_update.return_value = make_inv()
             service._transmission_repo.get_active_for_invoice.return_value = None
+            service._transmission_repo.get_by_idempotency_key.return_value = None
             t = MagicMock()
             t.id = uuid4()
             service._transmission_repo.add.return_value = t
@@ -431,7 +437,12 @@ class TestMaxRetryFailsPermanent:
 
         inv = _invoice(status=InvoiceStatus.SENDING)
         handler._invoice_repo.get_by_id.return_value = inv
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = MagicMock(
+            access_token="tok",
+            session_reference="sess-ref",
+            symmetric_key=b"k" * 32,
+            initialization_vector=b"i" * 16,
+        )
         return handler, transmission
 
     def test_generic_exception_at_max_retry_sets_permanent_without_new_job(self):
@@ -662,15 +673,16 @@ class TestNbpRateValidatorUnavailable:
 # ===========================================================================
 
 class TestMigration0007Logic:
+    from pathlib import Path
     _MIGRATION_PATH = (
-        __file__.replace("tests\\unit\\test_critical_fixes.py", "")
-        + "alembic\\versions\\0007_f6a7b8c9d0e1_ksef_hardening.py"
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0007_f6a7b8c9d0e1_ksef_hardening.py"
     )
 
     def _read_migration(self) -> str:
-        import pathlib
-        p = pathlib.Path(self._MIGRATION_PATH)
-        return p.read_text(encoding="utf-8")
+        return self._MIGRATION_PATH.read_text(encoding="utf-8")
 
     def test_backfill_sql_uses_exists_guard(self):
         """Backfill INSERT ma klauzulę EXISTS — sprawdzamy tekst SQL w migracji."""

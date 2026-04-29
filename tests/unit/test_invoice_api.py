@@ -53,7 +53,7 @@ def _make_item() -> InvoiceItem:
     )
 
 
-def _make_invoice(status: InvoiceStatus = InvoiceStatus.DRAFT, number: str | None = None) -> Invoice:
+def _make_invoice(status: InvoiceStatus = InvoiceStatus.READY_FOR_SUBMISSION, number: str | None = None) -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
@@ -140,10 +140,10 @@ class TestListInvoices:
     def test_passes_status_filter(self, client, mock_invoice_service):
         mock_invoice_service.list_invoices.return_value = ([], 0)
 
-        client.get("/api/v1/invoices/?status=DRAFT")
+        client.get("/api/v1/invoices/?status=READY_FOR_SUBMISSION")
 
         call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
-        assert call_kwargs["status"] == "DRAFT"  # passed as-is (string from query param)
+        assert call_kwargs["status"] == "READY_FOR_SUBMISSION"  # passed as-is (string from query param)
 
     def test_passes_date_filters(self, client, mock_invoice_service):
         mock_invoice_service.list_invoices.return_value = ([], 0)
@@ -191,7 +191,7 @@ class TestListInvoices:
 
 class TestGetInvoice:
     def test_returns_invoice(self, client, mock_invoice_service):
-        inv = _make_invoice(InvoiceStatus.DRAFT)
+        inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
         mock_invoice_service.get_invoice.return_value = inv
 
         res = client.get(f"/api/v1/invoices/{inv.id}")
@@ -199,7 +199,7 @@ class TestGetInvoice:
         assert res.status_code == 200
         body = res.json()
         assert UUID(body["id"]) == inv.id
-        assert body["status"] == "draft"
+        assert body["status"] == "ready_for_submission"
 
     def test_response_includes_payment_status(self, client, mock_invoice_service):
         inv = _make_invoice(InvoiceStatus.ACCEPTED, "FV/2026/001")
@@ -234,6 +234,67 @@ class TestMarkReady:
 
         assert res.status_code == 200
         assert res.json()["status"] == "ready_for_submission"
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/v1/invoices/{id}
+# ---------------------------------------------------------------------------
+
+class TestUpdateInvoice:
+    def test_update_returns_invoice(self, client, mock_invoice_service):
+        inv = _make_invoice(InvoiceStatus.REJECTED, "01/04/2026")
+        mock_invoice_service.update_invoice.return_value = inv
+
+        payload = {
+            "buyer_id": str(uuid4()),
+            "issue_date": "2026-04-05",
+            "sale_date": "2026-04-05",
+            "delivery_date": "2026-04-05",
+            "currency": "PLN",
+            "items": [
+                {
+                    "name": "Usługa",
+                    "quantity": "1",
+                    "unit": "szt.",
+                    "unit_price_net": "100.00",
+                    "vat_rate": "23",
+                }
+            ],
+        }
+
+        res = client.put(f"/api/v1/invoices/{inv.id}", json=payload)
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "rejected"
+
+    def test_update_blocks_analysis_status(self, client, mock_invoice_service):
+        from app.domain.exceptions import InvalidStatusTransitionError
+
+        mock_invoice_service.update_invoice.side_effect = InvalidStatusTransitionError(
+            "Faktura w statusie 'Analiza' nie może być edytowana."
+        )
+
+        payload = {
+            "buyer_id": str(uuid4()),
+            "issue_date": "2026-04-05",
+            "sale_date": "2026-04-05",
+            "delivery_date": "2026-04-05",
+            "currency": "PLN",
+            "items": [
+                {
+                    "name": "Usługa",
+                    "quantity": "1",
+                    "unit": "szt.",
+                    "unit_price_net": "100.00",
+                    "vat_rate": "23",
+                }
+            ],
+        }
+
+        res = client.put(f"/api/v1/invoices/{uuid4()}", json=payload)
+
+        assert res.status_code == 409
+        assert "Analiza" in res.json()["error"]["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +354,7 @@ class TestFA3FieldsInAPI:
         inv = Invoice(
             id=uuid4(),
             number_local=None,
-            status=InvoiceStatus.DRAFT,
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
             issue_date=_date(2026, 4, 6),
             sale_date=_date(2026, 4, 6),
             delivery_date=_date(2026, 4, 4),

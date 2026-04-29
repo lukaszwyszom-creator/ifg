@@ -4,6 +4,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+from datetime import UTC, datetime
+
 import pytest
 
 from app.core.exceptions import NotFoundError
@@ -27,7 +29,7 @@ def service(mock_session: MagicMock) -> TransmissionService:
 class TestSubmitInvoice:
     def test_wrong_status_raises(self, service: TransmissionService, actor: AuthenticatedUser):
         invoice = MagicMock()
-        invoice.status = InvoiceStatus.DRAFT
+        invoice.status = InvoiceStatus.ACCEPTED
         invoice.can_transition_to = MagicMock(return_value=False)
         service._invoice_repo.lock_for_update.return_value = invoice
 
@@ -48,9 +50,12 @@ class TestSubmitInvoice:
         invoice_id = uuid4()
         invoice = MagicMock()
         invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        invoice.updated_at = datetime.now(UTC)
         invoice.can_transition_to = MagicMock(return_value=True)
+        invoice.validate_for_ksef = MagicMock()
         service._invoice_repo.lock_for_update.return_value = invoice
         service._transmission_repo.get_active_for_invoice.return_value = None
+        service._transmission_repo.get_by_idempotency_key.return_value = None
 
         transmission = MagicMock()
         transmission.id = uuid4()
@@ -58,10 +63,74 @@ class TestSubmitInvoice:
         transmission.status = TransmissionStatus.QUEUED
         service._transmission_repo.add.return_value = transmission
 
-        result = service.submit_invoice(invoice_id, actor)
+        from unittest.mock import patch
+
+        with patch('app.services.transmission_service.KSeFMapper') as mock_mapper:
+            mock_mapper.invoice_to_xml.return_value = b'<xml/>'
+            mock_mapper.xml_content_hash.return_value = 'hash-1'
+
+            result = service.submit_invoice(invoice_id, actor)
+
         assert result == transmission
         service._job_repo.add.assert_called_once()
         assert service._audit_service.record.call_count == 2
+
+    def test_returns_existing_transmission_for_same_idempotency_key(self, service: TransmissionService, actor: AuthenticatedUser):
+        invoice_id = uuid4()
+        invoice = MagicMock()
+        invoice.status = InvoiceStatus.SENDING
+        invoice.updated_at = datetime.now(UTC)
+        invoice.can_transition_to = MagicMock(return_value=False)
+        service._invoice_repo.lock_for_update.return_value = invoice
+
+        existing = MagicMock()
+        existing.id = uuid4()
+        existing.invoice_id = invoice_id
+        existing.status = TransmissionStatus.SUBMITTED
+        service._transmission_repo.get_by_idempotency_key.return_value = existing
+
+        from unittest.mock import patch
+
+        with patch('app.services.transmission_service.KSeFMapper') as mock_mapper:
+            mock_mapper.invoice_to_xml.return_value = b'<xml/>'
+            mock_mapper.xml_content_hash.return_value = 'hash-1'
+
+            result = service.submit_invoice(invoice_id, actor)
+
+        assert result == existing
+        service._transmission_repo.add.assert_not_called()
+        service._job_repo.add.assert_not_called()
+
+    def test_does_not_reuse_failed_transmission_for_same_idempotency_key(self, service: TransmissionService, actor: AuthenticatedUser):
+        invoice_id = uuid4()
+        invoice = MagicMock()
+        invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        invoice.updated_at = datetime.now(UTC)
+        invoice.can_transition_to = MagicMock(return_value=True)
+        invoice.validate_for_ksef = MagicMock()
+        service._invoice_repo.lock_for_update.return_value = invoice
+        service._transmission_repo.get_active_for_invoice.return_value = None
+
+        failed = MagicMock()
+        failed.status = TransmissionStatus.FAILED_RETRYABLE
+        service._transmission_repo.get_by_idempotency_key.return_value = failed
+
+        transmission = MagicMock()
+        transmission.id = uuid4()
+        transmission.invoice_id = invoice_id
+        transmission.status = TransmissionStatus.QUEUED
+        service._transmission_repo.add.return_value = transmission
+
+        from unittest.mock import patch
+
+        with patch('app.services.transmission_service.KSeFMapper') as mock_mapper:
+            mock_mapper.invoice_to_xml.return_value = b'<xml/>'
+            mock_mapper.xml_content_hash.return_value = 'hash-1'
+
+            result = service.submit_invoice(invoice_id, actor)
+
+        assert result == transmission
+        service._transmission_repo.add.assert_called_once()
 
 
 class TestRetryTransmission:
@@ -108,12 +177,20 @@ class TestActiveStatusesPropagation:
         from app.services.transmission_service import _ACTIVE_STATUSES
         invoice_id = uuid4()
         invoice = MagicMock()
+        invoice.updated_at = datetime.now(UTC)
         invoice.can_transition_to = MagicMock(return_value=True)
+        invoice.validate_for_ksef = MagicMock()
         service._invoice_repo.lock_for_update.return_value = invoice
         service._transmission_repo.get_active_for_invoice.return_value = None
+        service._transmission_repo.get_by_idempotency_key.return_value = None
         service._transmission_repo.add.return_value = MagicMock(id=uuid4(), invoice_id=invoice_id)
 
-        service.submit_invoice(invoice_id, actor)
+        from unittest.mock import patch
+
+        with patch('app.services.transmission_service.KSeFMapper') as mock_mapper:
+            mock_mapper.invoice_to_xml.return_value = b'<xml/>'
+            mock_mapper.xml_content_hash.return_value = 'hash-1'
+            service.submit_invoice(invoice_id, actor)
 
         service._transmission_repo.get_active_for_invoice.assert_called_once_with(
             invoice_id, _ACTIVE_STATUSES

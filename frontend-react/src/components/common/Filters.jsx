@@ -1,8 +1,9 @@
+import { useEffect, useState } from 'react';
+import { invoicesApi } from '../../api/invoices';
 import styles from './Filters.module.css';
 
 const INVOICE_STATUSES = [
   { value: '', label: 'Wszystkie statusy' },
-  { value: 'draft', label: 'Szkic' },
   { value: 'ready_for_submission', label: 'Gotowa' },
   { value: 'sending', label: 'Wysyłanie' },
   { value: 'accepted', label: 'Zaakceptowana' },
@@ -38,6 +39,9 @@ const MONTHS_OF_YEAR = [
  * @param {bool}     compact   - ukryj contractor
  */
 export default function Filters({ filters, onChange, onReset, compact = false }) {
+  const [contractorHints, setContractorHints] = useState([]);
+  const contractorQuery = String(filters.contractor || '').trim();
+
   const now = new Date();
   const nowYear  = now.getFullYear();
   const nowMonth = now.getMonth() + 1; // 1-12
@@ -60,6 +64,44 @@ export default function Filters({ filters, onChange, onReset, compact = false })
   const handleMonth = (e) => onChange({ month: `${filterYear || nowYear}-${e.target.value}`, issue_date_from: '', issue_date_to: '' });
   const handleDateFrom = (e) => onChange({ issue_date_from: e.target.value, month: '' });
   const handleDateTo   = (e) => onChange({ issue_date_to: e.target.value, month: '' });
+
+  useEffect(() => {
+    if (compact || contractorQuery.length < 3) {
+      setContractorHints([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timerId = setTimeout(() => {
+      invoicesApi
+        .list({ page: 1, size: 30, number_filter: contractorQuery })
+        .then((res) => {
+          if (cancelled) return;
+
+          const values = new Set();
+          for (const inv of res.items ?? []) {
+            const buyerName = String(inv.buyer_snapshot?.name || '').trim();
+            const sellerName = String(inv.seller_snapshot?.name || '').trim();
+            const buyerNip = String(inv.buyer_snapshot?.nip || '').trim();
+            const sellerNip = String(inv.seller_snapshot?.nip || '').trim();
+            if (buyerName) values.add(buyerName);
+            if (sellerName) values.add(sellerName);
+            if (buyerNip) values.add(buyerNip);
+            if (sellerNip) values.add(sellerNip);
+          }
+
+          setContractorHints(Array.from(values).slice(0, 12));
+        })
+        .catch(() => {
+          if (!cancelled) setContractorHints([]);
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timerId);
+    };
+  }, [compact, contractorQuery]);
 
   return (
     <div className={styles.bar}>
@@ -89,7 +131,6 @@ export default function Filters({ filters, onChange, onReset, compact = false })
           >
             <option value="">---</option>
             {MONTHS_OF_YEAR.map((o) => {
-              // Ciemnoszary kolor dla miesięcy które jeszcze nie nastąpiły w wybranym roku
               const isFuture = selectedYear !== null && (
                 selectedYear > nowYear ||
                 (selectedYear === nowYear && Number(o.value) > nowMonth)
@@ -145,15 +186,21 @@ export default function Filters({ filters, onChange, onReset, compact = false })
 
         {!compact && (
           <div className="form-group">
-            <label className="form-label">Kontrahent (NIP/nazwa)</label>
+            <label className="form-label">Kontrahent (NIP/fragment nazwy)</label>
             <input
               type="text"
               className="input"
-              placeholder="szukaj..."
+              list="contractor-hints"
+              placeholder="min. 3 znaki..."
               value={filters.contractor}
               onChange={(e) => onChange({ contractor: e.target.value })}
               style={{ minWidth: 200 }}
             />
+            <datalist id="contractor-hints">
+              {contractorHints.map((hint) => (
+                <option key={hint} value={hint} />
+              ))}
+            </datalist>
           </div>
         )}
       </div>

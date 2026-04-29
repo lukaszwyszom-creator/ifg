@@ -32,3 +32,15 @@ class CloseSessionResponse(BaseModel):
     session_reference: str | None
 
     model_config = {"from_attributes": True}
+
+
+class KSeFConnectionStatusDetails(BaseModel):
+    reason: str
+    has_session: bool
+    session_expires_at: datetime | None = None
+    last_error: str | None = None
+
+
+class KSeFConnectionStatusResponse(BaseModel):
+    ui_status: str
+    details: KSeFConnectionStatusDetails

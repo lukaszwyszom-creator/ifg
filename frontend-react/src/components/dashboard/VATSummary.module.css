@@ -5,6 +5,39 @@
   padding: 20px;
 }
 
+.card :global(.card-header) {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.monthTitle {
+  font-size: 1.3em !important;
+  line-height: 1;
+}
+
+.deltaBadge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 1.56rem;
+  font-weight: 700;
+}
+
+.deltaDue {
+  color: #ef5350;
+}
+
+.deltaDeductible {
+  color: #60a5fa;
+}
+
+.deltaNeutral {
+  color: var(--color-text-2);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -28,12 +61,25 @@
 }
 .table td:first-child { text-align: left; }
 .rate { font-weight: 600; color: var(--color-gold); }
-.vatCol { color: var(--color-warning); }
 .totalRow td {
   font-weight: 700;
   color: var(--color-text);
   border-top: 1px solid var(--color-border);
   border-bottom: none;
   padding-top: 10px;
+  font-size: 1.105rem;
 }
 .empty { text-align: center !important; color: var(--color-text-3); padding: 20px; }
+
+.groupTitle {
+  color: #fff !important;
+  font-size: 0.936rem !important;
+}
+
+.netCol {
+  padding-right: 4px !important;
+}
+
+.vatCol {
+  padding-left: 4px !important;
+}

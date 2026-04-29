@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router-dom';
-import { useAuthStore } from '../../store/useAuthStore';
+import KSeFConnectionTile from './KSeFConnectionTile';
 import styles from './Topbar.module.css';
 
 function getCurrentMonthYear() {
@@ -12,16 +12,16 @@ function getCurrentMonthYear() {
 
 export default function Topbar({ onMenuToggle }) {
   const location = useLocation();
-  const user = useAuthStore((s) => s.user);
   const monthYear = getCurrentMonthYear();
   const invoicesTitle = (
     <>
-      Faktury bieżące sprzedaży - <span className={styles.pageTitleAccent}>{monthYear}</span>
+      <span className={styles.pageTitlePrefix}>Faktury bieżące sprzedaży - </span>
+      <span className={styles.pageTitleAccent}>{monthYear}</span>
     </>
   );
   const pageTitles = {
     '/invoices': invoicesTitle,
-    '/dashboard': 'Dashboard',
+    '/dashboard': <span className={styles.pageTitleGold}>Zestawienia: sprzedaż / zakup</span>,
     '/payments': 'Płatności',
     '/stock': 'Magazyn',
   };
@@ -38,10 +38,7 @@ export default function Topbar({ onMenuToggle }) {
       </div>
 
       <div className={styles.right}>
-        <div className={styles.userBadge}>
-          <span className={styles.userIcon}>👤</span>
-          <span className={styles.userName}>{user?.username ?? 'operator'}</span>
-        </div>
+        <KSeFConnectionTile />
       </div>
     </header>
   );

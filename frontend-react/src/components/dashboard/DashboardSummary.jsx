@@ -5,15 +5,10 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { invoicesApi } from '../../api/invoices';
+import { buildPlnSummary } from './dashboardAggregation';
 import styles from './DashboardSummary.module.css';
 
-const METRICS = [
-  { key: 'total',    label: 'Wszystkich faktur',   cls: 'neutral' },
-  { key: 'accepted', label: 'Zaakceptowanych',     cls: 'success' },
-  { key: 'ready',    label: 'Gotowych do wysyłki', cls: 'info'    },
-  { key: 'draft',    label: 'Szkiców',             cls: 'neutral' },
-  { key: 'rejected', label: 'Odrzuconych',         cls: 'error'   },
-];
+const fmtPln = (n) => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN`;
 
 // ---- helpers ----
 function currentMonthPrefix() {
@@ -23,66 +18,81 @@ function currentMonthPrefix() {
   return `${y}-${m}`;
 }
 
-function monthLabel(prefix) {
-  if (!prefix) return '';
-  const [y, m] = prefix.split('-');
-  const d = new Date(Number(y), Number(m) - 1, 1);
-  return d.toLocaleDateString('pl-PL', { year: 'numeric', month: 'long' });
+function toSlashDate(isoDate) {
+  if (!isoDate || typeof isoDate !== 'string' || isoDate.length < 10) return '...';
+  const y = isoDate.slice(0, 4);
+  const m = isoDate.slice(5, 7);
+  const d = isoDate.slice(8, 10);
+  return `${d}/${m}/${y}`;
+}
+
+function parseIsoDate(dateStr) {
+  const dt = new Date(`${dateStr}T00:00:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function buildDateRange(fromDate, toDate) {
+  const start = parseIsoDate(fromDate);
+  const end = parseIsoDate(toDate);
+  if (!start || !end || start > end) return [];
+
+  const dates = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const y = cursor.getFullYear();
+    const m = String(cursor.getMonth() + 1).padStart(2, '0');
+    const d = String(cursor.getDate()).padStart(2, '0');
+    dates.push(`${y}-${m}-${d}`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
 }
 
 function buildDailyMap(invoices) {
-  // Zlicza wartości w PLN: faktury PLN bezpośrednio, waluty obce × exchange_rate
+  // Zlicza wyłącznie faktury w PLN, pomijając odrzucone.
   const map = {};
   for (const inv of invoices) {
+    if ((inv.status ?? '') === 'rejected') continue;
     const d = (inv.issue_date ?? '').toString().slice(0, 10);
     if (!d) continue;
-    const gross = parseFloat(inv.total_gross ?? 0) || 0;
-    if (!gross) continue;
     const currency = (inv.currency ?? 'PLN').toUpperCase();
-    let plnAmount;
-    if (currency === 'PLN') {
-      plnAmount = gross;
-    } else {
-      const rate = parseFloat(inv.exchange_rate ?? 0) || 0;
-      if (!rate) continue; // waluta obca bez kursu — pomijamy na wykresie
-      plnAmount = gross * rate;
-    }
-    map[d] = (map[d] ?? 0) + plnAmount;
+    if (currency !== 'PLN') continue;
+    const net = parseFloat(inv.total_net ?? 0) || 0;
+    if (!net) continue;
+    map[d] = (map[d] ?? 0) + net;
   }
   return map;
 }
 
-// Zwraca sumę walut obcych: { EUR: { grossForeign, grossPln }, USD: {...} }
-function buildForeignSummary(invoices) {
-  const acc = {};
-  for (const inv of invoices) {
-    const cur = inv.currency ?? 'PLN';
-    if (cur === 'PLN') continue;
-    const gross = Number(inv.total_gross ?? 0);
-    const rate  = Number(inv.exchange_rate ?? 0);
-    if (!acc[cur]) acc[cur] = { grossForeign: 0, grossPln: 0 };
-    acc[cur].grossForeign = +(acc[cur].grossForeign + gross).toFixed(2);
-    acc[cur].grossPln     = +(acc[cur].grossPln + gross * rate).toFixed(2);
+function buildXAxisTicks(data, maxTicks = 12) {
+  if (!Array.isArray(data) || data.length === 0) return [];
+  if (data.length <= maxTicks) return data.map((d) => d.fullDate);
+
+  const ticks = [];
+  const lastIndex = data.length - 1;
+  const segments = Math.max(1, maxTicks - 1);
+
+  for (let i = 0; i <= segments; i += 1) {
+    const idx = Math.round((i * lastIndex) / segments);
+    ticks.push(data[idx].fullDate);
   }
-  return acc;
+
+  return [...new Set(ticks)];
 }
 
-async function fetchNbpRate(currency) {
-  try {
-    const resp = await fetch(
-      `https://api.nbp.pl/api/exchangerates/rates/a/${currency}/?format=json`,
-      { headers: { Accept: 'application/json' } },
-    );
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return Number(data.rates?.[0]?.mid ?? null);
-  } catch {
-    return null;
+function formatXAxisTick(fullDate, firstFullDate, lastFullDate, spansMultipleMonths) {
+  if (!fullDate || typeof fullDate !== 'string') return '';
+
+  const day = fullDate.slice(8, 10);
+  const month = fullDate.slice(5, 7);
+  if (spansMultipleMonths && (fullDate === firstFullDate || fullDate === lastFullDate)) {
+    return `${day}.${month}`;
   }
+  return day;
 }
 
-function buildCombinedData(saleMap, purchaseMap) {
-  const allDays = [...new Set([...Object.keys(saleMap), ...Object.keys(purchaseMap)])].sort();
+function buildCombinedData(saleMap, purchaseMap, fromDate, toDate) {
+  const allDays = buildDateRange(fromDate, toDate);
   let cumSale = 0;
   let cumPurchase = 0;
   return allDays.map((date) => {
@@ -103,20 +113,25 @@ function buildCombinedData(saleMap, purchaseMap) {
 function CombinedTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const pt = payload[0].payload;
+  const formatDaily = (value) => {
+    const num = Number(value || 0);
+    if (num === 0) return '0,00';
+    return `${num > 0 ? '+' : ''}${num.toLocaleString('pl-PL', { minimumFractionDigits: 2 })}`;
+  };
+
+  const saleDeltaClass = pt.dailySale === 0 ? styles.tooltipDeltaNeutral : styles.tooltipDeltaSale;
+  const purchaseDeltaClass = pt.dailyPurchase === 0 ? styles.tooltipDeltaNeutral : styles.tooltipDeltaPurchase;
+
   return (
     <div className={styles.tooltip}>
-      <div className={styles.tooltipDate}>{pt.fullDate}</div>
+      <div className={styles.tooltipDate}>do dnia {toSlashDate(pt.fullDate)} Netto:</div>
       <div className={styles.tooltipValue}>
         Sprzedaż: {pt.cumSale.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-        {pt.dailySale > 0 && (
-          <span className={styles.tooltipSubInline}> (+{pt.dailySale.toLocaleString('pl-PL', { minimumFractionDigits: 2 })})</span>
-        )}
+        <span className={`${styles.tooltipSubInline} ${saleDeltaClass}`}> ({formatDaily(pt.dailySale)})</span>
       </div>
       <div className={styles.tooltipValueBlue}>
         Zakupy: {pt.cumPurchase.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-        {pt.dailyPurchase > 0 && (
-          <span className={styles.tooltipSubInline}> (+{pt.dailyPurchase.toLocaleString('pl-PL', { minimumFractionDigits: 2 })})</span>
-        )}
+        <span className={`${styles.tooltipSubInline} ${purchaseDeltaClass}`}> ({formatDaily(pt.dailyPurchase)})</span>
       </div>
     </div>
   );
@@ -124,23 +139,13 @@ function CombinedTooltip({ active, payload }) {
 
 // Mapowanie wartości filtrów na etykiety po polsku
 const STATUS_LABELS = {
-  draft:                 'szkic',
   ready_for_submission:  'gotowa',
   sending:               'wysyłanie',
   accepted:              'zaakceptowana',
   rejected:              'odrzucona',
 };
 
-const TAB_LABELS = {
-  invoices:      'sprzedaż',
-  purchase:      'zakupy',
-  vat:           'VAT',
-  transmissions: 'transmisje KSeF',
-};
-
-export default function DashboardSummary({ filters, tab }) {
-  const [stats, setStats]           = useState({ total: 0, accepted: 0, ready: 0, draft: 0, rejected: 0 });
-  const [statsLoading, setStatsLoading] = useState(false);
+export default function DashboardSummary({ filters }) {
 
   // Jeden atomowy stan wykresu — eliminuje race-condition między
   // setAllSale/setAllPurchase (.then) a setChartLoading (.finally)
@@ -148,7 +153,6 @@ export default function DashboardSummary({ filters, tab }) {
     loading:         true,
     saleInvoices:    [],
     purchaseInvoices: [],
-    currentRates:    {},
   });
 
   // Wyznacz prefix miesiąca z filtrów lub bieżący miesiąc
@@ -171,9 +175,7 @@ export default function DashboardSummary({ filters, tab }) {
   const effectTo   = dateRangeActive ? dateTo   : monthTo;
 
   // Etykieta okresu do prawego górnego rogu
-  const periodLabel = dateRangeActive
-    ? `${dateFrom || '...'} – ${dateTo || '...'}`
-    : monthLabel(prefix);
+  const periodLabel = `${toSlashDate(effectFrom)} - ${toSlashDate(effectTo)}`;
 
   // Etykieta opcji (status + kontrahent)
   const optsLabel = [
@@ -181,34 +183,10 @@ export default function DashboardSummary({ filters, tab }) {
     filters?.contractor || '',
   ].filter(Boolean).join(', ');
 
-  // Karty metryk (globalne liczniki, niezależne od filtrów)
-  useEffect(() => {
-    let cancelled = false;
-    setStatsLoading(true);
-    Promise.all([
-      invoicesApi.list({ page: 1, size: 1 }),
-      invoicesApi.list({ page: 1, size: 1, status: 'accepted' }),
-      invoicesApi.list({ page: 1, size: 1, status: 'ready_for_submission' }),
-      invoicesApi.list({ page: 1, size: 1, status: 'draft' }),
-      invoicesApi.list({ page: 1, size: 1, status: 'rejected' }),
-    ])
-      .then(([all, acc, ready, draft, rej]) => {
-        if (cancelled) return;
-        setStats({
-          total:    all.total,
-          accepted: acc.total,
-          ready:    ready.total,
-          draft:    draft.total,
-          rejected: rej.total,
-        });
-      })
-      .finally(() => { if (!cancelled) setStatsLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
   // Dane wykresu — efektywny zakres + aktywne filtry
   const status     = filters?.status     || '';
-  const contractor = filters?.contractor || '';
+  const contractor = (filters?.contractor || '').trim();
+  const contractorFilter = contractor.length >= 3 ? contractor : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -219,7 +197,7 @@ export default function DashboardSummary({ filters, tab }) {
       issue_date_from: effectFrom,
       issue_date_to:   effectTo,
       ...(status     && { status }),
-      ...(contractor && { number_filter: contractor }),
+      ...(contractorFilter && { number_filter: contractorFilter }),
     };
 
     Promise.all([
@@ -232,51 +210,29 @@ export default function DashboardSummary({ filters, tab }) {
         const purchases = purchaseRes.items ?? [];
 
         // Jeden setState = jeden render, brak race-condition
-        setChart({ loading: false, saleInvoices: sales, purchaseInvoices: purchases, currentRates: {} });
-
-        // Kursy NBP dla walut obcych — osobna aktualizacja (niekrytyczna)
-        const currencies = [...new Set(
-          [...sales, ...purchases].map(i => i.currency).filter(c => c && c !== 'PLN'),
-        )];
-        if (currencies.length > 0) {
-          Promise.all(currencies.map(c => fetchNbpRate(c).then(rate => [c, rate])))
-            .then(pairs => {
-              if (cancelled) return;
-              setChart(prev => ({
-                ...prev,
-                currentRates: Object.fromEntries(pairs.filter(([, r]) => r !== null)),
-              }));
-            });
-        }
+        setChart({ loading: false, saleInvoices: sales, purchaseInvoices: purchases });
       })
       .catch(() => {
         if (!cancelled)
-          setChart({ loading: false, saleInvoices: [], purchaseInvoices: [], currentRates: {} });
+          setChart({ loading: false, saleInvoices: [], purchaseInvoices: [] });
       });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectFrom, effectTo, status, contractor]);
+  }, [effectFrom, effectTo, status, contractorFilter]);
 
   const combinedData = useMemo(() => {
     const saleMap     = buildDailyMap(chart.saleInvoices);
     const purchaseMap = buildDailyMap(chart.purchaseInvoices);
-    return buildCombinedData(saleMap, purchaseMap);
-  }, [chart.saleInvoices, chart.purchaseInvoices]);
+    return buildCombinedData(saleMap, purchaseMap, effectFrom, effectTo);
+  }, [chart.saleInvoices, chart.purchaseInvoices, effectFrom, effectTo]);
 
-  const lastSale     = combinedData.length ? combinedData[combinedData.length - 1].cumSale     : 0;
-  const lastPurchase = combinedData.length ? combinedData[combinedData.length - 1].cumPurchase : 0;
+  const xAxisTicks = useMemo(() => buildXAxisTicks(combinedData, 12), [combinedData]);
+  const firstFullDate = combinedData[0]?.fullDate ?? '';
+  const lastFullDate = combinedData[combinedData.length - 1]?.fullDate ?? '';
+  const spansMultipleMonths =
+    firstFullDate && lastFullDate && firstFullDate.slice(0, 7) !== lastFullDate.slice(0, 7);
 
-  const saleForeignSummary = useMemo(() => buildForeignSummary(chart.saleInvoices), [chart.saleInvoices]);
-
-  const fxDiff = useMemo(() => {
-    let diff = 0;
-    for (const [cur, { grossForeign, grossPln }] of Object.entries(saleForeignSummary)) {
-      const curRate = chart.currentRates[cur];
-      if (!curRate) continue;
-      diff += grossForeign * curRate - grossPln;
-    }
-    return +diff.toFixed(2);
-  }, [saleForeignSummary, chart.currentRates]);
+  const saleSummary     = useMemo(() => buildPlnSummary(chart.saleInvoices),     [chart.saleInvoices]);
+  const purchaseSummary = useMemo(() => buildPlnSummary(chart.purchaseInvoices), [chart.purchaseInvoices]);
 
   return (
     <div className={styles.root}>
@@ -284,10 +240,13 @@ export default function DashboardSummary({ filters, tab }) {
       <div className={styles.chartWrap}>
         <div className={styles.chartHeader}>
           <h3 className={styles.chartTitle}>
-            Sprzedaż i zakupy narastająco (brutto)
+            Sprzedaż i zakupy narastająco (Netto)
           </h3>
           <div className={styles.chartCorner}>
-            <span className={styles.monthLabel}>wybrany okres: {periodLabel}</span>
+            <span className={styles.chartTopLine}>
+              <span className={styles.periodPrefix}>wybrany okres: </span>
+              <span className={styles.periodAccent}>{periodLabel}</span>
+            </span>
             {optsLabel && (
               <span className={styles.wybranoLabel}>wybrane opcje: {optsLabel}</span>
             )}
@@ -299,7 +258,7 @@ export default function DashboardSummary({ filters, tab }) {
           <div className={styles.chartEmpty}>Brak faktur w wybranym okresie</div>
         ) : (
           <div className={styles.chartInner}>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={175}>
               <AreaChart data={combinedData} margin={{ top: 8, right: 24, bottom: 0, left: 8 }}>
                 <defs>
                   <linearGradient id="gradSale" x1="0" y1="0" x2="0" y2="1">
@@ -313,10 +272,13 @@ export default function DashboardSummary({ filters, tab }) {
                 </defs>
                 <CartesianGrid stroke="#2e2e2e" strokeDasharray="4 4" vertical={false} />
                 <XAxis
-                  dataKey="date"
+                  dataKey="fullDate"
+                  ticks={xAxisTicks}
+                  tickFormatter={(value) => formatXAxisTick(value, firstFullDate, lastFullDate, spansMultipleMonths)}
                   tick={{ fill: '#a0a0a0', fontSize: 12 }}
                   axisLine={{ stroke: '#2e2e2e' }}
                   tickLine={false}
+                  interval={0}
                 />
                 <YAxis
                   tick={{ fill: '#a0a0a0', fontSize: 12 }}
@@ -336,8 +298,8 @@ export default function DashboardSummary({ filters, tab }) {
                   stroke="#d4a017"
                   strokeWidth={2}
                   fill="url(#gradSale)"
-                  dot={{ r: 4, fill: '#d4a017', strokeWidth: 0 }}
-                  activeDot={{ r: 6, fill: '#e8b820', strokeWidth: 0 }}
+                  dot={{ r: 5, fill: '#be9015', strokeWidth: 0 }}
+                  activeDot={{ r: 7, fill: '#be9015', strokeWidth: 0 }}
                   isAnimationActive={false}
                 />
                 <Area
@@ -347,48 +309,48 @@ export default function DashboardSummary({ filters, tab }) {
                   stroke="#3b82f6"
                   strokeWidth={2}
                   fill="url(#gradPurchase)"
-                  dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }}
-                  activeDot={{ r: 6, fill: '#60a5fa', strokeWidth: 0 }}
+                  dot={{ r: 5, fill: '#3575dd', strokeWidth: 0 }}
+                  activeDot={{ r: 7, fill: '#3575dd', strokeWidth: 0 }}
                   isAnimationActive={false}
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         )}
-        {!chart.loading && combinedData.length > 0 && (
-          <div className={styles.chartLegend}>
-            <span className={styles.legendSale}>
-              Sprzedaż: {lastSale.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-              {Object.entries(saleForeignSummary).map(([cur, { grossForeign }]) => (
-                <span key={cur} className={styles.legendForeign}>
-                  {' + '}{grossForeign.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} {cur}
-                </span>
-              ))}
-            </span>
-            <span className={styles.legendPurchase}>
-              Zakupy: {lastPurchase.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-            </span>
-            {Object.keys(saleForeignSummary).length > 0 && Object.keys(chart.currentRates).length > 0 && (
-              <span className={fxDiff >= 0 ? styles.legendFxGain : styles.legendFxLoss}>
-                Różnica kursowa:{' '}
-                {fxDiff >= 0 ? '+' : ''}
-                {fxDiff.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-              </span>
-            )}
+        {!chart.loading && (
+          <div className={styles.summaryWrap}>
+            <div className={styles.summaryHeading}>W wybranym okresie:</div>
+            <div className={styles.summaryBar}>
+              <span className={styles.summarySale}>SPRZEDAŻ</span>
+              {' — '}
+              <span className={styles.summaryNetLabel}>Netto:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValueSale}`}>{fmtPln(saleSummary.netto)}</span>
+              {' | '}
+              <span className={styles.summarySecondaryLabel}>VAT:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(saleSummary.vat)}</span>
+              {' | '}
+              <span className={styles.summarySecondaryLabel}>Brutto:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(saleSummary.brutto)}</span>
+              {' / '}
+              <span className={styles.summaryPurchase}>ZAKUP</span>
+              {' — '}
+              <span className={styles.summaryNetLabel}>Netto:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValuePurchase}`}>{fmtPln(purchaseSummary.netto)}</span>
+              {' | '}
+              <span className={styles.summarySecondaryLabel}>VAT:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(purchaseSummary.vat)}</span>
+              {' | '}
+              <span className={styles.summarySecondaryLabel}>Brutto:</span>
+              {' '}
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(purchaseSummary.brutto)}</span>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* ---- Karty metryk ---- */}
-      <div className={styles.grid}>
-        {METRICS.map((m) => (
-          <div key={m.key} className={`${styles.card} ${styles[m.cls]}`}>
-            <span className={styles.value}>
-              {statsLoading ? <span className="spinner" /> : stats[m.key]}
-            </span>
-            <span className={styles.label}>{m.label}</span>
-          </div>
-        ))}
       </div>
     </div>
   );

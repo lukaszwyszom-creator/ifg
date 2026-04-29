@@ -44,6 +44,10 @@ class TransmissionRepository:
         )
         return self.session.execute(query).scalar_one_or_none()
 
+    def get_by_idempotency_key(self, idempotency_key: str) -> TransmissionORM | None:
+        query = select(TransmissionORM).where(TransmissionORM.idempotency_key == idempotency_key)
+        return self.session.execute(query).scalar_one_or_none()
+
     def list_all_paginated(self, page: int, size: int) -> tuple[list[TransmissionORM], int]:
         from sqlalchemy import func
 

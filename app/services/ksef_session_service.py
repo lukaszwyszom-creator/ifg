@@ -38,6 +38,9 @@ _KEY_REFRESH_TOKEN = "refresh_token"
 _KEY_REFRESH_VALID = "refresh_valid_until"
 _KEY_SYMMETRIC_KEY = "symmetric_key"
 _KEY_IV = "initialization_vector"
+_PROBE_ERROR_THRESHOLD = 3
+_probe_cache_lock = threading.Lock()
+_probe_cache: dict[str, dict[str, str | int | None]] = {}
 
 
 @dataclass
@@ -80,6 +83,7 @@ class KSeFSessionService:
         # cache tokenów — klucz: nip (str), wartość: _TokenCacheEntry
         self._token_cache: dict[str, _TokenCacheEntry] = {}
         self._cache_lock = threading.Lock()
+        self._probe_cache_key = getattr(self.ksef_client, "_base_url", "default")
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -243,6 +247,59 @@ class KSeFSessionService:
             raise NotFoundError(f"Nie znaleziono sesji KSeF {session_id}.")
         return orm
 
+    def get_connection_status(self, nip: str | None) -> dict:
+        probe_error = self._probe_connectivity_error()
+        if probe_error is not None:
+            return self._build_connection_status(
+                ui_status="ERROR",
+                reason=probe_error["reason"],
+                has_session=False,
+                last_error=probe_error["last_error"],
+            )
+
+        if not nip:
+            return self._build_connection_status(
+                ui_status="DISCONNECTED",
+                reason="NO_SESSION",
+                has_session=False,
+            )
+
+        try:
+            orm = self._get_active_db_session(nip)
+            if orm is None:
+                return self._build_connection_status(
+                    ui_status="DISCONNECTED",
+                    reason="NO_SESSION",
+                    has_session=False,
+                )
+
+            now = datetime.now(UTC)
+            if orm.expires_at is not None and orm.expires_at <= now:
+                orm.status = SESSION_EXPIRED
+                orm.updated_at = now
+                self.session.flush()
+                self._invalidate_cache(nip)
+                return self._build_connection_status(
+                    ui_status="DISCONNECTED",
+                    reason="SESSION_EXPIRED",
+                    has_session=False,
+                )
+
+            return self._build_connection_status(
+                ui_status="CONNECTED",
+                reason="UNKNOWN",
+                has_session=True,
+                session_expires_at=orm.expires_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("KSeF status check failed for NIP %s.", nip)
+            return self._build_connection_status(
+                ui_status="ERROR",
+                reason="UNKNOWN",
+                has_session=False,
+                last_error=str(exc),
+            )
+
     def expire_stale_sessions(self) -> int:
         now = datetime.now(UTC)
         stmt = select(KSeFSessionORM).where(
@@ -377,6 +434,84 @@ class KSeFSessionService:
         )
         return self.session.execute(stmt).scalar_one_or_none()
 
+    @staticmethod
+    def _build_connection_status(
+        ui_status: str,
+        reason: str,
+        has_session: bool,
+        session_expires_at: datetime | None = None,
+        last_error: str | None = None,
+    ) -> dict:
+        return {
+            "ui_status": ui_status,
+            "details": {
+                "reason": reason,
+                "has_session": has_session,
+                "session_expires_at": session_expires_at,
+                "last_error": last_error,
+            },
+        }
+
+    @staticmethod
+    def _map_status_reason_from_client_error(exc: KSeFClientError) -> str:
+        if exc.status_code in (401, 403):
+            return "AUTH_ERROR"
+        if exc.transient and exc.status_code is None:
+            return "NETWORK_ERROR"
+        if exc.transient:
+            return "KSEF_UNAVAILABLE"
+        return "UNKNOWN"
+
     def _invalidate_cache(self, nip: str) -> None:
         with self._cache_lock:
             self._token_cache.pop(nip, None)
+
+    def _probe_connectivity_error(self) -> dict | None:
+        try:
+            self.ksef_client.check_connectivity()
+        except KSeFClientError as exc:
+            reason = self._map_status_reason_from_client_error(exc)
+            with _probe_cache_lock:
+                state = _probe_cache.setdefault(
+                    self._probe_cache_key,
+                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
+                )
+                state["failure_count"] = int(state["failure_count"] or 0) + 1
+                state["last_error"] = str(exc)
+                state["last_reason"] = reason
+                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
+                    logger.warning(
+                        "KSeF connectivity probe failed (%s/%s): %s",
+                        state["failure_count"],
+                        _PROBE_ERROR_THRESHOLD,
+                        exc,
+                    )
+                    return None
+                return {
+                    "reason": str(state["last_reason"]),
+                    "last_error": str(state["last_error"]),
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("KSeF connectivity probe failed.")
+            with _probe_cache_lock:
+                state = _probe_cache.setdefault(
+                    self._probe_cache_key,
+                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
+                )
+                state["failure_count"] = int(state["failure_count"] or 0) + 1
+                state["last_error"] = str(exc)
+                state["last_reason"] = "UNKNOWN"
+                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
+                    return None
+                return {
+                    "reason": str(state["last_reason"]),
+                    "last_error": str(state["last_error"]),
+                }
+
+        with _probe_cache_lock:
+            _probe_cache[self._probe_cache_key] = {
+                "failure_count": 0,
+                "last_error": None,
+                "last_reason": "UNKNOWN",
+            }
+        return None

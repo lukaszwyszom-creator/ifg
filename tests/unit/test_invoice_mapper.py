@@ -6,6 +6,8 @@ from decimal import Decimal
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
+
 from app.domain.enums import InvoiceStatus, InvoiceType
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.persistence.mappers.invoice_mapper import InvoiceMapper
@@ -31,7 +33,7 @@ def _make_invoice_orm():
     orm = MagicMock()
     orm.id = uuid4()
     orm.number_local = "FV/1/04/2026"
-    orm.status = "draft"
+    orm.status = "ready_for_submission"
     orm.issue_date = date(2026, 4, 5)
     orm.sale_date = date(2026, 4, 5)
     orm.currency = "PLN"
@@ -74,7 +76,7 @@ class TestToDomain:
 
         assert domain.id == orm.id
         assert domain.number_local == "FV/1/04/2026"
-        assert domain.status == InvoiceStatus.DRAFT
+        assert domain.status == InvoiceStatus.READY_FOR_SUBMISSION
         assert domain.issue_date == date(2026, 4, 5)
         assert domain.currency == "PLN"
 
@@ -96,13 +98,21 @@ class TestToDomain:
         assert item.quantity == Decimal("5")
         assert item.vat_rate == Decimal("23")
 
+    def test_maps_legacy_draft_to_ready_for_submission(self):
+        orm = _make_invoice_orm()
+        orm.status = "draft"
+
+        domain = InvoiceMapper.to_domain(orm)
+
+        assert domain.status == InvoiceStatus.READY_FOR_SUBMISSION
+
 
 class TestToOrm:
     def test_creates_orm(self, sample_invoice: Invoice):
         orm = InvoiceMapper.to_orm(sample_invoice)
 
         assert orm.id == sample_invoice.id
-        assert orm.status == "draft"
+        assert orm.status == "ready_for_submission"
         assert orm.currency == "PLN"
         assert len(orm.items) == len(sample_invoice.items)
 
@@ -112,6 +122,14 @@ class TestToOrm:
         assert orm.totals_json["total_net"] == str(sample_invoice.total_net)
         assert orm.totals_json["total_vat"] == str(sample_invoice.total_vat)
         assert orm.totals_json["total_gross"] == str(sample_invoice.total_gross)
+
+    def test_write_path_rejects_non_enum_status(self, sample_invoice: Invoice):
+        sample_invoice.status = "draft"  # type: ignore[assignment]
+
+        from app.domain.exceptions import InvalidInvoiceError
+
+        with pytest.raises(InvalidInvoiceError, match="do zapisu"):
+            InvoiceMapper.to_orm(sample_invoice)
 
 
 class TestUpdateOrm:

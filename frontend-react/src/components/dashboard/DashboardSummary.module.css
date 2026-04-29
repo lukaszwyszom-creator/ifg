@@ -18,21 +18,22 @@
 /* Wrapper blokujący «wysokość 0» w niektórych layoutach flex */
 .chartInner {
   width: 100%;
-  height: 250px;
+  height: 175px;
 }
 
 .chartTitle {
-  font-size: 0.82rem;
+  font-size: 1.07rem;
   font-weight: 600;
-  color: var(--color-text-2);
+  color: #fff;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 0;
+  line-height: 1;
 }
 
 .chartHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
@@ -41,6 +42,12 @@
 .chartCorner {
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.chartTopLine {
+  display: inline-flex;
   align-items: flex-end;
   gap: 4px;
 }
@@ -63,12 +70,100 @@
 }
 
 .chartEmpty {
-  height: 250px;
+  height: 175px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-text-3);
   font-size: 0.85rem;
+}
+
+/* ---- labels okresu (zgodne kolorystycznie z Topbar) ---- */
+.periodPrefix {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: #edb439;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.periodAccent {
+  font-size: 1.4em;
+  font-weight: 700;
+  color: #962806;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* ---- pasek podsumowania ---- */
+.summaryWrap {
+  margin-top: 10px;
+}
+
+.summaryHeading {
+  color: #962806;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.summaryBar {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 0.98rem;
+  line-height: 1.3;
+  color: var(--color-text-3);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.summaryPeriodPrefix {
+  color: #962806;
+  font-weight: 600;
+}
+
+.summarySale {
+  color: #edb439;
+  font-weight: 700;
+}
+
+.summaryPurchase {
+  color: #60a5fa;
+  font-weight: 700;
+}
+
+.summaryValue {
+  color: #fff;
+  font-weight: 400;
+}
+
+.summaryNetLabel {
+  color: #fff;
+  font-weight: 700;
+}
+
+.summaryValueBold {
+  font-weight: 700;
+}
+
+.summaryNetValueSale {
+  color: #edb439;
+}
+
+.summaryNetValuePurchase {
+  color: #60a5fa;
+}
+
+.summarySecondaryLabel {
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8em;
+}
+
+.summarySecondaryValue {
+  font-size: 0.8em;
 }
 
 .tooltip {
@@ -97,8 +192,20 @@
 
 .tooltipSubInline {
   color: var(--color-text-3);
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   font-weight: 400;
+}
+
+.tooltipDeltaSale {
+  color: #3bd424;
+}
+
+.tooltipDeltaPurchase {
+  color: #f03535;
+}
+
+.tooltipDeltaNeutral {
+  color: #b5b5b5;
 }
 
 .chartLegend {
@@ -138,42 +245,4 @@
   color: var(--color-text-3);
   margin-top: 6px;
   text-align: right;
-}
-
-/* ---- karty metryk ---- */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 14px;
-  margin-bottom: 24px;
-}
-
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-top: 3px solid var(--color-border);
-  transition: border-color 0.15s;
-}
-.card.success { border-top-color: var(--color-success); }
-.card.error   { border-top-color: var(--color-error);   }
-.card.info    { border-top-color: var(--color-info);     }
-.card.warning { border-top-color: var(--color-warning);  }
-.card.neutral { border-top-color: var(--color-gold);     }
-
-.value {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--color-text);
-  line-height: 1;
-}
-.label {
-  font-size: 0.78rem;
-  color: var(--color-text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }

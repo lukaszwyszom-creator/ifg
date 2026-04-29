@@ -2,7 +2,6 @@ import styles from './StatusBadge.module.css';
 
 const STATUS_MAP = {
   // Invoice statuses
-  draft:                 { label: 'Szkic',          cls: 'neutral' },
   ready_for_submission:  { label: 'Gotowa',          cls: 'info'    },
   sending:               { label: 'Wysyłanie',       cls: 'warning' },
   accepted:              { label: 'Zaakceptowana',   cls: 'success' },

@@ -1,0 +1,5 @@
+ total | with_number | without_number 
+-------+-------------+----------------
+    37 |           0 |             37
+(1 row)
+

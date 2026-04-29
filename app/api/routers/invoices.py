@@ -11,7 +11,12 @@ from app.api.deps import get_current_user, get_idempotency_service, get_invoice_
 from app.core.exceptions import ConflictError
 from app.core.security import AuthenticatedUser
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
-from app.schemas.invoice import InvoiceCreateRequest, InvoiceListResponse, InvoiceResponse
+from app.schemas.invoice import (
+    InvoiceCreateRequest,
+    InvoiceListResponse,
+    InvoiceResponse,
+    InvoiceUpdateRequest,
+)
 from app.services.idempotency_service import DuplicateRequestError, IdempotencyService
 from app.services.invoice_service import InvoiceService
 from app.services.pdf_service import render_invoice_html, render_invoice_pdf
@@ -101,6 +106,17 @@ def mark_invoice_as_ready(
     actor: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> InvoiceResponse:
     invoice = invoice_service.mark_as_ready(invoice_id, actor)
+    return InvoiceResponse.from_domain(invoice)
+
+
+@router.put("/{invoice_id}", response_model=InvoiceResponse)
+def update_invoice(
+    invoice_id: UUID,
+    body: InvoiceUpdateRequest,
+    invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
+    actor: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
+) -> InvoiceResponse:
+    invoice = invoice_service.update_invoice(invoice_id, body.model_dump(), actor)
     return InvoiceResponse.from_domain(invoice)
 
 

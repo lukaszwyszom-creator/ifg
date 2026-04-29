@@ -45,6 +45,15 @@ def _make_sending_invoice() -> Invoice:
     )
 
 
+def _make_session_context():
+    return MagicMock(
+        access_token="tok",
+        session_reference="sess-ref",
+        symmetric_key=b"k" * 32,
+        initialization_vector=b"i" * 16,
+    )
+
+
 class TestPollHandler:
     def test_missing_transmission_skips(self, handler: PollKSeFStatusJobHandler):
         handler._transmission_repo.lock_for_update.return_value = None
@@ -55,7 +64,7 @@ class TestPollHandler:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -65,6 +74,7 @@ class TestPollHandler:
         status_result.processing_code = 200
         status_result.processing_description = "OK"
         status_result.ksef_reference_number = "KSEF-ABC"
+        status_result.upo_url = "https://upo.test/1"
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         handler.handle(_make_payload())
@@ -78,7 +88,7 @@ class TestPollHandler:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -97,9 +107,11 @@ class TestPollHandler:
 
     def test_other_code_schedules_retry(self, handler: PollKSeFStatusJobHandler):
         transmission = MagicMock()
+        transmission.invoice_id = uuid4()
         transmission.status = TransmissionStatus.SUBMITTED
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         status_result = MagicMock()
         status_result.processing_code = 100
@@ -112,9 +124,11 @@ class TestPollHandler:
 
     def test_ksef_error_schedules_retry(self, handler: PollKSeFStatusJobHandler):
         transmission = MagicMock()
+        transmission.invoice_id = uuid4()
         transmission.status = TransmissionStatus.SUBMITTED
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.get_invoice_status.side_effect = KSeFClientError("Network error")
 
         handler.handle(_make_payload())
@@ -127,8 +141,10 @@ class TestPollWaitingStatus:
 
     def test_other_code_sets_waiting_status(self, handler: PollKSeFStatusJobHandler):
         transmission = MagicMock()
+        transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         status_result = MagicMock()
         status_result.processing_code = 100  # KSeF przetwarza
@@ -141,8 +157,10 @@ class TestPollWaitingStatus:
 
     def test_ksef_error_sets_waiting_status(self, handler: PollKSeFStatusJobHandler):
         transmission = MagicMock()
+        transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._ksef_client.get_invoice_status.side_effect = KSeFClientError("timeout")
 
         handler.handle(_make_payload())
@@ -154,12 +172,14 @@ class TestPollWaitingStatus:
         transmission = MagicMock()
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
         handler._invoice_repo.lock_for_update.return_value = _make_sending_invoice()
 
         status_result = MagicMock()
         status_result.processing_code = 200
         status_result.ksef_reference_number = "KSEF-XYZ"
+        status_result.upo_url = "https://upo.test/2"
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         handler.handle(_make_payload())
@@ -176,7 +196,8 @@ class TestKSeFReferenceNumberCommit08:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -185,6 +206,7 @@ class TestKSeFReferenceNumberCommit08:
         status_result = MagicMock()
         status_result.processing_code = 200
         status_result.ksef_reference_number = "KSeF/001/2026/04"
+        status_result.upo_url = "https://upo.test/3"
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         handler.handle(_make_payload())
@@ -198,7 +220,8 @@ class TestKSeFReferenceNumberCommit08:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -207,6 +230,7 @@ class TestKSeFReferenceNumberCommit08:
         status_result = MagicMock()
         status_result.processing_code = 200
         status_result.ksef_reference_number = None
+        status_result.upo_url = None
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         handler.handle(_make_payload())  # nie rzuca
@@ -246,7 +270,8 @@ class TestUPOCommit09:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -255,6 +280,7 @@ class TestUPOCommit09:
         status_result = MagicMock()
         status_result.processing_code = 200
         status_result.ksef_reference_number = "KSeF/001/2026/04"
+        status_result.upo_url = "https://upo.test/4"
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         return transmission
@@ -266,7 +292,7 @@ class TestUPOCommit09:
 
         handler.handle(_make_payload())
 
-        handler._ksef_client.get_upo.assert_called_once_with("tok", "KSeF/001/2026/04")
+        handler._ksef_client.get_upo.assert_called_once_with("https://upo.test/4")
         assert transmission.upo_xml == b"<UPO>tresc</UPO>"
         assert transmission.upo_status == "fetched"
 
@@ -299,7 +325,8 @@ class TestUPOCommit09:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice
@@ -308,6 +335,7 @@ class TestUPOCommit09:
         status_result = MagicMock()
         status_result.processing_code = 200
         status_result.ksef_reference_number = None
+        status_result.upo_url = None
         handler._ksef_client.get_invoice_status.return_value = status_result
 
         handler.handle(_make_payload())
@@ -321,7 +349,8 @@ class TestUPOCommit09:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
-        handler._ksef_session_service.get_session_token.return_value = "tok"
+        handler._invoice_repo.get_by_id.return_value = _make_sending_invoice()
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
 
         invoice = _make_sending_invoice()
         handler._invoice_repo.lock_for_update.return_value = invoice

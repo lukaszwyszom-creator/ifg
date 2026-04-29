@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 # Klasy statusów do etykiet PL
 _STATUS_LABELS: dict[str, str] = {
-    "draft": "Szkic",
     "ready_for_submission": "Gotowa do wysyłki",
     "sending": "Wysyłanie",
     "accepted": "Zatwierdzona",
@@ -94,7 +93,6 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
     background: #e0e0e0;
     color: #333;
   }}
-  .badge-draft {{ background: #e9ecef; color: #333; }}
   .badge-accepted {{ background: #d4edda; color: #155724; }}
   .badge-rejected {{ background: #f8d7da; color: #721c24; }}
   .badge-sending {{ background: #fff3cd; color: #856404; }}

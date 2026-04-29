@@ -27,3 +27,48 @@
 .sub    { font-size: 0.85rem; color: var(--color-text-2); }
 
 .form { display: flex; flex-direction: column; gap: 14px; }
+
+.passwordFieldWrap {
+  position: relative;
+}
+
+.passwordInput {
+  padding-right: 42px;
+}
+
+.passwordEyeButton {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.passwordEyeButton:hover {
+  color: var(--color-gold);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.passwordEyeButton:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 1px;
+}
+
+.passwordEyeButton svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

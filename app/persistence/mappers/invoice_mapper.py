@@ -4,6 +4,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from app.domain.enums import CorrectionType, InvoiceStatus, InvoiceType
+from app.domain.exceptions import InvalidInvoiceError
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.persistence.models.contractor import ContractorORM
 from app.persistence.models.contractor_override import ContractorOverrideORM
@@ -22,17 +23,54 @@ _OVERRIDABLE_FIELDS = (
     "postal_code", "city", "voivodeship", "county", "commune",
 )
 
+_READ_STATUS_ALIASES = {
+    "draft": InvoiceStatus.READY_FOR_SUBMISSION,
+}
+
+_ALLOWED_WRITE_STATUSES = frozenset(
+    {
+        InvoiceStatus.READY_FOR_SUBMISSION,
+        InvoiceStatus.SENDING,
+        InvoiceStatus.ACCEPTED,
+        InvoiceStatus.REJECTED,
+    }
+)
+
 
 class InvoiceMapper:
+
+    @staticmethod
+    def _status_from_db(raw_status: str | None) -> InvoiceStatus:
+        normalized = (raw_status or "").strip().lower()
+        if normalized in _READ_STATUS_ALIASES:
+            return _READ_STATUS_ALIASES[normalized]
+        try:
+            return InvoiceStatus(normalized)
+        except ValueError as exc:
+            raise InvalidInvoiceError(
+                "Nieobsługiwany status faktury w danych: "
+                f"'{raw_status}'. Dozwolone: ready_for_submission, sending, accepted, rejected."
+            ) from exc
+
+    @staticmethod
+    def _status_to_db(status: InvoiceStatus) -> str:
+        if not isinstance(status, InvoiceStatus) or status not in _ALLOWED_WRITE_STATUSES:
+            raise InvalidInvoiceError(
+                "Nieobsługiwany status faktury do zapisu: "
+                f"'{status}'. Dozwolone: ready_for_submission, sending, accepted, rejected."
+            )
+        return status.value
 
     @staticmethod
     def to_domain(orm: InvoiceORM) -> Invoice:
         totals = orm.totals_json or {}
         items = sorted(orm.items, key=lambda i: i.sort_order)
+        status = InvoiceMapper._status_from_db(orm.status)
+
         return Invoice(
             id=orm.id,
             number_local=orm.number_local,
-            status=InvoiceStatus(orm.status),
+            status=status,
             issue_date=orm.issue_date,
             sale_date=orm.sale_date,
             delivery_date=orm.delivery_date,
@@ -73,7 +111,7 @@ class InvoiceMapper:
         orm = InvoiceORM(
             id=invoice.id,
             number_local=invoice.number_local,
-            status=invoice.status.value,
+            status=InvoiceMapper._status_to_db(invoice.status),
             seller_snapshot_json=invoice.seller_snapshot,
             buyer_snapshot_json=invoice.buyer_snapshot,
             totals_json=InvoiceMapper._totals_to_json(invoice),
@@ -112,7 +150,7 @@ class InvoiceMapper:
     @staticmethod
     def update_orm(orm: InvoiceORM, invoice: Invoice) -> None:
         orm.number_local = invoice.number_local
-        orm.status = invoice.status.value
+        orm.status = InvoiceMapper._status_to_db(invoice.status)
         orm.seller_snapshot_json = invoice.seller_snapshot
         orm.buyer_snapshot_json = invoice.buyer_snapshot
         orm.totals_json = InvoiceMapper._totals_to_json(invoice)
