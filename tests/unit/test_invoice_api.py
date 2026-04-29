@@ -235,6 +235,19 @@ class TestMarkReady:
         assert res.status_code == 200
         assert res.json()["status"] == "ready_for_submission"
 
+    @pytest.mark.parametrize("status_name", ["sending", "accepted", "rejected"])
+    def test_mark_ready_invalid_status_returns_409(self, client, mock_invoice_service, status_name):
+        from app.domain.exceptions import InvalidStatusTransitionError
+
+        mock_invoice_service.mark_as_ready.side_effect = InvalidStatusTransitionError(
+            f"Nie można oznaczyć faktury jako gotowej dla statusu '{status_name}'."
+        )
+
+        res = client.post(f"/api/v1/invoices/{uuid4()}/mark-ready")
+
+        assert res.status_code == 409
+        assert status_name in res.json()["error"]["message"]
+
 
 # ---------------------------------------------------------------------------
 # PUT /api/v1/invoices/{id}

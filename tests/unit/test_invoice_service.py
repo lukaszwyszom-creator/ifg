@@ -274,18 +274,55 @@ class TestListInvoices:
 
 
 class TestMarkAsReady:
-    def test_invalid_transition_raises(self, service: InvoiceService, actor: AuthenticatedUser):
-        invoice = MagicMock()
-        invoice.can_transition_to.return_value = False
-        invoice.status = MagicMock()
-        invoice.status.value = "accepted"
-        service.invoice_repository.lock_for_update.return_value = invoice
-
-        with pytest.raises(InvalidStatusTransitionError):
-            service.mark_as_ready(uuid4(), actor)
-
-    def test_ready_for_submission_raises(self, service: InvoiceService, actor: AuthenticatedUser, sample_invoice: Invoice):
+    def test_ready_for_submission_without_number_assigns_number(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+    ):
         sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        sample_invoice.number_local = None
+        service.invoice_repository.lock_for_update.return_value = sample_invoice
+        service.invoice_repository.get_next_sequence_number.return_value = 1
+        service.invoice_repository.exists_by_number.return_value = False
+        service.invoice_repository.update.return_value = sample_invoice
+
+        result = service.mark_as_ready(sample_invoice.id, actor)
+
+        assert result.number_local is not None
+        service.invoice_repository.get_next_sequence_number.assert_called_once()
+        service.invoice_repository.update.assert_called_once()
+        service.audit_service.record.assert_called_once()
+
+    def test_ready_for_submission_with_number_is_idempotent(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+    ):
+        sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        sample_invoice.number_local = "FV/2026/04/001"
+        service.invoice_repository.lock_for_update.return_value = sample_invoice
+
+        result = service.mark_as_ready(sample_invoice.id, actor)
+
+        assert result.number_local == "FV/2026/04/001"
+        service.invoice_repository.get_next_sequence_number.assert_not_called()
+        service.invoice_repository.update.assert_not_called()
+        service.audit_service.record.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "status",
+        [InvoiceStatus.SENDING, InvoiceStatus.ACCEPTED, InvoiceStatus.REJECTED],
+    )
+    def test_non_ready_statuses_raise_invalid_transition(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+        status: InvoiceStatus,
+    ):
+        sample_invoice.status = status
         service.invoice_repository.lock_for_update.return_value = sample_invoice
 
         with pytest.raises(InvalidStatusTransitionError):

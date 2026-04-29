@@ -74,14 +74,20 @@ class InvoiceRepository:
         if issue_date_to is not None:
             base_stmt = base_stmt.where(InvoiceORM.issue_date <= issue_date_to)
         if number_filter is not None:
-            pattern = f"%{number_filter}%"
-            base_stmt = base_stmt.where(
-                or_(
-                    InvoiceORM.number_local.ilike(pattern),
-                    cast(InvoiceORM.buyer_snapshot_json, String).ilike(pattern),
-                    cast(InvoiceORM.seller_snapshot_json, String).ilike(pattern),
+            normalized_filter = number_filter.strip()
+            if normalized_filter:
+                pattern = f"%{normalized_filter}%"
+                base_stmt = base_stmt.where(
+                    or_(
+                        InvoiceORM.number_local.ilike(pattern),
+                        InvoiceORM.buyer_snapshot_json["nip"].astext.ilike(pattern),
+                        InvoiceORM.buyer_snapshot_json["name"].astext.ilike(pattern),
+                        InvoiceORM.seller_snapshot_json["nip"].astext.ilike(pattern),
+                        InvoiceORM.seller_snapshot_json["name"].astext.ilike(pattern),
+                        cast(InvoiceORM.buyer_snapshot_json, String).ilike(pattern),
+                        cast(InvoiceORM.seller_snapshot_json, String).ilike(pattern),
+                    )
                 )
-            )
         if direction is not None:
             base_stmt = base_stmt.where(InvoiceORM.direction == direction)
 

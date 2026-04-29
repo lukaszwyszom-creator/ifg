@@ -256,6 +256,9 @@ class InvoiceService:
             direction=direction,
         )
 
+    # Po migracji usuwającej status draft mark-ready jest świadomie idempotentne:
+    # dla READY_FOR_SUBMISSION tylko uzupełnia number_local (jeśli brak),
+    # a dla statusów końcowych/analitycznych pozostaje blokowane (409).
     def mark_as_ready(
         self, invoice_id: UUID, actor: AuthenticatedUser
     ) -> Invoice:
@@ -265,11 +268,19 @@ class InvoiceService:
                 if invoice is None:
                     raise NotFoundError(f"Faktura {invoice_id} nie istnieje.")
 
-                if not invoice.can_transition_to(InvoiceStatus.READY_FOR_SUBMISSION):
+                if invoice.status != InvoiceStatus.READY_FOR_SUBMISSION:
                     raise InvalidStatusTransitionError(
-                        f"Nie można zmienić statusu z "
-                        f"'{invoice.status.value}' na 'ready_for_submission'."
+                        "Nie można oznaczyć faktury jako gotowej dla statusu "
+                        f"'{invoice.status.value}'."
                     )
+
+                if invoice.number_local:
+                    logger.info(
+                        "mark-ready idempotent hit: invoice_id=%s number=%s",
+                        invoice_id,
+                        invoice.number_local,
+                    )
+                    return invoice
 
                 year = invoice.issue_date.year
                 month = invoice.issue_date.month
@@ -306,7 +317,7 @@ class InvoiceService:
                 logger.info(
                     "Faktura oznaczona jako gotowa: invoice_id=%s number=%s",
                     invoice_id,
-                    number,
+                    updated.number_local,
                 )
 
                 return updated

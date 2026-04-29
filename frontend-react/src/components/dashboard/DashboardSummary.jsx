@@ -168,11 +168,14 @@ export default function DashboardSummary({ filters }) {
   // Ręczny zakres dat (nadpisuje miesiąc)
   const dateFrom        = filters?.issue_date_from || '';
   const dateTo          = filters?.issue_date_to   || '';
+  const contractor = (filters?.contractor || '').trim();
+  const contractorFilter = contractor.length >= 3 ? contractor : '';
   const dateRangeActive = !!(dateFrom || dateTo);
+  const useImplicitMonthRange = !dateRangeActive && !contractorFilter;
 
   // Efektywny zakres dat do fetchowania
-  const effectFrom = dateRangeActive ? dateFrom : monthFrom;
-  const effectTo   = dateRangeActive ? dateTo   : monthTo;
+  const effectFrom = useImplicitMonthRange ? monthFrom : dateFrom;
+  const effectTo   = useImplicitMonthRange ? monthTo   : dateTo;
 
   // Etykieta okresu do prawego górnego rogu
   const periodLabel = `${toSlashDate(effectFrom)} - ${toSlashDate(effectTo)}`;
@@ -185,9 +188,6 @@ export default function DashboardSummary({ filters }) {
 
   // Dane wykresu — efektywny zakres + aktywne filtry
   const status     = filters?.status     || '';
-  const contractor = (filters?.contractor || '').trim();
-  const contractorFilter = contractor.length >= 3 ? contractor : '';
-
   useEffect(() => {
     let cancelled = false;
     setChart(prev => ({ ...prev, loading: true }));

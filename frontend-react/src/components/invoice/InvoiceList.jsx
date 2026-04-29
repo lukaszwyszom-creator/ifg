@@ -28,10 +28,12 @@ export default function InvoiceList({
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const contractorFilter = String(filters.contractor || '').trim();
+
       // Wyznacz daty z filtra miesiąca (jeśli nie podano własnych dat)
       let dateFrom = filters.issue_date_from || '';
       let dateTo   = filters.issue_date_to   || '';
-      if (filters.month && !dateFrom && !dateTo) {
+      if (filters.month && !dateFrom && !dateTo && contractorFilter.length < 3) {
         const [y, m] = filters.month.split('-').map(Number);
         const last = new Date(y, m, 0).getDate();
         dateFrom = `${filters.month}-01`;
@@ -44,7 +46,7 @@ export default function InvoiceList({
         ...(filters.status  && { status: filters.status }),
         ...(dateFrom        && { issue_date_from: dateFrom }),
         ...(dateTo          && { issue_date_to: dateTo }),
-        ...(filters.contractor && { number_filter: filters.contractor }),
+        ...(contractorFilter.length >= 3 && { number_filter: contractorFilter }),
       };
       const res = await invoicesApi.list(params);
       setData(res);

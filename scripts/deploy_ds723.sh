@@ -63,9 +63,6 @@ set -euo pipefail
 # Docker na Synology nie jest w domyślnym PATH
 export PATH="/var/packages/ContainerManager/target/usr/bin:$PATH"
 
-# Upewnij się, że docker socket jest dostępny bez sudo
-echo 'Ikonasynology1971!' | sudo -S chmod 666 /var/run/docker.sock
-
 echo "→ Ładuję obraz frontendu"
 docker load < /tmp/ifg-frontend.tar.gz
 rm -f /tmp/ifg-frontend.tar.gz
