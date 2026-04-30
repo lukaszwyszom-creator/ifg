@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { paymentsApi } from '../../api/payments';
 import DashboardSummary from '../../components/dashboard/DashboardSummary';
@@ -9,50 +9,58 @@ import Filters from '../../components/common/Filters';
 import styles from './AdvancedDashboard.module.css';
 
 const TABS = [
-  { id: 'invoices',       label: 'Faktury sprzedaży' },
-  { id: 'purchase',       label: 'Faktury zakupowe' },
-  { id: 'vat',            label: 'Zestawienie VAT'  },
-  { id: 'transmissions',  label: 'Transmisje KSeF'   },
+  { id: 'invoices',      label: 'Faktury sprzedaży' },
+  { id: 'purchase',      label: 'Faktury zakupowe'  },
+  { id: 'settlements',   label: 'Rozrachunki'        },
+  { id: 'vat',           label: 'Zestawienie VAT'   },
+  { id: 'transmissions', label: 'Transmisje KSeF'   },
 ];
 
 export default function AdvancedDashboard() {
   const [tab, setTab] = useState('invoices');
-  const [showSettlements, setShowSettlements] = useState(false);
   const [settlementTab, setSettlementTab] = useState('debtors');
   const [settlements, setSettlements] = useState({ debtors: [], creditors: [] });
   const [settlementsLoading, setSettlementsLoading] = useState(false);
   const [settlementsError, setSettlementsError] = useState('');
+  const [settlementsLoaded, setSettlementsLoaded] = useState(false);
   const filters = useAppStore((s) => s.filters);
   const setFilters = useAppStore((s) => s.setFilters);
   const resetFilters = useAppStore((s) => s.resetFilters);
 
-  const openSettlements = async () => {
-    setShowSettlements(true);
-    setSettlementTab('debtors');
+  useEffect(() => {
+    if (tab !== 'settlements') return;
+    if (settlementsLoaded) return;
+    let cancelled = false;
     setSettlementsLoading(true);
     setSettlementsError('');
-
-    try {
-      const data = await paymentsApi.getSettlements({ side: 'all' });
-      setSettlements({
-        debtors: Array.isArray(data?.debtors) ? data.debtors : [],
-        creditors: Array.isArray(data?.creditors) ? data.creditors : [],
+    paymentsApi
+      .getSettlements({ side: 'all' })
+      .then((data) => {
+        if (cancelled) return;
+        setSettlements({
+          debtors: Array.isArray(data?.debtors) ? data.debtors : [],
+          creditors: Array.isArray(data?.creditors) ? data.creditors : [],
+        });
+        setSettlementsLoaded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[Rozrachunki] Błąd pobierania danych:', err);
+        setSettlementsError('Nie udało się pobrać rozrachunków. Sprawdź połączenie z serwerem.');
+        setSettlements({ debtors: [], creditors: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setSettlementsLoading(false);
       });
-    } catch {
-      setSettlementsError('Nie udało się pobrać rozrachunków.');
-      setSettlements({ debtors: [], creditors: [] });
-    } finally {
-      setSettlementsLoading(false);
-    }
-  };
-
-  const closeSettlements = () => {
-    setShowSettlements(false);
-    setSettlementsError('');
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, settlementsLoaded]);
 
   const fmtMoney = (value) => `${Number(value ?? 0).toFixed(2)} PLN`;
-  const rows = settlementTab === 'debtors' ? settlements.debtors : settlements.creditors;
+  const settlementRows = settlementTab === 'debtors' ? settlements.debtors : settlements.creditors;
+  const sumDebt = settlements.debtors.reduce((acc, r) => acc + Number(r.remaining_amount ?? 0), 0);
+  const sumCredit = settlements.creditors.reduce((acc, r) => acc + Number(r.remaining_amount ?? 0), 0);
 
   return (
     <div className={styles.page}>
@@ -68,21 +76,16 @@ export default function AdvancedDashboard() {
       />
 
       {/* Tabsy */}
-      <div className={styles.tabsRow}>
-        <div className={styles.tabs}>
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`${styles.tab} ${tab === t.id ? styles.tabActive : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <button className="btn btn-secondary btn-sm" onClick={openSettlements}>
-          Rozrachunki
-        </button>
+      <div className={styles.tabs}>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`${styles.tab} ${tab === t.id ? styles.tabActive : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* Zawartość */}
@@ -95,40 +98,37 @@ export default function AdvancedDashboard() {
           <InvoiceList filters={filters} direction="purchase" showKsefStatus={false} />
         )}
 
-        {tab === 'vat' && (
-          <VATSummary filters={filters} />
-        )}
-
-        {tab === 'transmissions' && (
-          <TransmissionTable />
-        )}
-      </div>
-
-      {showSettlements && (
-        <div className={styles.overlay} onClick={closeSettlements}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Rozrachunki</h3>
-              <button className="btn btn-ghost btn-sm" onClick={closeSettlements}>Zamknij</button>
-            </div>
-
-            <div className={styles.modalTabs}>
+        {tab === 'settlements' && (
+          <div className={styles.settlementsPanel}>
+            <div className={styles.settlementTabs}>
               <button
-                className={`${styles.modalTab} ${settlementTab === 'debtors' ? styles.modalTabActive : ''}`}
+                className={`${styles.settlementTab} ${settlementTab === 'debtors' ? styles.settlementTabActive : ''}`}
                 onClick={() => setSettlementTab('debtors')}
               >
                 Dłużnicy
               </button>
               <button
-                className={`${styles.modalTab} ${settlementTab === 'creditors' ? styles.modalTabActive : ''}`}
+                className={`${styles.settlementTab} ${settlementTab === 'creditors' ? styles.settlementTabActive : ''}`}
                 onClick={() => setSettlementTab('creditors')}
               >
                 Wierzyciele
               </button>
             </div>
 
-            {settlementsLoading && <div className={styles.modalState}><span className="spinner" /></div>}
-            {!settlementsLoading && settlementsError && <div className="alert alert-error">{settlementsError}</div>}
+            {settlementsLoading && (
+              <div className={styles.settlementState}><span className="spinner" /></div>
+            )}
+
+            {!settlementsLoading && settlementsError && (
+              <div className="alert alert-error">{settlementsError}</div>
+            )}
+
+            {!settlementsLoading && !settlementsError && settlementsLoaded && (
+              <div className={styles.settlementsSummary}>
+                <span>Dłużnicy: <strong>{fmtMoney(sumDebt)}</strong></span>
+                <span>Wierzyciele: <strong>{fmtMoney(sumCredit)}</strong></span>
+              </div>
+            )}
 
             {!settlementsLoading && !settlementsError && (
               <div className={styles.tableWrap}>
@@ -145,29 +145,39 @@ export default function AdvancedDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {settlementRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className={styles.emptyRow}>Brak danych</td>
+                        <td colSpan={7} className={styles.emptyRow}>Brak rozrachunków</td>
                       </tr>
+                    ) : (
+                      settlementRows.map((item) => (
+                        <tr key={item.invoice_id}>
+                          <td>{item.contractor_name || '—'}</td>
+                          <td>{item.number_local || '—'}</td>
+                          <td>{item.issue_date || '—'}</td>
+                          <td>{fmtMoney(item.gross_total)}</td>
+                          <td>{fmtMoney(item.paid_amount)}</td>
+                          <td>{fmtMoney(item.remaining_amount)}</td>
+                          <td>{item.payment_status || '—'}</td>
+                        </tr>
+                      ))
                     )}
-                    {rows.map((item) => (
-                      <tr key={item.invoice_id}>
-                        <td>{item.contractor_name || '—'}</td>
-                        <td>{item.number_local || '—'}</td>
-                        <td>{item.issue_date || '—'}</td>
-                        <td>{fmtMoney(item.gross_total)}</td>
-                        <td>{fmtMoney(item.paid_amount)}</td>
-                        <td>{fmtMoney(item.remaining_amount)}</td>
-                        <td>{item.payment_status || '—'}</td>
-                      </tr>
-                    ))}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+
+        {tab === 'vat' && (
+          <VATSummary filters={filters} />
+        )}
+
+        {tab === 'transmissions' && (
+          <TransmissionTable />
+        )}
+      </div>
+
     </div>
   );
 }
