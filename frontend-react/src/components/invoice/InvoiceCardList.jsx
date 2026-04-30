@@ -316,7 +316,7 @@ export default function InvoiceCardList({
         <div className={`${styles.headerCell} ${styles.invoiceCellPdf}`}>PDF</div>
       </div>
 
-      <div className={styles.scrollArea}>
+      <div className={styles.scrollArea} data-invoice-scroll-area>
         {preparedItems.map((item) => {
           const invoice = item.invoice;
           const grossAmount = getGrossAmount(invoice);

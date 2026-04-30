@@ -4,20 +4,13 @@ import {
   XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { invoicesApi } from '../../api/invoices';
 import { buildPlnSummary } from './dashboardAggregation';
+import { buildInvoiceParams, fetchAllInvoices, resolveEffectiveFilters } from './dashboardQuery';
 import styles from './DashboardSummary.module.css';
 
 const fmtPln = (n) => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN`;
 
 // ---- helpers ----
-function currentMonthPrefix() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
-}
-
 function toSlashDate(isoDate) {
   if (!isoDate || typeof isoDate !== 'string' || isoDate.length < 10) return '...';
   const y = isoDate.slice(0, 4);
@@ -156,26 +149,8 @@ export default function DashboardSummary({ filters }) {
   });
 
   // Wyznacz prefix miesiąca z filtrów lub bieżący miesiąc
-  // Zakres dat z pola miesiąca (fallback na bieżący miesiąc)
-  const prefix    = filters?.month || currentMonthPrefix();
-  const monthFrom = `${prefix}-01`;
-  const monthTo   = (() => {
-    const [y, m] = prefix.split('-').map(Number);
-    const last = new Date(y, m, 0).getDate();
-    return `${prefix}-${String(last).padStart(2, '0')}`;
-  })();
-
-  // Ręczny zakres dat (nadpisuje miesiąc)
-  const dateFrom        = filters?.issue_date_from || '';
-  const dateTo          = filters?.issue_date_to   || '';
-  const contractor = (filters?.contractor || '').trim();
-  const contractorFilter = contractor.length >= 3 ? contractor : '';
-  const dateRangeActive = !!(dateFrom || dateTo);
-  const useImplicitMonthRange = !dateRangeActive && !contractorFilter;
-
-  // Efektywny zakres dat do fetchowania
-  const effectFrom = useImplicitMonthRange ? monthFrom : dateFrom;
-  const effectTo   = useImplicitMonthRange ? monthTo   : dateTo;
+  // Zakres/filtrowanie zawsze liczone wspólną logiką (spójnie z VATSummary)
+  const { from: effectFrom, to: effectTo, status, contractorFilter } = resolveEffectiveFilters(filters);
 
   // Etykieta okresu do prawego górnego rogu
   const periodLabel = `${toSlashDate(effectFrom)} - ${toSlashDate(effectTo)}`;
@@ -187,27 +162,19 @@ export default function DashboardSummary({ filters }) {
   ].filter(Boolean).join(', ');
 
   // Dane wykresu — efektywny zakres + aktywne filtry
-  const status     = filters?.status     || '';
   useEffect(() => {
     let cancelled = false;
     setChart(prev => ({ ...prev, loading: true }));
 
-    const baseParams = {
-      size: 100, page: 1,
-      issue_date_from: effectFrom,
-      issue_date_to:   effectTo,
-      ...(status     && { status }),
-      ...(contractorFilter && { number_filter: contractorFilter }),
-    };
+    const saleParams = buildInvoiceParams(filters, 'sale');
+    const purchaseParams = buildInvoiceParams(filters, 'purchase');
 
     Promise.all([
-      invoicesApi.list({ ...baseParams, direction: 'sale'     }),
-      invoicesApi.list({ ...baseParams, direction: 'purchase' }),
+      fetchAllInvoices(saleParams),
+      fetchAllInvoices(purchaseParams),
     ])
-      .then(([saleRes, purchaseRes]) => {
+      .then(([sales, purchases]) => {
         if (cancelled) return;
-        const sales     = saleRes.items     ?? [];
-        const purchases = purchaseRes.items ?? [];
 
         // Jeden setState = jeden render, brak race-condition
         setChart({ loading: false, saleInvoices: sales, purchaseInvoices: purchases });
@@ -217,7 +184,7 @@ export default function DashboardSummary({ filters }) {
           setChart({ loading: false, saleInvoices: [], purchaseInvoices: [] });
       });
     return () => { cancelled = true; };
-  }, [effectFrom, effectTo, status, contractorFilter]);
+  }, [effectFrom, effectTo, status, contractorFilter, filters]);
 
   const combinedData = useMemo(() => {
     const saleMap     = buildDailyMap(chart.saleInvoices);

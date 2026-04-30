@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { ksefApi } from '../../api/ksef';
 import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
@@ -29,18 +29,6 @@ const UI_CONFIG = {
     actionLabel: 'Spróbuj ponownie',
   },
 };
-
-function disconnectedPayload(reason = 'NO_SESSION', lastError = null) {
-  return {
-    ui_status: 'DISCONNECTED',
-    details: {
-      reason,
-      has_session: false,
-      session_expires_at: null,
-      last_error: lastError,
-    },
-  };
-}
 
 function getFriendlyReason(reason) {
   switch (reason) {
@@ -76,9 +64,9 @@ export default function KSeFConnectionTile() {
   const status = useAppStore((s) => s.ksefConnection);
   const setKsefConnection = useAppStore((s) => s.setKsefConnection);
 
-  const applyStatus = (nextStatus) => {
+  const applyStatus = useCallback((nextStatus) => {
     setKsefConnection(nextStatus);
-  };
+  }, [setKsefConnection]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,7 +142,7 @@ export default function KSeFConnectionTile() {
       window.removeEventListener(REFRESH_EVENT, handleRefreshEvent);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [sellerNip, setSellerNip]);
+  }, [sellerNip, setSellerNip, applyStatus]);
 
   const handleClick = async () => {
     if (status.ui_status === 'CONNECTING') {

@@ -17,6 +17,11 @@ const backendHealthUrl = 'http://127.0.0.1:8000/health';
 let frontendStartPromise = null;
 let backendStartPromise = null;
 
+// Cache statusu gotowości — unika ponownych health checków przy każdym żądaniu
+let readyCache = null;
+let readyCacheAt = 0;
+const READY_CACHE_TTL_MS = 5000;
+
 const proxy = httpProxy.createProxyServer({
   target: frontendUrl,
   ws: true,
@@ -124,11 +129,21 @@ async function ensureBackend() {
 }
 
 async function ensureServices() {
+  const now = Date.now();
+  if (readyCache && now - readyCacheAt < READY_CACHE_TTL_MS) {
+    return readyCache;
+  }
+
   const [frontendReady, backendReady] = await Promise.all([
     ensureFrontend(),
     ensureBackend(),
   ]);
-  return frontendReady && backendReady;
+  const result = frontendReady && backendReady;
+  if (result) {
+    readyCache = result;
+    readyCacheAt = now;
+  }
+  return result;
 }
 
 function renderBootPage(requestPath) {

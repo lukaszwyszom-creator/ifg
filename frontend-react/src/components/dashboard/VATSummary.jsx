@@ -1,15 +1,9 @@
 import { useState, useEffect } from 'react';
-import { invoicesApi } from '../../api/invoices';
+import { buildPlnSummary } from './dashboardAggregation';
+import { buildInvoiceParams, fetchAllInvoices, resolveEffectiveFilters } from './dashboardQuery';
 import styles from './VATSummary.module.css';
 
 const VAT_RATES = ['23', '8', '5', '0'];
-
-function currentMonthPrefix() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
-}
 
 function monthRange(prefix) {
   const [y, m] = String(prefix || currentMonthPrefix()).split('-').map(Number);
@@ -46,6 +40,19 @@ function toNum(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function toNumericRate(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+  const normalized = text.replace('%', '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function signedAmount(value) {
   const n = Number(value || 0);
   const abs = Math.abs(n).toFixed(2);
@@ -55,7 +62,8 @@ function signedAmount(value) {
 }
 
 function resolveRate(item) {
-  const rate = toNum(item?.vat_rate);
+  const rate = toNumericRate(item?.vat_rate);
+  if (rate === null) return 'inne';
   if (rate >= 22.5 && rate <= 23.5) return '23';
   if (rate >= 7.5 && rate <= 8.5) return '8';
   if (rate >= 4.5 && rate <= 5.5) return '5';
@@ -72,28 +80,12 @@ function createEmptyRateRow() {
   };
 }
 
-async function fetchAllInvoices(params) {
-  let page = 1;
-  const size = 100;
-  let total = 0;
-  const items = [];
-
-  do {
-    const res = await invoicesApi.list({ ...params, page, size });
-    total = Number(res.total || 0);
-    items.push(...(res.items || []));
-    page += 1;
-  } while (items.length < total);
-
-  return items;
-}
-
 export default function VATSummary({ filters }) {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ saleNet: 0, saleVat: 0, purchaseNet: 0, purchaseVat: 0 });
   const [loading, setLoading] = useState(false);
 
-  const periodPrefix = filters?.month || currentMonthPrefix();
+  const { monthPrefix: periodPrefix } = resolveEffectiveFilters(filters);
   const { from, to } = monthRange(periodPrefix);
 
   const delta = totals.saleVat - totals.purchaseVat;
@@ -107,9 +99,13 @@ export default function VATSummary({ filters }) {
     let cancelled = false;
 
     setLoading(true);
+
+    const saleParams = buildInvoiceParams(filters, 'sale');
+    const purchaseParams = buildInvoiceParams(filters, 'purchase');
+
     Promise.all([
-      fetchAllInvoices({ direction: 'sale', issue_date_from: from, issue_date_to: to }),
-      fetchAllInvoices({ direction: 'purchase', issue_date_from: from, issue_date_to: to }),
+      fetchAllInvoices(saleParams),
+      fetchAllInvoices(purchaseParams),
     ])
       .then(([saleInvoices, purchaseInvoices]) => {
         if (cancelled) return;
@@ -125,6 +121,7 @@ export default function VATSummary({ filters }) {
         const aggregateInto = (invoices, side) => {
           for (const inv of invoices) {
             if ((inv.status ?? '') === 'rejected') continue;
+            if ((inv.currency ?? 'PLN').toUpperCase() !== 'PLN') continue;
             for (const item of inv.items || []) {
               const rate = resolveRate(item);
               const row = rateMap[rate] || (rateMap.inne = createEmptyRateRow());
@@ -167,17 +164,15 @@ export default function VATSummary({ filters }) {
           };
         });
 
-        const totalSaleNet = finalRows.reduce((sum, r) => sum + r.saleNet, 0);
-        const totalSaleVat = finalRows.reduce((sum, r) => sum + r.saleVat, 0);
-        const totalPurchaseNet = finalRows.reduce((sum, r) => sum + r.purchaseNet, 0);
-        const totalPurchaseVat = finalRows.reduce((sum, r) => sum + r.purchaseVat, 0);
+        const saleSummary = buildPlnSummary(saleInvoices);
+        const purchaseSummary = buildPlnSummary(purchaseInvoices);
 
         setRows(finalRows);
         setTotals({
-          saleNet: +totalSaleNet.toFixed(2),
-          saleVat: +totalSaleVat.toFixed(2),
-          purchaseNet: +totalPurchaseNet.toFixed(2),
-          purchaseVat: +totalPurchaseVat.toFixed(2),
+          saleNet: saleSummary.netto,
+          saleVat: saleSummary.vat,
+          purchaseNet: purchaseSummary.netto,
+          purchaseVat: purchaseSummary.vat,
         });
       })
       .finally(() => {
@@ -187,7 +182,7 @@ export default function VATSummary({ filters }) {
     return () => {
       cancelled = true;
     };
-  }, [from, to]);
+  }, [from, to, filters]);
 
   if (loading) return <div className={styles.card}><span className="spinner" /></div>;
 

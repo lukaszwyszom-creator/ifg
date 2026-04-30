@@ -1,4 +1,5 @@
 .wrap {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -83,16 +84,24 @@
   50%       { opacity: 1;   }
 }
 
-/* ── Error hint ────────────────────────────────────────────────────────────── */
+/* ── Rejected error popover (overlay, no layout impact) ───────────────────── */
 
-.err {
-  color: var(--color-warning);
-  cursor: pointer;
-  font-size: 0.72rem;
-  white-space: nowrap;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.errorPopover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(194, 0, 0, 0.45);
+  background: rgba(28, 10, 10, 0.96);
+  color: #ffdada;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  white-space: normal;
+  word-break: break-word;
 }
 
 /* ── Mobile ────────────────────────────────────────────────────────────────── */
@@ -106,6 +115,12 @@
   .tile {
     width: 100%;
     justify-content: center;
+  }
+
+  .errorPopover {
+    left: 0;
+    right: auto;
+    max-width: min(360px, calc(100vw - 48px));
   }
 }
 

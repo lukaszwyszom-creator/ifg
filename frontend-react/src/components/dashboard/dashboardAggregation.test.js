@@ -222,3 +222,29 @@ test('AdvancedDashboard: ukrywa kolumnę Status KSeF w zestawieniach sprzedaży 
   );
   assert.ok(src.includes('showKsefStatus={false}'), 'brak wyłączenia showKsefStatus w dashboardzie');
 });
+
+test('VATSummary: nie mapuje nieparsowalnej stawki VAT do 0%', () => {
+  const src = readFileSync(
+    join(__dir, './VATSummary.jsx'),
+    'utf-8',
+  );
+  assert.ok(
+    src.includes("if (rate === null) return 'inne';"),
+    'nieparsowalna stawka VAT powinna trafiać do bucketu "inne"',
+  );
+  assert.ok(
+    !src.includes('const rate = toNum(item?.vat_rate);'),
+    'resolveRate nie powinien już używać toNum dla vat_rate',
+  );
+});
+
+test('VATSummary: parsuje stawki z przecinkiem i symbolem %', () => {
+  const src = readFileSync(
+    join(__dir, './VATSummary.jsx'),
+    'utf-8',
+  );
+  assert.ok(
+    src.includes("replace('%', '')") && src.includes("replace(',', '.')"),
+    'normalizacja vat_rate powinna obsługiwać zapis "23%" i "23,0"',
+  );
+});

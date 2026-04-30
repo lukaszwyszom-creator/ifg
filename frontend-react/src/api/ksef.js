@@ -1,7 +1,6 @@
 import client from './client';
 
 let statusInFlightPromise = null;
-let statusDebounceTimer = null;
 let statusDebouncedPromise = null;
 let statusRequestId = 0;
 let statusMutationVersion = 0;
@@ -31,8 +30,7 @@ function getStatusDebounced() {
   }
 
   statusDebouncedPromise = new Promise((resolve, reject) => {
-    statusDebounceTimer = window.setTimeout(() => {
-      statusDebounceTimer = null;
+    window.setTimeout(() => {
       fetchStatusNow()
         .then(resolve)
         .catch(reject)

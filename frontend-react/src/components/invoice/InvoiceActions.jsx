@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { transmissionsApi } from '../../api/transmissions';
 import { useAppStore } from '../../store/useAppStore';
 import { resolveKsefState } from './invoiceOpenMode';
@@ -15,13 +15,70 @@ const REFRESH_EVENT = 'ksef:status-refresh';
 export default function InvoiceActions({ invoice, onRefresh }) {
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const wrapRef = useRef(null);
   const ksefState = resolveKsefState(invoice.status, invoice);
   const ksefConnectionStatus = useAppStore((s) => s.ksefConnection.ui_status);
+
+  useEffect(() => {
+    if (!popoverOpen) {
+      return undefined;
+    }
+
+    const scrollHost = wrapRef.current?.closest('[data-invoice-scroll-area]');
+
+    const handlePointerDown = (event) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(event.target)) {
+        setPopoverOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setPopoverOpen(false);
+      }
+    };
+
+    const handleScroll = () => {
+      setPopoverOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    scrollHost?.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+      scrollHost?.removeEventListener('scroll', handleScroll);
+    };
+  }, [popoverOpen]);
+
+  const getRejectedErrorMessage = () => {
+    const candidates = [
+      invoice?.error_message,
+      invoice?.ksef_error_message,
+      invoice?.rejection_reason,
+      invoice?.last_error,
+      invoice?.transmission_error_message,
+      invoice?.ksef_last_error,
+      ksefState.tooltip,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return 'Faktura odrzucona przez KSeF.';
+  };
 
   const submitToKsef = async (e) => {
     e.stopPropagation();
     setBusy(true);
     setErrorMsg('');
+    setPopoverOpen(false);
     try {
       await transmissionsApi.submit(invoice.id);
       onRefresh?.();
@@ -39,7 +96,9 @@ export default function InvoiceActions({ invoice, onRefresh }) {
 
   const showRejectedDetails = (e) => {
     e.stopPropagation();
-    setErrorMsg(ksefState.tooltip ?? 'Faktura odrzucona przez KSeF');
+    const msg = getRejectedErrorMessage();
+    setErrorMsg(msg);
+    setPopoverOpen((prev) => !prev);
   };
 
   const sendBlocked = ksefState.kind === 'send' && ksefConnectionStatus !== 'CONNECTED';
@@ -56,10 +115,10 @@ export default function InvoiceActions({ invoice, onRefresh }) {
 
   const tileTitle =
     sendBlocked && !busy ? 'Aby wysłać fakturę, połącz się z KSeF' :
-    ksefState.tooltip ?? undefined;
+    (ksefState.kind === 'rejected' ? undefined : ksefState.tooltip ?? undefined);
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} ref={wrapRef}>
       <button
         className={`${styles.tile} ${styles[`kind_${ksefState.kind}`]}${busy ? ` ${styles.tileBusy}` : ''}`}
         disabled={isDisabled}
@@ -71,14 +130,15 @@ export default function InvoiceActions({ invoice, onRefresh }) {
           ? <span className="spinner" style={{ width: 12, height: 12 }} />
           : ksefState.label}
       </button>
-      {errorMsg && (
-        <span
-          className={styles.err}
-          title={errorMsg}
-          onClick={(e) => { e.stopPropagation(); setErrorMsg(''); }}
+      {ksefState.kind === 'rejected' && popoverOpen && errorMsg && (
+        <div
+          className={styles.errorPopover}
+          role="dialog"
+          aria-label="Szczegóły odrzucenia KSeF"
+          onClick={(e) => e.stopPropagation()}
         >
-          ⚠ {errorMsg.length > 36 ? `${errorMsg.slice(0, 36)}…` : errorMsg}
-        </span>
+          {errorMsg}
+        </div>
       )}
     </div>
   );
