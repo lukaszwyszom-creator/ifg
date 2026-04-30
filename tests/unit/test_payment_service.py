@@ -15,6 +15,7 @@ from app.domain.enums import InvoicePaymentStatus, PaymentMatchMethod, PaymentMa
 from app.persistence.models.bank_transaction import BankTransactionORM
 from app.persistence.models.invoice import InvoiceORM
 from app.persistence.models.payment_allocation import PaymentAllocationORM
+from app.persistence.repositories.payment_allocation_repository import SettlementOpenInvoiceRow
 from app.services.payment_service import PaymentService, _parse_csv
 
 
@@ -72,6 +73,29 @@ def _make_alloc_orm(tx_id, invoice_id, amount: Decimal = Decimal("1000.00")) -> 
         created_at=datetime.now(UTC),
     )
     return orm
+
+
+def _make_settlement_row(
+    *,
+    gross: Decimal,
+    paid_status: str,
+    direction: str,
+    buyer_name: str = "Nabywca",
+    seller_name: str = "Sprzedawca",
+    number_local: str = "FV/1/04/2026",
+) -> SettlementOpenInvoiceRow:
+    contractor_name = buyer_name if direction == "sale" else seller_name
+    return SettlementOpenInvoiceRow(
+        invoice_id=uuid4(),
+        number_local=number_local,
+        contractor_name=contractor_name,
+        issue_date=date(2026, 4, 1),
+        gross_total=gross,
+        paid_amount=Decimal("0.00"),
+        payment_status=paid_status,
+        invoice_type="VAT",
+        direction=direction,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +295,92 @@ class TestComputeTxMatchStatus:
     def test_remaining_full_is_unmatched(self):
         status = PaymentService._compute_tx_match_status(Decimal("1000"), Decimal("1000"))
         assert status == PaymentMatchStatus.UNMATCHED
+
+
+class TestSettlementSummary:
+    def test_unpaid_invoice_is_included_in_debtors(self, mock_session):
+        row = _make_settlement_row(
+            gross=Decimal("1200.00"),
+            paid_status=InvoicePaymentStatus.UNPAID.value,
+            direction="sale",
+        )
+        alloc_repo = MagicMock()
+        alloc_repo.list_open_invoices_with_paid_amount.return_value = [row]
+
+        svc = _make_service(session=mock_session, alloc_repo=alloc_repo)
+        result = svc.get_settlement_summary(side="all", month=None)
+
+        assert len(result["debtors"]) == 1
+        payload = result["debtors"][0]
+        assert payload["invoice_id"] == row.invoice_id
+        assert payload["paid_amount"] == Decimal("0.00")
+        assert payload["remaining_amount"] == Decimal("1200.00")
+
+    def test_partially_paid_invoice_has_correct_remaining_amount(self, mock_session):
+        row = _make_settlement_row(
+            gross=Decimal("2000.00"),
+            paid_status=InvoicePaymentStatus.PARTIALLY_PAID.value,
+            direction="sale",
+        )
+        row.paid_amount = Decimal("750.00")
+        alloc_repo = MagicMock()
+        alloc_repo.list_open_invoices_with_paid_amount.return_value = [row]
+
+        svc = _make_service(session=mock_session, alloc_repo=alloc_repo)
+        result = svc.get_settlement_summary(side="sales", month="2026-04")
+
+        assert len(result["debtors"]) == 1
+        row = result["debtors"][0]
+        assert row["paid_amount"] == Decimal("750.00")
+        assert row["remaining_amount"] == Decimal("1250.00")
+
+        alloc_repo.list_open_invoices_with_paid_amount.assert_called_once()
+        kwargs = alloc_repo.list_open_invoices_with_paid_amount.call_args.kwargs
+        assert kwargs["direction"] == "sale"
+        assert kwargs["month_start"] == date(2026, 4, 1)
+        assert kwargs["month_end"] == date(2026, 5, 1)
+
+    def test_fully_paid_invoice_is_not_included(self, mock_session):
+        row = _make_settlement_row(
+            gross=Decimal("1000.00"),
+            paid_status=InvoicePaymentStatus.PARTIALLY_PAID.value,
+            direction="sale",
+        )
+        row.paid_amount = Decimal("1000.00")
+        alloc_repo = MagicMock()
+        alloc_repo.list_open_invoices_with_paid_amount.return_value = [row]
+
+        svc = _make_service(session=mock_session, alloc_repo=alloc_repo)
+        result = svc.get_settlement_summary(side="all", month=None)
+
+        assert result["debtors"] == []
+        assert result["creditors"] == []
+
+    def test_debtors_and_creditors_are_split_by_direction(self, mock_session):
+        sale_row = _make_settlement_row(
+            gross=Decimal("900.00"),
+            paid_status=InvoicePaymentStatus.UNPAID.value,
+            direction="sale",
+            buyer_name="Alfa",
+        )
+        sale_row.paid_amount = Decimal("100.00")
+        purchase_row = _make_settlement_row(
+            gross=Decimal("500.00"),
+            paid_status=InvoicePaymentStatus.UNPAID.value,
+            direction="purchase",
+            seller_name="Beta",
+        )
+        purchase_row.paid_amount = Decimal("50.00")
+        alloc_repo = MagicMock()
+        alloc_repo.list_open_invoices_with_paid_amount.return_value = [sale_row, purchase_row]
+
+        svc = _make_service(session=mock_session, alloc_repo=alloc_repo)
+        result = svc.get_settlement_summary(side="all", month=None)
+
+        assert len(result["debtors"]) == 1
+        assert result["debtors"][0]["contractor_name"] == "Alfa"
+        assert result["debtors"][0]["side"] == "sale"
+
+        assert len(result["creditors"]) == 1
+        assert result["creditors"][0]["contractor_name"] == "Beta"
+        assert result["creditors"][0]["side"] == "purchase"

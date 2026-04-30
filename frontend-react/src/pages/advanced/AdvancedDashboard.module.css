@@ -4,12 +4,20 @@
   gap: 0;
 }
 
+.tabsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 /* Tabs */
 .tabs {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 0;
+  flex: 1;
 }
 
 .tab {
@@ -54,3 +62,91 @@
 .placeholderIcon { font-size: 2.5rem; }
 .placeholder h3 { font-size: 1rem; color: var(--color-text-2); }
 .placeholder p  { font-size: 0.85rem; line-height: 1.7; }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.modal {
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modalTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.modalTab {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-2);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.modalTabActive {
+  color: var(--color-gold);
+  border-color: var(--color-gold);
+}
+
+.modalState {
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.settlementTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.settlementTable th,
+.settlementTable td {
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  padding: 8px;
+  white-space: nowrap;
+}
+
+.settlementTable th {
+  color: var(--color-text-2);
+  font-weight: 600;
+}
+
+.emptyRow {
+  text-align: center;
+  color: var(--color-text-3);
+}

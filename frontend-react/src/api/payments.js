@@ -23,4 +23,7 @@ export const paymentsApi = {
 
   invoiceHistory: (invoiceId) =>
     client.get(`/payments/invoice/${invoiceId}/history`).then((r) => r.data),
+
+  getSettlements: (params) =>
+    client.get('/payments/settlements', { params }).then((r) => r.data),
 };

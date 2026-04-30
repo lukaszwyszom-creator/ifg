@@ -102,3 +102,25 @@ class ImportResultResponse(BaseModel):
     skipped: int
     auto_matched: int
     manual_review: int
+
+
+# ---------------------------------------------------------------------------
+# Settlements (read-only)
+# ---------------------------------------------------------------------------
+
+class SettlementItemResponse(BaseModel):
+    invoice_id: UUID
+    number_local: str | None = None
+    contractor_name: str | None = None
+    issue_date: date
+    gross_total: Decimal
+    paid_amount: Decimal
+    remaining_amount: Decimal
+    payment_status: str
+    invoice_type: str | None = None
+    side: str
+
+
+class SettlementSummaryResponse(BaseModel):
+    debtors: list[SettlementItemResponse]
+    creditors: list[SettlementItemResponse]

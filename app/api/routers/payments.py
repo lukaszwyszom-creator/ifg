@@ -7,6 +7,7 @@ Endpoints:
   POST   /payments/transactions/{id}/allocate – ręczna alokacja do faktury
   DELETE /payments/allocations/{id}          – cofnięcie alokacji
   GET    /payments/invoice/{id}/history      – historia płatności faktury
+    GET    /payments/settlements               – podsumowanie rozrachunków (read-only)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from app.schemas.payment import (
     ImportResultResponse,
     ManualAllocateRequest,
     PaymentAllocationResponse,
+    SettlementSummaryResponse,
     TransactionListResponse,
 )
 from app.services.payment_service import PaymentService
@@ -179,3 +181,21 @@ def invoice_payment_history(
         return [PaymentAllocationResponse.from_orm_with_tx(a) for a in allocs]
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.get(
+    "/settlements",
+    response_model=SettlementSummaryResponse,
+    summary="Podsumowanie rozrachunków (read-only)",
+)
+def get_settlement_summary(
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    payment_service: Annotated[PaymentService, Depends(get_payment_service)],
+    side: str = Query("all", pattern="^(sales|purchase|all)$"),
+    month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+) -> SettlementSummaryResponse:
+    try:
+        result = payment_service.get_settlement_summary(side=side, month=month)
+        return SettlementSummaryResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))

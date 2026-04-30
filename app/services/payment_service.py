@@ -314,6 +314,74 @@ class PaymentService:
             return self._tx_repo.list_unmatched_paginated(page, size, match_status)
         return self._tx_repo.list_all_paginated(page, size)
 
+    def get_settlement_summary(
+        self,
+        side: str | None = None,
+        month: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read-only podsumowanie rozrachunków dla sprzedaży/zakupu."""
+        normalized_side = (side or "all").strip().lower()
+        allowed_sides = {"all", "sales", "purchase"}
+        if normalized_side not in allowed_sides:
+            raise ValueError("Parametr 'side' musi mieć wartość: sales|purchase|all.")
+
+        month_start: date | None = None
+        month_end: date | None = None
+        if month:
+            try:
+                month_start = datetime.strptime(month, "%Y-%m").date().replace(day=1)
+            except ValueError as exc:
+                raise ValueError("Parametr 'month' musi mieć format YYYY-MM.") from exc
+
+            if month_start.month == 12:
+                month_end = date(month_start.year + 1, 1, 1)
+            else:
+                month_end = date(month_start.year, month_start.month + 1, 1)
+
+        direction = None
+        if normalized_side == "sales":
+            direction = "sale"
+        elif normalized_side == "purchase":
+            direction = "purchase"
+
+        rows = self._alloc_repo.list_open_invoices_with_paid_amount(
+            direction=direction,
+            month_start=month_start,
+            month_end=month_end,
+        )
+
+        debtors: list[dict[str, Any]] = []
+        creditors: list[dict[str, Any]] = []
+
+        for row in rows:
+            remaining_amount = row.gross_total - row.paid_amount
+            if remaining_amount <= Decimal("0"):
+                continue
+
+            if row.direction == "sale":
+                target = debtors
+            elif row.direction == "purchase":
+                target = creditors
+            else:
+                continue
+
+            target.append(
+                {
+                    "invoice_id": row.invoice_id,
+                    "number_local": row.number_local,
+                    "contractor_name": row.contractor_name,
+                    "issue_date": row.issue_date,
+                    "gross_total": row.gross_total,
+                    "paid_amount": row.paid_amount,
+                    "remaining_amount": remaining_amount,
+                    "payment_status": row.payment_status,
+                    "invoice_type": row.invoice_type,
+                    "side": row.direction,
+                }
+            )
+
+        return {"debtors": debtors, "creditors": creditors}
+
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
