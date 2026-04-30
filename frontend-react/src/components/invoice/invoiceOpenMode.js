@@ -28,23 +28,43 @@ const UPO_STATUSES = new Set([
   'success',
 ]);
 
-export function resolveKsefState(status) {
+/**
+ * Zwraca znormalizowany stan KSeF faktury do użycia w UI.
+ *
+ * @param {string}  status   - invoice.status z backendu
+ * @param {object}  invoice  - pełny obiekt faktury (opcjonalny, do tooltip)
+ * @returns {{ kind: string, label: string, tooltip: string|null }}
+ */
+export function resolveKsefState(status, invoice = {}) {
   const normalized = (status ?? '').toString().trim().toLowerCase();
 
   if (UNSENT_STATUSES.has(normalized)) {
-    return { kind: 'send', label: 'Wyślij' };
+    return { kind: 'send', label: 'Wyślij', tooltip: null };
   }
   if (PROCESSING_STATUSES.has(normalized)) {
-    return { kind: 'processing', label: 'Analiza' };
+    return {
+      kind: 'processing',
+      label: 'W toku',
+      tooltip: 'Faktura przekazana do KSeF – oczekiwanie na wynik',
+    };
   }
   if (REJECTED_STATUSES.has(normalized)) {
-    return { kind: 'rejected', label: 'Odrzucona' };
+    return {
+      kind: 'rejected',
+      label: 'Odrzucona',
+      tooltip: 'Faktura odrzucona przez KSeF – sprawdź zakładkę Transmisje KSeF po szczegóły błędu',
+    };
   }
   if (UPO_STATUSES.has(normalized)) {
-    return { kind: 'upo', label: 'OK (UPO)' };
+    const ref = invoice?.ksef_reference_number;
+    return {
+      kind: 'upo',
+      label: 'OK (UPO)',
+      tooltip: ref ? `Ref KSeF: ${ref}` : 'Faktura zaakceptowana przez KSeF',
+    };
   }
 
-  return { kind: 'send', label: 'Wyślij' };
+  return { kind: 'send', label: 'Wyślij', tooltip: null };
 }
 
 /**

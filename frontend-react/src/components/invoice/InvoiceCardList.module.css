@@ -275,7 +275,7 @@
   min-height: 24px;
 }
 
-.ksefCell :global(span[class*='ksefBadge']) {
+.ksefCell :global([class*='tile']) {
   min-height: 24px;
   padding: 2px 8px;
 }

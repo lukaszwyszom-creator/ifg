@@ -7,32 +7,28 @@ import styles from './InvoiceActions.module.css';
 const REFRESH_EVENT = 'ksef:status-refresh';
 
 /**
+ * Jednoelementowy kafelek KSeF — jednocześnie wskaźnik statusu i trigger akcji.
+ *
  * @param {object}   invoice      - pełny obiekt faktury
  * @param {Function} onRefresh    - callback po akcji
  */
 export default function InvoiceActions({ invoice, onRefresh }) {
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const ksefState = resolveKsefState(invoice.status);
+  const [errorMsg, setErrorMsg] = useState('');
+  const ksefState = resolveKsefState(invoice.status, invoice);
   const ksefConnectionStatus = useAppStore((s) => s.ksefConnection.ui_status);
-  const sendBlocked = busy || ksefConnectionStatus !== 'CONNECTED';
-  const sendBlockedTitle = sendBlocked && !busy
-    ? 'Aby wysłać fakturę, połącz się z KSeF'
-    : undefined;
 
   const submitToKsef = async (e) => {
     e.stopPropagation();
     setBusy(true);
-    setMsg('');
-
+    setErrorMsg('');
     try {
       await transmissionsApi.submit(invoice.id);
       onRefresh?.();
     } catch (err) {
-      setMsg(
+      setErrorMsg(
         err.response?.data?.error?.message ??
         err.response?.data?.detail ??
-        err.response?.data?.error?.code ??
         'Błąd wysyłki do KSeF',
       );
     } finally {
@@ -41,27 +37,50 @@ export default function InvoiceActions({ invoice, onRefresh }) {
     }
   };
 
+  const showRejectedDetails = (e) => {
+    e.stopPropagation();
+    setErrorMsg(ksefState.tooltip ?? 'Faktura odrzucona przez KSeF');
+  };
+
+  const sendBlocked = ksefState.kind === 'send' && ksefConnectionStatus !== 'CONNECTED';
+  const isDisabled =
+    busy ||
+    ksefState.kind === 'processing' ||
+    ksefState.kind === 'upo' ||
+    sendBlocked;
+
+  const handleClick =
+    ksefState.kind === 'send' ? submitToKsef :
+    ksefState.kind === 'rejected' ? showRejectedDetails :
+    undefined;
+
+  const tileTitle =
+    sendBlocked && !busy ? 'Aby wysłać fakturę, połącz się z KSeF' :
+    ksefState.tooltip ?? undefined;
+
   return (
     <div className={styles.wrap}>
-      {ksefState.kind === 'send' ? (
-        <button
-          className={`btn btn-sm ${styles.sendBtn}`}
-          disabled={sendBlocked}
-          onClick={submitToKsef}
-          title={sendBlockedTitle}
+      <button
+        className={`${styles.tile} ${styles[`kind_${ksefState.kind}`]}${busy ? ` ${styles.tileBusy}` : ''}`}
+        disabled={isDisabled}
+        onClick={handleClick}
+        title={tileTitle}
+        aria-label={ksefState.label}
+      >
+        {busy
+          ? <span className="spinner" style={{ width: 12, height: 12 }} />
+          : ksefState.label}
+      </button>
+      {errorMsg && (
+        <span
+          className={styles.err}
+          title={errorMsg}
+          onClick={(e) => { e.stopPropagation(); setErrorMsg(''); }}
         >
-          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : ksefState.label}
-        </button>
-      ) : (
-        <span className={`${styles.ksefBadge} ${styles[`state_${ksefState.kind}`]}`}>
-          {ksefState.label}
-        </span>
-      )}
-      {msg && (
-        <span className={styles.err} title={msg}>
-          ⚠ {msg.length > 36 ? `${msg.slice(0, 36)}…` : msg}
+          ⚠ {errorMsg.length > 36 ? `${errorMsg.slice(0, 36)}…` : errorMsg}
         </span>
       )}
     </div>
   );
 }
+

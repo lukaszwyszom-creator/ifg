@@ -15,7 +15,7 @@ test('status odrzucona pozwala na edycje', () => {
 });
 
 test('status analiza blokuje edycje i wymusza podglad', () => {
-  assert.equal(resolveKsefState('sending').label, 'Analiza');
+  assert.equal(resolveKsefState('sending').label, 'W toku');
   assert.equal(isInvoiceEditable('sending'), false);
   assert.equal(getInvoiceOpenMode('sending'), 'preview');
 });

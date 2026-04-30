@@ -226,7 +226,7 @@ export default function SimpleView() {
             <InvoiceForm initial={activeInvoice} onSubmit={handleUpdate} loading={saving} />
           ) : (
             <div className={styles.section}>
-              <div className={styles.sub}>Status: Analiza - edycja zablokowana</div>
+              <div className={styles.sub}>Status: W toku / zaakceptowana – edycja zablokowana</div>
               <div className={styles.header}>
                 <button
                   className="btn btn-primary"

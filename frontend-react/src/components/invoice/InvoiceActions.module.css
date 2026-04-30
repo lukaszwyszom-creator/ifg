@@ -6,71 +6,106 @@
   min-width: 0;
 }
 
-.sendBtn {
-  background: #ff6600 !important;
-  color: #fff !important;
-  border-color: #ff6600 !important;
-  white-space: nowrap;
-}
+/* ── Unified KSeF tile ─────────────────────────────────────────────────────── */
 
-.sendBtn:hover:not(:disabled) {
-  background: #cc5200 !important;
-  border-color: #cc5200 !important;
-}
-
-.ksefBadge {
+.tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 4px 10px;
+  min-height: 26px;
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;
+  border: 1px solid transparent;
+  cursor: default;
+  transition: background 0.15s, opacity 0.15s;
+  line-height: 1;
 }
 
-.feedback {
+.tile:not(:disabled) {
+  cursor: pointer;
+}
+
+/* send — orange, active */
+.kind_send {
+  background: #ff6600;
+  color: #fff;
+  border-color: #ff6600;
+}
+
+.kind_send:hover:not(:disabled) {
+  background: #cc5200;
+  border-color: #cc5200;
+}
+
+.kind_send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* processing — neutral teal tint, disabled, subtle pulse */
+.kind_processing {
+  background: rgba(0, 200, 200, 0.12);
+  color: var(--color-text-2);
+  border-color: rgba(0, 200, 200, 0.28);
+  animation: ksefPulse 2.4s ease-in-out infinite;
+}
+
+/* upo — dark green, low contrast, non-actionable */
+.kind_upo {
+  background: #0f471d;
+  color: rgba(255, 255, 255, 0.45);
+  border-color: transparent;
+  opacity: 0.75;
+}
+
+/* rejected — red, active/clickable */
+.kind_rejected {
+  background: #c20000;
+  color: #fff;
+  border-color: transparent;
+}
+
+.kind_rejected:hover:not(:disabled) {
+  background: #a00000;
+}
+
+/* busy state — keeps tile size stable while spinner shows */
+.tileBusy {
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+@keyframes ksefPulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1;   }
+}
+
+/* ── Error hint ────────────────────────────────────────────────────────────── */
+
+.err {
+  color: var(--color-warning);
+  cursor: pointer;
   font-size: 0.72rem;
   white-space: nowrap;
-  max-width: 260px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.state_processing {
-  background: #00ffff;
-  color: #1f2937;
-}
+/* ── Mobile ────────────────────────────────────────────────────────────────── */
 
-.state_rejected {
-  background: #c20000;
-  color: #fff;
-  border-radius: 0;
-  border: 1px solid #fff;
-  margin: 1px;
-}
-
-.state_upo {
-  background: #0f471d;
-  color: #fff;
-}
-
-.err {
-  color: var(--color-warning);
-  cursor: help;
-  white-space: nowrap;
-}
-
-/* Na mobile przyciski pionowo */
 @media (max-width: 640px) {
   .wrap {
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
   }
-  .wrap .btn {
+  .tile {
     width: 100%;
     justify-content: center;
   }
 }
+
