@@ -44,3 +44,4 @@ Thumbs.db
 # Alembic
 alembic/versions/__pycache__/
 *.zip
+.github/skills/
