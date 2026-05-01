@@ -29,6 +29,9 @@ def list_invoices(
     status: str | None = Query(default=None),
     issue_date_from: date | None = Query(default=None),
     issue_date_to: date | None = Query(default=None),
+    issue_date_before: date | None = Query(default=None),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    view: str | None = Query(default=None, pattern="^(open|month)$"),
     number_filter: str | None = Query(default=None),
     direction: str | None = Query(default=None, pattern="^(sale|purchase)$"),
     page: int = Query(default=1, ge=1),
@@ -36,20 +39,55 @@ def list_invoices(
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> InvoiceListResponse:
+    # Parametr `month=YYYY-MM` ma pierwszeństwo gdy nie podano jawnie zakresu dat.
+    # Zapewnia spójność widoku z miesiącem wyświetlanym w nagłówku UI.
+    # Stosujemy konwencję półotwartego przedziału [first_day, first_day_of_next_month),
+    # co eliminuje edge-case'y końca dnia i jest zgodne z praktyką SQL.
+    # Dla view="open" filtry dat są ignorowane przez service.
+    if (
+        view != "open"
+        and month
+        and issue_date_from is None
+        and issue_date_to is None
+        and issue_date_before is None
+    ):
+        year, mon = (int(part) for part in month.split("-"))
+        issue_date_from = date(year, mon, 1)
+        if mon == 12:
+            issue_date_before = date(year + 1, 1, 1)
+        else:
+            issue_date_before = date(year, mon + 1, 1)
+
     items, total = invoice_service.list_invoices(
         status=status,
         page=page,
         size=size,
         issue_date_from=issue_date_from,
         issue_date_to=issue_date_to,
+        issue_date_before=issue_date_before,
         number_filter=number_filter,
         direction=direction,
+        view=view,
+    )
+    # Saldo do zapłaty per faktura — liczone na bieżąco (poza DB).
+    # Działa dla każdego widoku (open / month / domyślnego).
+    remaining_map = invoice_service.compute_remaining_amounts(items)
+    # Agregacja po stronie backendu wyłącznie dla widoku 'open'
+    # (frontend nie liczy sum). Wykorzystuje już policzone remaining_map.
+    summary = (
+        invoice_service.compute_open_summary(items, remaining_map)
+        if view == "open"
+        else None
     )
     return InvoiceListResponse(
-        items=[InvoiceResponse.from_domain(i) for i in items],
+        items=[
+            InvoiceResponse.from_domain(i, remaining_amount=remaining_map.get(i.id))
+            for i in items
+        ],
         total=total,
         page=page,
         size=size,
+        summary=summary,
     )
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID, uuid4
 
@@ -14,16 +14,20 @@ from app.core.security import AuthenticatedUser
 from app.core.utils import to_uuid
 from app.domain.enums import InvoiceStatus
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
-from app.domain.models.invoice import Invoice, InvoiceItem
+from app.domain.models.invoice import Invoice
 from app.persistence.mappers.invoice_mapper import InvoiceMapper
 from app.persistence.repositories.contractor_override_repository import (
     ContractorOverrideRepository,
 )
 from app.persistence.repositories.contractor_repository import ContractorRepository
 from app.persistence.repositories.invoice_repository import InvoiceRepository
+from app.persistence.repositories.payment_allocation_repository import (
+    PaymentAllocationRepository,
+)
 from app.integrations.nbp.client import NbpRateClient, NbpRateError
 from app.services.audit_service import AuditService
 from app.services.invoice_number_policy import InvoiceNumberPolicy
+from app.services.invoice_totals import InvoiceTotalsCalculator
 from app.services.stock_service import StockService
 
 logger = logging.getLogger(__name__)
@@ -42,6 +46,7 @@ class InvoiceService:
         contractor_override_repository: ContractorOverrideRepository,
         audit_service: AuditService,
         stock_service: StockService | None = None,
+        payment_allocation_repository: PaymentAllocationRepository | None = None,
     ) -> None:
         self.session = session
         self.invoice_repository = invoice_repository
@@ -49,6 +54,7 @@ class InvoiceService:
         self.contractor_override_repository = contractor_override_repository
         self.audit_service = audit_service
         self.stock_service = stock_service
+        self.payment_allocation_repository = payment_allocation_repository
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -92,10 +98,14 @@ class InvoiceService:
                 "Data sprzedaży nie może być późniejsza niż data wystawienia."
             )
 
+        due_date: date | None = data.get("due_date")
+        if due_date is None:
+            due_date = issue_date + timedelta(days=14)
+
         buyer_snapshot = self._resolve_buyer_snapshot(buyer_id)
         seller_snapshot = self._build_seller_snapshot()
-        items = self._build_items(raw_items)
-        total_net, total_vat, total_gross = self._calculate_totals(items)
+        items = InvoiceTotalsCalculator.build_items(raw_items)
+        total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
         currency = data.get("currency", "PLN")
         exchange_rate: Decimal | None = data.get("exchange_rate")
@@ -119,6 +129,7 @@ class InvoiceService:
             issue_date=issue_date,
             sale_date=sale_date,
             delivery_date=delivery_date,
+            due_date=due_date,
             currency=currency,
             exchange_rate=exchange_rate,
             exchange_rate_date=exchange_rate_date,
@@ -204,13 +215,15 @@ class InvoiceService:
             )
 
         buyer_snapshot = self._resolve_buyer_snapshot(buyer_id)
-        items = self._build_items(raw_items)
-        total_net, total_vat, total_gross = self._calculate_totals(items)
+        items = InvoiceTotalsCalculator.build_items(raw_items)
+        total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
         invoice.buyer_snapshot = buyer_snapshot
         invoice.issue_date = issue_date
         invoice.sale_date = sale_date
         invoice.delivery_date = delivery_date
+        if "due_date" in data:
+            invoice.due_date = data.get("due_date")
         invoice.currency = data.get("currency", invoice.currency)
         invoice.items = items
         invoice.total_net = total_net
@@ -243,18 +256,100 @@ class InvoiceService:
         size: int = 20,
         issue_date_from: date | None = None,
         issue_date_to: date | None = None,
+        issue_date_before: date | None = None,
         number_filter: str | None = None,
         direction: str | None = None,
+        view: str | None = None,
     ) -> tuple[list[Invoice], int]:
+        if issue_date_to is not None and issue_date_before is not None:
+            raise InvalidInvoiceError(
+                "Nie można używać jednocześnie issue_date_to i issue_date_before."
+            )
+
+        payment_status_in: tuple[str, ...] | None = None
+        order_by_due_date = False
+        if view == "open":
+            # Widok operacyjny: wszystkie nieuregulowane faktury, niezależnie od miesiąca.
+            # Świadomie ignorujemy filtry dat — ten widok ma pokazać ogon zaległości.
+            payment_status_in = ("unpaid", "partially_paid")
+            order_by_due_date = True
+            issue_date_from = None
+            issue_date_to = None
+            issue_date_before = None
+        elif view is not None and view != "month":
+            raise InvalidInvoiceError(
+                f"Nieobsługiwana wartość parametru 'view': {view!r}. "
+                "Dozwolone: 'open', 'month'."
+            )
+
         return self.invoice_repository.list_paginated(
             status=status,
             page=page,
             size=size,
             issue_date_from=issue_date_from,
             issue_date_to=issue_date_to,
+            issue_date_before=issue_date_before,
             number_filter=number_filter,
             direction=direction,
+            payment_status_in=payment_status_in,
+            order_by_due_date=order_by_due_date,
         )
+
+    def compute_remaining_amounts(
+        self, invoices: list[Invoice]
+    ) -> dict[UUID, Decimal]:
+        """Zwraca remaining_amount = total_gross - sum(active allocations) per faktura.
+
+        Wynik jest read-only (nie zapisujemy w DB). Dla statusu 'paid' wynik = 0,
+        dla 'unpaid' bez alokacji = total_gross, dla 'partially_paid' = różnica.
+        Gdy repo alokacji nie zostało wstrzyknięte, zwraca dict pusty (fallback
+        po stronie warstwy schematu: brak danych = None w odpowiedzi).
+
+        Optymalizacja: jeden SELECT … GROUP BY zamiast N+1 (batch po invoice_id).
+        """
+        if self.payment_allocation_repository is None or not invoices:
+            return {}
+        invoice_ids = [inv.id for inv in invoices]
+        allocated_map = self.payment_allocation_repository.sum_allocated_for_invoices(
+            invoice_ids
+        )
+        result: dict[UUID, Decimal] = {}
+        for inv in invoices:
+            allocated = allocated_map.get(inv.id, Decimal("0"))
+            remaining = (Decimal(inv.total_gross) - allocated).quantize(
+                _TWO_PLACES, rounding=ROUND_HALF_UP
+            )
+            if remaining < Decimal("0"):
+                remaining = Decimal("0")
+            result[inv.id] = remaining
+        return result
+
+    def compute_open_summary(
+        self,
+        invoices: list[Invoice],
+        remaining_map: dict[UUID, Decimal],
+    ) -> dict[str, Decimal]:
+        """Agreguje sumy dla widoku 'Otwarte' na bazie już policzonych remaining_amount.
+
+        Bez dodatkowych zapytań do DB — operuje na danych przekazanych z routera.
+        sale → receivables (do odzyskania), purchase → payables (do zapłaty).
+        """
+        receivables = Decimal("0")
+        payables = Decimal("0")
+        for inv in invoices:
+            remaining = remaining_map.get(inv.id, Decimal("0"))
+            if inv.direction == "purchase":
+                payables += remaining
+            else:
+                receivables += remaining
+        return {
+            "total_receivables": receivables.quantize(
+                _TWO_PLACES, rounding=ROUND_HALF_UP
+            ),
+            "total_payables": payables.quantize(
+                _TWO_PLACES, rounding=ROUND_HALF_UP
+            ),
+        }
 
     # Po migracji usuwającej status draft mark-ready jest świadomie idempotentne:
     # dla READY_FOR_SUBMISSION tylko uzupełnia number_local (jeśli brak),
@@ -372,68 +467,3 @@ class InvoiceService:
             "city": settings.seller_city,
             "country": settings.seller_country,
         }
-
-    @staticmethod
-    def _build_items(raw_items: list[dict]) -> list[InvoiceItem]:
-        items: list[InvoiceItem] = []
-
-        for idx, raw in enumerate(raw_items):
-            name = raw["name"].strip()
-            if not name:
-                raise InvalidInvoiceError(
-                    f"Pozycja {idx + 1}: nazwa nie może być pusta."
-                )
-
-            quantity = Decimal(str(raw["quantity"]))
-            unit_price_net = Decimal(str(raw["unit_price_net"]))
-            vat_rate = Decimal(str(raw["vat_rate"]))
-
-            if quantity <= 0:
-                raise InvalidInvoiceError(
-                    f"Pozycja {idx + 1}: ilość musi być większa od zera."
-                )
-            if unit_price_net < 0:
-                raise InvalidInvoiceError(
-                    f"Pozycja {idx + 1}: cena jednostkowa nie może być ujemna."
-                )
-            if vat_rate < 0 or vat_rate > 100:
-                raise InvalidInvoiceError(
-                    f"Pozycja {idx + 1}: stawka VAT musi być w zakresie 0–100."
-                )
-
-            net_total = (quantity * unit_price_net).quantize(
-                _TWO_PLACES, rounding=ROUND_HALF_UP
-            )
-            vat_total = (net_total * vat_rate / 100).quantize(
-                _TWO_PLACES, rounding=ROUND_HALF_UP
-            )
-            gross_total = net_total + vat_total
-
-            items.append(
-                InvoiceItem(
-                    name=name,
-                    quantity=quantity,
-                    unit=raw.get("unit", "szt."),
-                    unit_price_net=unit_price_net,
-                    vat_rate=vat_rate,
-                    net_total=net_total,
-                    vat_total=vat_total,
-                    gross_total=gross_total,
-                    sort_order=idx + 1,
-                )
-            )
-
-        return items
-
-    @staticmethod
-    def _calculate_totals(
-        items: list[InvoiceItem],
-    ) -> tuple[Decimal, Decimal, Decimal]:
-        total_net = sum(i.net_total for i in items)
-        total_vat = sum(i.vat_total for i in items)
-        total_gross = sum(i.gross_total for i in items)
-        return (
-            Decimal(str(total_net)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
-            Decimal(str(total_vat)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
-            Decimal(str(total_gross)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
-        )

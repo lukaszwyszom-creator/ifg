@@ -272,6 +272,153 @@ class TestListInvoices:
         assert total == 1
         assert len(items) == 1
 
+    def test_open_view_filters_by_payment_status_and_orders_by_due_date(
+        self, service: InvoiceService, sample_invoice: Invoice
+    ):
+        service.invoice_repository.list_paginated.return_value = ([sample_invoice], 1)
+
+        service.list_invoices(view="open")
+
+        kwargs = service.invoice_repository.list_paginated.call_args.kwargs
+        assert kwargs["payment_status_in"] == ("unpaid", "partially_paid")
+        assert kwargs["order_by_due_date"] is True
+
+    def test_open_view_ignores_date_filters(
+        self, service: InvoiceService, sample_invoice: Invoice
+    ):
+        from datetime import date as _date
+
+        service.invoice_repository.list_paginated.return_value = ([sample_invoice], 1)
+
+        service.list_invoices(
+            view="open",
+            issue_date_from=_date(2026, 1, 1),
+            issue_date_before=_date(2026, 2, 1),
+        )
+
+        kwargs = service.invoice_repository.list_paginated.call_args.kwargs
+        assert kwargs["issue_date_from"] is None
+        assert kwargs["issue_date_to"] is None
+        assert kwargs["issue_date_before"] is None
+
+    def test_month_view_does_not_apply_open_filters(
+        self, service: InvoiceService, sample_invoice: Invoice
+    ):
+        service.invoice_repository.list_paginated.return_value = ([sample_invoice], 1)
+
+        service.list_invoices(view="month")
+
+        kwargs = service.invoice_repository.list_paginated.call_args.kwargs
+        assert kwargs["payment_status_in"] is None
+        assert kwargs["order_by_due_date"] is False
+
+
+class TestComputeRemainingAmounts:
+    def _service_with_alloc(self, mock_session, alloc_repo) -> InvoiceService:
+        return InvoiceService(
+            session=mock_session,
+            invoice_repository=MagicMock(),
+            contractor_repository=MagicMock(),
+            contractor_override_repository=MagicMock(),
+            audit_service=MagicMock(),
+            payment_allocation_repository=alloc_repo,
+        )
+
+    def test_partially_paid_returns_positive_remaining(
+        self, mock_session, sample_invoice: Invoice
+    ):
+        # Faktura: total_gross = 2460.00, zapłacono 1000.00 → pozostało 1460.00
+        sample_invoice.payment_status = "partially_paid"
+        alloc_repo = MagicMock()
+        alloc_repo.sum_allocated_for_invoices.return_value = {
+            sample_invoice.id: Decimal("1000.00")
+        }
+        svc = self._service_with_alloc(mock_session, alloc_repo)
+
+        result = svc.compute_remaining_amounts([sample_invoice])
+
+        assert result[sample_invoice.id] == Decimal("1460.00")
+        assert result[sample_invoice.id] > Decimal("0")
+        # Optymalizacja: dokładnie jedno wywołanie batch zamiast N pojedynczych.
+        assert alloc_repo.sum_allocated_for_invoices.call_count == 1
+
+    def test_unpaid_no_allocations_equals_total_gross(
+        self, mock_session, sample_invoice: Invoice
+    ):
+        alloc_repo = MagicMock()
+        # Brak wpisu w mapie = brak alokacji = pełna kwota do zapłaty.
+        alloc_repo.sum_allocated_for_invoices.return_value = {}
+        svc = self._service_with_alloc(mock_session, alloc_repo)
+
+        result = svc.compute_remaining_amounts([sample_invoice])
+
+        assert result[sample_invoice.id] == Decimal("2460.00")
+
+    def test_paid_in_full_returns_zero(
+        self, mock_session, sample_invoice: Invoice
+    ):
+        alloc_repo = MagicMock()
+        alloc_repo.sum_allocated_for_invoices.return_value = {
+            sample_invoice.id: Decimal("2460.00")
+        }
+        svc = self._service_with_alloc(mock_session, alloc_repo)
+
+        result = svc.compute_remaining_amounts([sample_invoice])
+
+        assert result[sample_invoice.id] == Decimal("0.00")
+
+    def test_batch_query_for_multiple_invoices(
+        self, mock_session, sample_invoice: Invoice, sample_invoice_item
+    ):
+        # Druga faktura z innym id, bez alokacji.
+        from datetime import datetime as _dt, UTC as _UTC
+        from uuid import uuid4 as _uuid4
+        from app.domain.enums import InvoiceStatus as _Status
+        now = _dt.now(_UTC)
+        other = Invoice(
+            id=_uuid4(),
+            number_local="FV/2/04/2026",
+            status=_Status.READY_FOR_SUBMISSION,
+            issue_date=sample_invoice.issue_date,
+            sale_date=sample_invoice.sale_date,
+            currency="PLN",
+            seller_snapshot={},
+            buyer_snapshot={},
+            items=[sample_invoice_item],
+            total_net=Decimal("100.00"),
+            total_vat=Decimal("23.00"),
+            total_gross=Decimal("123.00"),
+            created_at=now,
+            updated_at=now,
+        )
+        alloc_repo = MagicMock()
+        alloc_repo.sum_allocated_for_invoices.return_value = {
+            sample_invoice.id: Decimal("500.00"),
+        }
+        svc = self._service_with_alloc(mock_session, alloc_repo)
+
+        result = svc.compute_remaining_amounts([sample_invoice, other])
+
+        # Jedna kwerenda dla obu faktur.
+        assert alloc_repo.sum_allocated_for_invoices.call_count == 1
+        called_ids = alloc_repo.sum_allocated_for_invoices.call_args.args[0]
+        assert set(called_ids) == {sample_invoice.id, other.id}
+        assert result[sample_invoice.id] == Decimal("1960.00")
+        assert result[other.id] == Decimal("123.00")
+
+    def test_no_repo_returns_empty_map(
+        self, mock_session, sample_invoice: Invoice
+    ):
+        svc = InvoiceService(
+            session=mock_session,
+            invoice_repository=MagicMock(),
+            contractor_repository=MagicMock(),
+            contractor_override_repository=MagicMock(),
+            audit_service=MagicMock(),
+        )
+
+        assert svc.compute_remaining_amounts([sample_invoice]) == {}
+
 
 class TestMarkAsReady:
     def test_ready_for_submission_without_number_assigns_number(

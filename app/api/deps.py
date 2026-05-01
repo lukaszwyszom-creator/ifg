@@ -95,6 +95,7 @@ def get_invoice_service(
             session=session,
             stock_repository=StockRepository(session),
         ),
+        payment_allocation_repository=PaymentAllocationRepository(session),
     )
 
 

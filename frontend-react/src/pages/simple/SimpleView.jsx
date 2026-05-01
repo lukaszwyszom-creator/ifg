@@ -4,10 +4,16 @@ import InvoiceForm from '../../components/invoice/InvoiceForm';
 import InvoiceList from '../../components/invoice/InvoiceList';
 import styles from './SimpleView.module.css';
 
-const EMPTY_FILTERS = Object.freeze({});
 const GROSS_FIELDS = ['total_gross', 'gross_total', 'amount_gross'];
 const NET_FIELDS = ['total_net', 'net_total', 'amount_net'];
 const VAT_FIELDS = ['total_vat', 'vat_total', 'amount_vat'];
+
+const currentMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const CURRENT_MONTH_FILTERS = Object.freeze({ month: currentMonthKey() });
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === '') return null;
@@ -21,12 +27,6 @@ const resolveAmount = (invoice, fields) => {
     if (value !== null) return value;
   }
   return null;
-};
-
-const toMonthKey = (dateValue) => {
-  const parsed = new Date(dateValue);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
 };
 
 const formatPln = (amount) => `${new Intl.NumberFormat('pl-PL', {
@@ -63,8 +63,8 @@ export default function SimpleView() {
   }, []);
 
   const monthlySummary = useMemo(() => {
-    const currentMonth = toMonthKey(new Date());
-    const monthInvoices = visibleInvoices.filter((invoice) => toMonthKey(invoice.issue_date) === currentMonth);
+    // Lista jest filtrowana po stronie API (month=YYYY-MM), więc bierzemy całość.
+    const monthInvoices = visibleInvoices;
 
     const gross = calculateStrictSum(monthInvoices, GROSS_FIELDS);
     const net = calculateStrictSum(monthInvoices, NET_FIELDS);
@@ -206,7 +206,7 @@ export default function SimpleView() {
             key={refreshKey}
             limit={10}
             hidePager
-            filters={EMPTY_FILTERS}
+            filters={CURRENT_MONTH_FILTERS}
             onItemsChange={handleItemsChange}
             onOpenInvoice={handleOpenInvoice}
           />

@@ -24,6 +24,19 @@ _ALLOWED_TRANSITIONS: dict[InvoiceStatus, frozenset[InvoiceStatus]] = {
 _CORRECTION_TYPES = frozenset({InvoiceType.KOR, InvoiceType.KOR_ZAL, InvoiceType.KOR_ROZ})
 
 
+def calculate_overdue_days(due_date: date | None) -> int | None:
+    """Liczba dni po terminie płatności (0 jeśli nie minęło, None jeśli brak terminu).
+
+    Funkcja czysta — nic nie zapisuje do DB. Wynik zależy od `date.today()`.
+    """
+    if due_date is None:
+        return None
+    today = date.today()
+    if today <= due_date:
+        return 0
+    return (today - due_date).days
+
+
 @dataclass(slots=True)
 class InvoiceItem:
     name: str
@@ -57,6 +70,7 @@ class Invoice:
     updated_at: datetime
     number_local: str | None = None
     delivery_date: date | None = None
+    due_date: date | None = None
     ksef_reference_number: str | None = None
     payment_status: str = "unpaid"
     invoice_type: InvoiceType = InvoiceType.VAT

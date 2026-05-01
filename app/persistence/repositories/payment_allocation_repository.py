@@ -101,6 +101,28 @@ class PaymentAllocationRepository:
         )
         return Decimal(str(self._session.execute(stmt).scalar_one()))
 
+    def sum_allocated_for_invoices(
+        self, invoice_ids: list[UUID] | tuple[UUID, ...]
+    ) -> dict[UUID, Decimal]:
+        """Batch: jeden SELECT … GROUP BY zamiast N pojedynczych. Zwraca tylko id z alokacjami."""
+        if not invoice_ids:
+            return {}
+        stmt = (
+            select(
+                PaymentAllocationORM.invoice_id,
+                sa_func.coalesce(sa_func.sum(PaymentAllocationORM.allocated_amount), 0),
+            )
+            .where(
+                PaymentAllocationORM.invoice_id.in_(list(invoice_ids)),
+                PaymentAllocationORM.is_reversed.is_(False),
+            )
+            .group_by(PaymentAllocationORM.invoice_id)
+        )
+        return {
+            row[0]: Decimal(str(row[1]))
+            for row in self._session.execute(stmt).all()
+        }
+
     def sum_allocated_for_transaction(self, transaction_id: UUID) -> Decimal:
         stmt = (
             select(sa_func.coalesce(sa_func.sum(PaymentAllocationORM.allocated_amount), 0))

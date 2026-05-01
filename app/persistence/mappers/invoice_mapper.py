@@ -74,6 +74,7 @@ class InvoiceMapper:
             issue_date=orm.issue_date,
             sale_date=orm.sale_date,
             delivery_date=orm.delivery_date,
+            due_date=orm.due_date,
             ksef_reference_number=orm.ksef_reference_number,
             currency=orm.currency,
             seller_snapshot=orm.seller_snapshot_json,
@@ -118,6 +119,7 @@ class InvoiceMapper:
             issue_date=invoice.issue_date,
             sale_date=invoice.sale_date,
             delivery_date=invoice.delivery_date,
+            due_date=invoice.due_date,
             ksef_reference_number=invoice.ksef_reference_number,
             currency=invoice.currency,
             invoice_type=invoice.invoice_type.value,
@@ -157,6 +159,7 @@ class InvoiceMapper:
         orm.issue_date = invoice.issue_date
         orm.sale_date = invoice.sale_date
         orm.delivery_date = invoice.delivery_date
+        orm.due_date = invoice.due_date
         orm.ksef_reference_number = invoice.ksef_reference_number
         orm.currency = invoice.currency
         orm.invoice_type = invoice.invoice_type.value

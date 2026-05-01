@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from app.domain.enums import InvoiceType
-from app.domain.models.invoice import Invoice, InvoiceItem
+from app.domain.models.invoice import Invoice, InvoiceItem, calculate_overdue_days
 
 
 class InvoiceItemInput(BaseModel):
@@ -21,6 +21,7 @@ class InvoiceCreateRequest(BaseModel):
     issue_date: date
     sale_date: date
     delivery_date: date | None = None
+    due_date: date | None = None
     currency: str = "PLN"
     exchange_rate: Decimal | None = None
     exchange_rate_date: date | None = None
@@ -37,6 +38,7 @@ class InvoiceUpdateRequest(BaseModel):
     issue_date: date
     sale_date: date
     delivery_date: date | None = None
+    due_date: date | None = None
     currency: str = "PLN"
     items: list[InvoiceItemInput]
 
@@ -76,6 +78,8 @@ class InvoiceResponse(BaseModel):
     issue_date: date
     sale_date: date
     delivery_date: date | None = None
+    due_date: date | None = None
+    overdue_days: int | None = None
     ksef_reference_number: str | None = None
     currency: str
     seller_snapshot: dict
@@ -95,9 +99,17 @@ class InvoiceResponse(BaseModel):
     created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # Pole obliczane (poza modelem domenowym, nie zapisywane w DB):
+    # remaining_amount = total_gross - sum(active payment_allocations).
+    # None oznacza brak danych (np. gdy endpoint nie liczy salda).
+    remaining_amount: Decimal | None = None
 
     @classmethod
-    def from_domain(cls, invoice: Invoice) -> "InvoiceResponse":
+    def from_domain(
+        cls,
+        invoice: Invoice,
+        remaining_amount: Decimal | None = None,
+    ) -> "InvoiceResponse":
         return cls(
             id=invoice.id,
             status=invoice.status.value,
@@ -105,6 +117,8 @@ class InvoiceResponse(BaseModel):
             issue_date=invoice.issue_date,
             sale_date=invoice.sale_date,
             delivery_date=invoice.delivery_date,
+            due_date=invoice.due_date,
+            overdue_days=calculate_overdue_days(invoice.due_date),
             ksef_reference_number=invoice.ksef_reference_number,
             currency=invoice.currency,
             seller_snapshot=invoice.seller_snapshot,
@@ -124,7 +138,13 @@ class InvoiceResponse(BaseModel):
             created_by=invoice.created_by,
             created_at=invoice.created_at,
             updated_at=invoice.updated_at,
+            remaining_amount=remaining_amount,
         )
+
+
+class OpenInvoicesSummary(BaseModel):
+    total_receivables: Decimal
+    total_payables: Decimal
 
 
 class InvoiceListResponse(BaseModel):
@@ -132,6 +152,7 @@ class InvoiceListResponse(BaseModel):
     total: int
     page: int
     size: int
+    summary: OpenInvoicesSummary | None = None
 
 
 class SubmitInvoiceResponse(BaseModel):

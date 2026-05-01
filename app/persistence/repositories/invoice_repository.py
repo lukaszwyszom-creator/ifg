@@ -62,8 +62,11 @@ class InvoiceRepository:
         size: int = 20,
         issue_date_from: date | None = None,
         issue_date_to: date | None = None,
+        issue_date_before: date | None = None,
         number_filter: str | None = None,
         direction: str | None = None,
+        payment_status_in: tuple[str, ...] | None = None,
+        order_by_due_date: bool = False,
     ) -> tuple[list[Invoice], int]:
         base_stmt = select(InvoiceORM)
 
@@ -73,6 +76,10 @@ class InvoiceRepository:
             base_stmt = base_stmt.where(InvoiceORM.issue_date >= issue_date_from)
         if issue_date_to is not None:
             base_stmt = base_stmt.where(InvoiceORM.issue_date <= issue_date_to)
+        if issue_date_before is not None:
+            base_stmt = base_stmt.where(InvoiceORM.issue_date < issue_date_before)
+        if payment_status_in:
+            base_stmt = base_stmt.where(InvoiceORM.payment_status.in_(payment_status_in))
         if number_filter is not None:
             normalized_filter = number_filter.strip()
             if normalized_filter:
@@ -94,9 +101,18 @@ class InvoiceRepository:
         count_stmt = select(func.count()).select_from(base_stmt.subquery())
         total = self.session.execute(count_stmt).scalar_one()
 
+        if order_by_due_date:
+            # ORDER BY due_date ASC NULLS LAST, issue_date ASC
+            order_clause = (
+                InvoiceORM.due_date.asc().nulls_last(),
+                InvoiceORM.issue_date.asc(),
+            )
+        else:
+            order_clause = (InvoiceORM.created_at.desc(),)
+
         data_stmt = (
             base_stmt
-            .order_by(InvoiceORM.created_at.desc())
+            .order_by(*order_clause)
             .offset((page - 1) * size)
             .limit(size)
         )

@@ -30,20 +30,19 @@ export default function InvoiceList({
     try {
       const contractorFilter = String(filters.contractor || '').trim();
 
-      // Wyznacz daty z filtra miesiąca (jeśli nie podano własnych dat)
-      let dateFrom = filters.issue_date_from || '';
-      let dateTo   = filters.issue_date_to   || '';
-      if (filters.month && !dateFrom && !dateTo && contractorFilter.length < 3) {
-        const [y, m] = filters.month.split('-').map(Number);
-        const last = new Date(y, m, 0).getDate();
-        dateFrom = `${filters.month}-01`;
-        dateTo   = `${filters.month}-${String(last).padStart(2, '0')}`;
-      }
+      // Filtr miesiąca przekazujemy jawnie do API (parametr `month=YYYY-MM`).
+      // Backend rozwija go na issue_date_from/to. Dzięki temu nagłówek UI
+      // i dane na liście są zawsze w jednym miesiącu — brak rozjazdów.
+      const dateFrom = filters.issue_date_from || '';
+      const dateTo   = filters.issue_date_to   || '';
+      const useMonth = !!filters.month && !dateFrom && !dateTo && contractorFilter.length < 3;
+
       const params = {
         page,
         size,
         direction,
         ...(filters.status  && { status: filters.status }),
+        ...(useMonth        && { month: filters.month }),
         ...(dateFrom        && { issue_date_from: dateFrom }),
         ...(dateTo          && { issue_date_to: dateTo }),
         ...(contractorFilter.length >= 3 && { number_filter: contractorFilter }),

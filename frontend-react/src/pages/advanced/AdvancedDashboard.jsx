@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { paymentsApi } from '../../api/payments';
+import { invoicesApi } from '../../api/invoices';
 import DashboardSummary from '../../components/dashboard/DashboardSummary';
 import VATSummary from '../../components/dashboard/VATSummary';
 import TransmissionTable from '../../components/dashboard/TransmissionTable';
 import InvoiceList from '../../components/invoice/InvoiceList';
 import Filters from '../../components/common/Filters';
+import OpenInvoicesPanel from './OpenInvoicesPanel';
 import styles from './AdvancedDashboard.module.css';
 
 const TABS = [
   { id: 'invoices',      label: 'Faktury sprzedaży' },
   { id: 'purchase',      label: 'Faktury zakupowe'  },
-  { id: 'settlements',   label: 'Rozrachunki'        },
+  { id: 'open',          label: 'Otwarte'           },
+  { id: 'settlements',   label: 'Rozrachunki'       },
   { id: 'vat',           label: 'Zestawienie VAT'   },
   { id: 'transmissions', label: 'Transmisje KSeF'   },
 ];
@@ -23,6 +26,11 @@ export default function AdvancedDashboard() {
   const [settlementsLoading, setSettlementsLoading] = useState(false);
   const [settlementsError, setSettlementsError] = useState('');
   const [settlementsLoaded, setSettlementsLoaded] = useState(false);
+  const [openInvoices, setOpenInvoices] = useState([]);
+  const [openSummary, setOpenSummary] = useState(null);
+  const [openLoading, setOpenLoading] = useState(false);
+  const [openError, setOpenError] = useState('');
+  const [openLoaded, setOpenLoaded] = useState(false);
   const filters = useAppStore((s) => s.filters);
   const setFilters = useAppStore((s) => s.setFilters);
   const resetFilters = useAppStore((s) => s.resetFilters);
@@ -45,8 +53,20 @@ export default function AdvancedDashboard() {
       })
       .catch((err) => {
         if (cancelled) return;
-        console.error('[Rozrachunki] Błąd pobierania danych:', err);
-        setSettlementsError('Nie udało się pobrać rozrachunków. Sprawdź połączenie z serwerem.');
+        const status = err?.response?.status;
+        const data = err?.response?.data;
+        const url = err?.config?.url ?? '/payments/settlements';
+        const authHeader = err?.config?.headers?.Authorization;
+        console.error('[Rozrachunki] Błąd pobierania danych:', {
+          url,
+          status,
+          responseData: data,
+          authHeaderPresent: !!authHeader,
+          authHeaderPrefix: authHeader ? authHeader.slice(0, 15) + '…' : 'brak',
+          err,
+        });
+        const hint = status === 401 ? ' (brak autoryzacji)' : status === 404 ? ' (endpoint nie znaleziony)' : status ? ` (HTTP ${status})` : '';
+        setSettlementsError(`Nie udało się pobrać rozrachunków${hint}. Sprawdź połączenie z serwerem.`);
         setSettlements({ debtors: [], creditors: [] });
       })
       .finally(() => {
@@ -56,6 +76,36 @@ export default function AdvancedDashboard() {
       cancelled = true;
     };
   }, [tab, settlementsLoaded]);
+
+  useEffect(() => {
+    if (tab !== 'open') return;
+    if (openLoaded) return;
+    let cancelled = false;
+    setOpenLoading(true);
+    setOpenError('');
+    invoicesApi
+      .list({ view: 'open', size: 100 })
+      .then((data) => {
+        if (cancelled) return;
+        setOpenInvoices(Array.isArray(data?.items) ? data.items : []);
+        setOpenSummary(data?.summary ?? null);
+        setOpenLoaded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const status = err?.response?.status;
+        const hint = status ? ` (HTTP ${status})` : '';
+        setOpenError(`Nie udało się pobrać otwartych faktur${hint}.`);
+        setOpenInvoices([]);
+        setOpenSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setOpenLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, openLoaded]);
 
   const fmtMoney = (value) => `${Number(value ?? 0).toFixed(2)} PLN`;
   const settlementRows = settlementTab === 'debtors' ? settlements.debtors : settlements.creditors;
@@ -98,6 +148,16 @@ export default function AdvancedDashboard() {
           <InvoiceList filters={filters} direction="purchase" showKsefStatus={false} />
         )}
 
+        {tab === 'open' && (
+          <OpenInvoicesPanel
+            invoices={openInvoices}
+            summary={openSummary}
+            loading={openLoading}
+            error={openError}
+            loaded={openLoaded}
+          />
+        )}
+
         {tab === 'settlements' && (
           <div className={styles.settlementsPanel}>
             <div className={styles.settlementTabs}>
@@ -137,30 +197,42 @@ export default function AdvancedDashboard() {
                     <tr>
                       <th>Kontrahent</th>
                       <th>Numer faktury</th>
-                      <th>Data</th>
+                      <th>Data wystawienia</th>
+                      <th>Termin płatności</th>
                       <th>Kwota brutto</th>
                       <th>Zapłacono</th>
                       <th>Pozostało</th>
-                      <th>Status płatności</th>
+                      <th>Opóźnienie</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className={styles.emptyRow}>Brak rozrachunków</td>
+                        <td colSpan={8} className={styles.emptyRow}>Brak rozrachunków</td>
                       </tr>
                     ) : (
-                      settlementRows.map((item) => (
-                        <tr key={item.invoice_id}>
-                          <td>{item.contractor_name || '—'}</td>
-                          <td>{item.number_local || '—'}</td>
-                          <td>{item.issue_date || '—'}</td>
-                          <td>{fmtMoney(item.gross_total)}</td>
-                          <td>{fmtMoney(item.paid_amount)}</td>
-                          <td>{fmtMoney(item.remaining_amount)}</td>
-                          <td>{item.payment_status || '—'}</td>
-                        </tr>
-                      ))
+                      settlementRows.map((item) => {
+                        const overdueDays = item.overdue_days;
+                        const isOverdue = typeof overdueDays === 'number' && overdueDays > 0;
+                        const remaining = Number(item.remaining_amount ?? 0);
+                        const hasRemaining = remaining > 0;
+                        return (
+                          <tr key={item.invoice_id}>
+                            <td>{item.contractor_name || '—'}</td>
+                            <td>{item.number_local || '—'}</td>
+                            <td>{item.issue_date || '—'}</td>
+                            <td>{item.due_date || '—'}</td>
+                            <td>{fmtMoney(item.gross_total)}</td>
+                            <td>{fmtMoney(item.paid_amount)}</td>
+                            <td className={hasRemaining ? styles.amountDue : undefined}>
+                              {fmtMoney(item.remaining_amount)}
+                            </td>
+                            <td className={isOverdue ? styles.overdue : undefined}>
+                              {isOverdue ? `${overdueDays} dni` : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

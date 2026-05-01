@@ -24,6 +24,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-123")
 from app.api.deps import get_current_user, get_idempotency_service, get_invoice_service
 from app.core.security import AuthenticatedUser
 from app.domain.enums import InvoiceStatus
+from app.domain.exceptions import InvalidInvoiceError
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.main import app
 from app.services.idempotency_service import IdempotencyService
@@ -80,7 +81,14 @@ def _make_invoice(status: InvoiceStatus = InvoiceStatus.READY_FOR_SUBMISSION, nu
 
 @pytest.fixture()
 def mock_invoice_service() -> MagicMock:
-    return MagicMock(spec=InvoiceService)
+    svc = MagicMock(spec=InvoiceService)
+    # Domyślnie brak alokacji — pusty dict; testy mogą nadpisać.
+    svc.compute_remaining_amounts.return_value = {}
+    svc.compute_open_summary.return_value = {
+        "total_receivables": Decimal("0"),
+        "total_payables": Decimal("0"),
+    }
+    return svc
 
 
 @pytest.fixture()
@@ -161,6 +169,92 @@ class TestListInvoices:
 
         call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
         assert call_kwargs["number_filter"] == "FV/2026"
+
+    def test_month_filter_expands_to_date_range(self, client, mock_invoice_service):
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        client.get("/api/v1/invoices/?month=2026-02")
+
+        call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        # Konwencja półotwarta: [first_day, first_day_of_next_month)
+        assert call_kwargs["issue_date_from"] == date(2026, 2, 1)
+        assert call_kwargs["issue_date_before"] == date(2026, 3, 1)
+        assert call_kwargs["issue_date_to"] is None
+
+    def test_month_with_no_data_returns_empty_list(self, client, mock_invoice_service):
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        res = client.get("/api/v1/invoices/?month=2026-07")
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["total"] == 0
+        assert body["items"] == []
+        call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        assert call_kwargs["issue_date_from"] == date(2026, 7, 1)
+        assert call_kwargs["issue_date_before"] == date(2026, 8, 1)
+
+    def test_month_december_rolls_over_year(self, client, mock_invoice_service):
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        client.get("/api/v1/invoices/?month=2026-12")
+
+        call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        assert call_kwargs["issue_date_from"] == date(2026, 12, 1)
+        assert call_kwargs["issue_date_before"] == date(2027, 1, 1)
+
+    def test_explicit_dates_take_precedence_over_month(self, client, mock_invoice_service):
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        client.get(
+            "/api/v1/invoices/?month=2026-02"
+            "&issue_date_from=2026-01-15&issue_date_to=2026-01-20"
+        )
+
+        call_kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        assert call_kwargs["issue_date_from"] == date(2026, 1, 15)
+        assert call_kwargs["issue_date_to"] == date(2026, 1, 20)
+
+    def test_invalid_month_format_rejected(self, client, mock_invoice_service):
+        res = client.get("/api/v1/invoices/?month=2026-2")
+        assert res.status_code == 422
+
+    def test_combining_issue_date_to_and_before_rejected(self, client, mock_invoice_service):
+        # Service podnosi InvalidInvoiceError (status_code=422) przy obu parametrach.
+        mock_invoice_service.list_invoices.side_effect = InvalidInvoiceError(
+            "Nie można używać jednocześnie issue_date_to i issue_date_before."
+        )
+
+        res = client.get(
+            "/api/v1/invoices/"
+            "?issue_date_to=2026-02-28&issue_date_before=2026-03-01"
+        )
+
+        assert res.status_code == 422
+
+    def test_view_open_passed_to_service(self, client, mock_invoice_service):
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        client.get("/api/v1/invoices/?view=open")
+
+        kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        assert kwargs["view"] == "open"
+
+    def test_view_open_skips_month_expansion(self, client, mock_invoice_service):
+        # Router nie rozwija month=YYYY-MM gdy view=open — service ignoruje daty.
+        mock_invoice_service.list_invoices.return_value = ([], 0)
+
+        client.get("/api/v1/invoices/?view=open&month=2026-02")
+
+        kwargs = mock_invoice_service.list_invoices.call_args.kwargs
+        assert kwargs["view"] == "open"
+        assert kwargs["issue_date_from"] is None
+        assert kwargs["issue_date_to"] is None
+        assert kwargs["issue_date_before"] is None
+
+    def test_invalid_view_value_rejected(self, client, mock_invoice_service):
+        res = client.get("/api/v1/invoices/?view=foo")
+        assert res.status_code == 422
 
     def test_pagination_defaults(self, client, mock_invoice_service):
         mock_invoice_service.list_invoices.return_value = ([], 0)

@@ -129,3 +129,16 @@
   text-align: center;
   color: var(--color-text-3);
 }
+
+.overdue {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.amountDue {
+  color: var(--color-error);
+}
+
+.overdueRow {
+  background-color: rgba(220, 53, 69, 0.06);
+}
