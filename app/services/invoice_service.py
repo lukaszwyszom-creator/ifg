@@ -14,7 +14,7 @@ from app.core.security import AuthenticatedUser
 from app.core.utils import to_uuid
 from app.domain.enums import InvoiceStatus
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
-from app.domain.models.invoice import Invoice
+from app.domain.models.invoice import Invoice, calculate_overdue_days
 from app.persistence.mappers.invoice_mapper import InvoiceMapper
 from app.persistence.repositories.contractor_override_repository import (
     ContractorOverrideRepository,
@@ -334,20 +334,50 @@ class InvoiceService:
         Bez dodatkowych zapytań do DB — operuje na danych przekazanych z routera.
         sale → receivables (do odzyskania), purchase → payables (do zapłaty).
         """
+        two_places = Decimal("0.01")
         receivables = Decimal("0")
         payables = Decimal("0")
+        overdue_0_30 = Decimal("0")
+        overdue_30_60 = Decimal("0")
+        overdue_60_plus = Decimal("0")
         for inv in invoices:
-            remaining = remaining_map.get(inv.id, Decimal("0"))
+            remaining_raw = remaining_map.get(inv.id, Decimal("0"))
+            remaining = (
+                remaining_raw
+                if isinstance(remaining_raw, Decimal)
+                else Decimal(str(remaining_raw))
+            )
             if inv.direction == "purchase":
                 payables += remaining
             else:
                 receivables += remaining
+
+            overdue_days = calculate_overdue_days(inv.due_date)
+            if overdue_days is None:
+                continue
+            if overdue_days == 0:
+                continue
+            if 1 <= overdue_days <= 30:
+                overdue_0_30 += remaining
+            elif 31 <= overdue_days <= 60:
+                overdue_30_60 += remaining
+            elif overdue_days >= 61:
+                overdue_60_plus += remaining
         return {
             "total_receivables": receivables.quantize(
-                _TWO_PLACES, rounding=ROUND_HALF_UP
+                two_places, rounding=ROUND_HALF_UP
             ),
             "total_payables": payables.quantize(
-                _TWO_PLACES, rounding=ROUND_HALF_UP
+                two_places, rounding=ROUND_HALF_UP
+            ),
+            "overdue_0_30": overdue_0_30.quantize(
+                two_places, rounding=ROUND_HALF_UP
+            ),
+            "overdue_30_60": overdue_30_60.quantize(
+                two_places, rounding=ROUND_HALF_UP
+            ),
+            "overdue_60_plus": overdue_60_plus.quantize(
+                two_places, rounding=ROUND_HALF_UP
             ),
         }
 

@@ -37,8 +37,11 @@ export default function OpenInvoicesPanel({ invoices, summary, loading, error, l
     remaining: remainingFor(inv),
   }));
   // Sumy liczy backend (summary.total_receivables / total_payables).
-  const totalRecover = Number(summary?.total_receivables ?? 0);
-  const totalToPay = Number(summary?.total_payables ?? 0);
+  const totalRecover = summary?.total_receivables ?? '0.00';
+  const totalToPay = summary?.total_payables ?? '0.00';
+  const overdue0to30 = summary?.overdue_0_30 ?? '0.00';
+  const overdue30to60 = summary?.overdue_30_60 ?? '0.00';
+  const overdue60plus = summary?.overdue_60_plus ?? '0.00';
 
   return (
     <div className={styles.settlementsPanel}>
@@ -51,10 +54,18 @@ export default function OpenInvoicesPanel({ invoices, summary, loading, error, l
       )}
 
       {!loading && !error && loaded && (
-        <div className={styles.settlementsSummary}>
-          <span>Do odzyskania: <strong>{fmtMoney(totalRecover)}</strong></span>
-          <span>Do zapłaty: <strong>{fmtMoney(totalToPay)}</strong></span>
-        </div>
+        <>
+          <div className={styles.settlementsSummary}>
+            <span>Do odzyskania: <strong>{fmtMoney(totalRecover)}</strong></span>
+            <span>Do zapłaty: <strong>{fmtMoney(totalToPay)}</strong></span>
+          </div>
+          <div className={styles.settlementsSummary}>
+            <span>Struktura przeterminowania:</span>
+            <span>1-30 dni po terminie: <strong>{fmtMoney(overdue0to30)}</strong></span>
+            <span>31-60 dni po terminie: <strong>{fmtMoney(overdue30to60)}</strong></span>
+            <span>60+ dni po terminie: <strong>{fmtMoney(overdue60plus)}</strong></span>
+          </div>
+        </>
       )}
 
       {!loading && !error && (

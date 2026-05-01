@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 # Środowisko musi być ustawione PRZED importem aplikacji.
@@ -117,6 +117,7 @@ def _make_invoice(
     total_gross: Decimal,
     number_local: str,
     issue_date: date,
+    due_date: date | None,
     created_by: uuid.UUID,
 ) -> InvoiceORM:
     total_net = (total_gross / Decimal("1.23")).quantize(Decimal("0.01"))
@@ -135,6 +136,7 @@ def _make_invoice(
         },
         issue_date=issue_date,
         sale_date=issue_date,
+        due_date=due_date,
         currency="PLN",
         direction=direction,
         created_by=created_by,
@@ -143,7 +145,7 @@ def _make_invoice(
 
 @pytest.fixture(scope="module")
 def seeded(db_session, client):
-    """Seed: admin + kontrahent + 3 faktury + 1 alokacja częściowa."""
+    """Seed: admin + kontrahent + 5 faktur + 1 alokacja częściowa."""
     admin = UserORM(
         username="open_view_admin",
         password_hash=hash_password("Admin1234!"),
@@ -160,7 +162,7 @@ def seeded(db_session, client):
     db_session.commit()
     db_session.refresh(admin)
 
-    today = date(2026, 4, 15)
+    today = date.today()
 
     sale_unpaid = _make_invoice(
         direction="sale",
@@ -168,6 +170,7 @@ def seeded(db_session, client):
         total_gross=Decimal("1000.00"),
         number_local="FV/OPEN/1",
         issue_date=today,
+        due_date=today - timedelta(days=10),
         created_by=admin.id,
     )
     sale_partial = _make_invoice(
@@ -176,6 +179,7 @@ def seeded(db_session, client):
         total_gross=Decimal("1000.00"),
         number_local="FV/OPEN/2",
         issue_date=today,
+        due_date=today - timedelta(days=45),
         created_by=admin.id,
     )
     purchase_unpaid = _make_invoice(
@@ -184,6 +188,25 @@ def seeded(db_session, client):
         total_gross=Decimal("500.00"),
         number_local="FZ/OPEN/1",
         issue_date=today,
+        due_date=today - timedelta(days=90),
+        created_by=admin.id,
+    )
+    sale_due_today = _make_invoice(
+        direction="sale",
+        payment_status="unpaid",
+        total_gross=Decimal("200.00"),
+        number_local="FV/OPEN/3",
+        issue_date=today,
+        due_date=today,
+        created_by=admin.id,
+    )
+    purchase_no_due = _make_invoice(
+        direction="purchase",
+        payment_status="unpaid",
+        total_gross=Decimal("300.00"),
+        number_local="FZ/OPEN/2",
+        issue_date=today,
+        due_date=None,
         created_by=admin.id,
     )
 
@@ -210,6 +233,20 @@ def seeded(db_session, client):
             net_amount=Decimal("406.50"), vat_amount=Decimal("93.50"),
             gross_amount=Decimal("500.00"), sort_order=1,
         ),
+        InvoiceItemORM(
+            invoice_id=sale_due_today.id, name="Item",
+            quantity=Decimal("1"), unit="szt.",
+            unit_price_net=Decimal("162.60"), vat_rate=Decimal("23"),
+            net_amount=Decimal("162.60"), vat_amount=Decimal("37.40"),
+            gross_amount=Decimal("200.00"), sort_order=1,
+        ),
+        InvoiceItemORM(
+            invoice_id=purchase_no_due.id, name="Item",
+            quantity=Decimal("1"), unit="szt.",
+            unit_price_net=Decimal("243.90"), vat_rate=Decimal("23"),
+            net_amount=Decimal("243.90"), vat_amount=Decimal("56.10"),
+            gross_amount=Decimal("300.00"), sort_order=1,
+        ),
     ]
 
     # Bank transaction + alokacja 400 PLN dla sale_partial → remaining = 600.
@@ -222,7 +259,17 @@ def seeded(db_session, client):
         match_status="partial",
         remaining_amount=Decimal("0.00"),
     )
-    db_session.add_all([sale_unpaid, sale_partial, purchase_unpaid, *items, bank_tx])
+    db_session.add_all(
+        [
+            sale_unpaid,
+            sale_partial,
+            purchase_unpaid,
+            sale_due_today,
+            purchase_no_due,
+            *items,
+            bank_tx,
+        ]
+    )
     db_session.flush()
 
     allocation = PaymentAllocationORM(
@@ -254,11 +301,39 @@ def test_open_view_summary_aggregates_receivables_and_payables(client, seeded):
 
     # W widoku 'open' summary nie może być None.
     assert data["summary"] is not None
-    assert Decimal(data["summary"]["total_receivables"]) == Decimal("1600.00")
-    assert Decimal(data["summary"]["total_payables"]) == Decimal("500.00")
+    receivables = data["summary"]["total_receivables"]
+    payables = data["summary"]["total_payables"]
+    overdue_0_30 = data["summary"]["overdue_0_30"]
+    overdue_30_60 = data["summary"]["overdue_30_60"]
+    overdue_60_plus = data["summary"]["overdue_60_plus"]
 
-    # Wszystkie 3 faktury powinny być widoczne w widoku 'open'.
-    assert data["total"] == 3
+    # Decimal w JSON ma pozostać stringiem, nie floatem.
+    assert isinstance(receivables, str)
+    assert isinstance(payables, str)
+    assert isinstance(overdue_0_30, str)
+    assert isinstance(overdue_30_60, str)
+    assert isinstance(overdue_60_plus, str)
+    assert not isinstance(receivables, float)
+    assert not isinstance(payables, float)
+    assert not isinstance(overdue_0_30, float)
+    assert not isinstance(overdue_30_60, float)
+    assert not isinstance(overdue_60_plus, float)
+
+    assert receivables == "1800.00"
+    assert payables == "800.00"
+    # Aging: 10 dni -> 0_30, 45 dni -> 30_60, 90 dni -> 60_plus,
+    # 0 dni oraz due_date=None nie trafiają do żadnej kategorii.
+    assert overdue_0_30 == "1000.00"
+    assert overdue_30_60 == "600.00"
+    assert overdue_60_plus == "500.00"
+    # Brak podwójnego liczenia między bucketami.
+    assert (
+        Decimal(overdue_0_30) + Decimal(overdue_30_60) + Decimal(overdue_60_plus)
+        == Decimal("2100.00")
+    )
+
+    # Wszystkie 5 faktur powinno być widocznych w widoku 'open'.
+    assert data["total"] == 5
     remaining_by_number = {
         item["number_local"]: Decimal(item["remaining_amount"])
         for item in data["items"]
@@ -266,3 +341,5 @@ def test_open_view_summary_aggregates_receivables_and_payables(client, seeded):
     assert remaining_by_number["FV/OPEN/1"] == Decimal("1000.00")
     assert remaining_by_number["FV/OPEN/2"] == Decimal("600.00")
     assert remaining_by_number["FZ/OPEN/1"] == Decimal("500.00")
+    assert remaining_by_number["FV/OPEN/3"] == Decimal("200.00")
+    assert remaining_by_number["FZ/OPEN/2"] == Decimal("300.00")

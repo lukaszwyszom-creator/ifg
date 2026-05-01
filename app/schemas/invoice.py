@@ -145,6 +145,9 @@ class InvoiceResponse(BaseModel):
 class OpenInvoicesSummary(BaseModel):
     total_receivables: Decimal
     total_payables: Decimal
+    overdue_0_30: Decimal = Decimal("0.00")
+    overdue_30_60: Decimal = Decimal("0.00")
+    overdue_60_plus: Decimal = Decimal("0.00")
 
 
 class InvoiceListResponse(BaseModel):
