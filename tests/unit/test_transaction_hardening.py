@@ -374,26 +374,32 @@ class TestInvoiceNumberSequential:
             audit_service=audit,
         )
 
-    def test_mark_ready_on_ready_raises(self, db, actor):
+    def test_mark_ready_on_non_ready_raises(self, db, actor):
         svc = self._invoice_service(db)
         user, _ = self._seed_user_and_buyer(db)
 
         inv = self._make_ready_invoice(db, user)
+        inv.status = "accepted"
+        db.flush()
 
         from app.domain.exceptions import InvalidStatusTransitionError
         with pytest.raises(InvalidStatusTransitionError):
             svc.mark_as_ready(inv.id, actor)
 
     def test_same_invoice_mark_ready_idempotent_via_status_guard(self, db, actor):
-        """Attempting mark_as_ready twice raises InvalidStatusTransitionError."""
-        from app.domain.exceptions import InvalidStatusTransitionError
+        """Attempting mark_as_ready twice returns the same numbered invoice."""
+        from app.domain.enums import InvoiceStatus
 
         svc = self._invoice_service(db)
         user, _ = self._seed_user_and_buyer(db)
         inv = self._make_ready_invoice(db, user)
 
-        with pytest.raises(InvalidStatusTransitionError):
-            svc.mark_as_ready(inv.id, actor)
+        first = svc.mark_as_ready(inv.id, actor)
+        second = svc.mark_as_ready(inv.id, actor)
+
+        assert first.number_local is not None
+        assert second.number_local == first.number_local
+        assert second.status == InvoiceStatus.READY_FOR_SUBMISSION
 
 
 # ---------------------------------------------------------------------------

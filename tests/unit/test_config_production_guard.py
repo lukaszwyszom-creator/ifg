@@ -12,7 +12,13 @@ _SAFE_KEY = "production-ready-random-key-abc123XY-z9876543210123456"
 
 def _make(**overrides):
     """Tworzy instancję Settings z minimalnym zestawem wymaganych pól."""
-    defaults = dict(DATABASE_URL=_PROD_DB, APP_ENV="production", JWT_SECRET_KEY=_SAFE_KEY)
+    defaults = dict(
+        _env_file=None,
+        DATABASE_URL=_PROD_DB,
+        APP_ENV="production",
+        DEBUG=False,
+        JWT_SECRET_KEY=_SAFE_KEY,
+    )
     defaults.update(overrides)
     return Settings(**defaults)
 
