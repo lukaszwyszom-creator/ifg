@@ -11,6 +11,7 @@ import styles from './KSeFSessionBar.module.css';
 export default function KSeFSessionBar() {
   const storedNip = useAppStore((s) => s.sellerNip);
   const setSellerNip = useAppStore((s) => s.setSellerNip);
+  const refreshAllInvoicePools = useAppStore((s) => s.refreshAllInvoicePools);
 
   const [nip, setNip] = useState(storedNip);
   const [session, setSession] = useState(null);  // KSeFSessionResponse | null
@@ -133,10 +134,9 @@ export default function KSeFSessionBar() {
 
       const result = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
       setSuccessMsg(`Pobrano ${result.saved} nowych faktur zakupowych`);
-      if (result.saved > 0) {
-        // Odśwież listę faktur
-        window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
-      }
+      // Odśwież wspólny pool faktur niezależnie od tego, który moduł jest aktywny.
+      await refreshAllInvoicePools();
+      window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
     } catch (err) {
       const msg =
         err.response?.data?.error?.message ??

@@ -4,8 +4,9 @@ import {
   XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
+import { useAppStore } from '../../store/useAppStore';
 import { buildPlnSummary } from './dashboardAggregation';
-import { buildInvoiceParams, fetchAllInvoices, resolveEffectiveFilters } from './dashboardQuery';
+import { buildInvoicePoolKey, buildInvoicePoolQuery, resolveEffectiveFilters } from './dashboardQuery';
 import styles from './DashboardSummary.module.css';
 
 const fmtPln = (n) => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN`;
@@ -139,18 +140,34 @@ const STATUS_LABELS = {
 };
 
 export default function DashboardSummary({ filters }) {
+  const loadInvoicePool = useAppStore((s) => s.loadInvoicePool);
 
   // Jeden atomowy stan wykresu — eliminuje race-condition między
   // setAllSale/setAllPurchase (.then) a setChartLoading (.finally)
-  const [chart, setChart] = useState({
-    loading:         true,
-    saleInvoices:    [],
-    purchaseInvoices: [],
-  });
+  const [chartLoading, setChartLoading] = useState(true);
 
   // Wyznacz prefix miesiąca z filtrów lub bieżący miesiąc
   // Zakres/filtrowanie zawsze liczone wspólną logiką (spójnie z VATSummary)
   const { from: effectFrom, to: effectTo, status, contractorFilter } = resolveEffectiveFilters(filters);
+
+  const saleQuery = buildInvoicePoolQuery(filters, 'sale', { defaultToCurrentMonth: true });
+  const purchaseQuery = buildInvoicePoolQuery(filters, 'purchase', { defaultToCurrentMonth: true });
+  const salePoolKey = buildInvoicePoolKey(saleQuery);
+  const purchasePoolKey = buildInvoicePoolKey(purchaseQuery);
+
+  const saleEntry = useAppStore((s) => s.invoicePool?.sale?.[salePoolKey]);
+  const purchaseEntry = useAppStore((s) => s.invoicePool?.purchase?.[purchasePoolKey]);
+  const saleLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`sale:${salePoolKey}`]));
+  const purchaseLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`purchase:${purchasePoolKey}`]));
+
+  const saleInvoices = useMemo(
+    () => (Array.isArray(saleEntry?.items) ? saleEntry.items : []),
+    [saleEntry]
+  );
+  const purchaseInvoices = useMemo(
+    () => (Array.isArray(purchaseEntry?.items) ? purchaseEntry.items : []),
+    [purchaseEntry]
+  );
 
   // Etykieta okresu do prawego górnego rogu
   const periodLabel = `${toSlashDate(effectFrom)} - ${toSlashDate(effectTo)}`;
@@ -164,33 +181,26 @@ export default function DashboardSummary({ filters }) {
   // Dane wykresu — efektywny zakres + aktywne filtry
   useEffect(() => {
     let cancelled = false;
-    setChart(prev => ({ ...prev, loading: true }));
-
-    const saleParams = buildInvoiceParams(filters, 'sale');
-    const purchaseParams = buildInvoiceParams(filters, 'purchase');
+    setChartLoading(true);
 
     Promise.all([
-      fetchAllInvoices(saleParams),
-      fetchAllInvoices(purchaseParams),
+      loadInvoicePool({ direction: 'sale', filters, options: { defaultToCurrentMonth: true } }),
+      loadInvoicePool({ direction: 'purchase', filters, options: { defaultToCurrentMonth: true } }),
     ])
-      .then(([sales, purchases]) => {
-        if (cancelled) return;
-
-        // Jeden setState = jeden render, brak race-condition
-        setChart({ loading: false, saleInvoices: sales, purchaseInvoices: purchases });
-      })
-      .catch(() => {
-        if (!cancelled)
-          setChart({ loading: false, saleInvoices: [], purchaseInvoices: [] });
+      .catch(() => null)
+      .finally(() => {
+        if (!cancelled) setChartLoading(false);
       });
     return () => { cancelled = true; };
-  }, [effectFrom, effectTo, status, contractorFilter, filters]);
+  }, [loadInvoicePool, effectFrom, effectTo, status, contractorFilter, filters, salePoolKey, purchasePoolKey]);
+
+  const chartBusy = chartLoading || saleLoading || purchaseLoading;
 
   const combinedData = useMemo(() => {
-    const saleMap     = buildDailyMap(chart.saleInvoices);
-    const purchaseMap = buildDailyMap(chart.purchaseInvoices);
+    const saleMap     = buildDailyMap(saleInvoices);
+    const purchaseMap = buildDailyMap(purchaseInvoices);
     return buildCombinedData(saleMap, purchaseMap, effectFrom, effectTo);
-  }, [chart.saleInvoices, chart.purchaseInvoices, effectFrom, effectTo]);
+  }, [saleInvoices, purchaseInvoices, effectFrom, effectTo]);
 
   const xAxisTicks = useMemo(() => buildXAxisTicks(combinedData, 12), [combinedData]);
   const firstFullDate = combinedData[0]?.fullDate ?? '';
@@ -198,8 +208,8 @@ export default function DashboardSummary({ filters }) {
   const spansMultipleMonths =
     firstFullDate && lastFullDate && firstFullDate.slice(0, 7) !== lastFullDate.slice(0, 7);
 
-  const saleSummary     = useMemo(() => buildPlnSummary(chart.saleInvoices),     [chart.saleInvoices]);
-  const purchaseSummary = useMemo(() => buildPlnSummary(chart.purchaseInvoices), [chart.purchaseInvoices]);
+  const saleSummary     = useMemo(() => buildPlnSummary(saleInvoices),     [saleInvoices]);
+  const purchaseSummary = useMemo(() => buildPlnSummary(purchaseInvoices), [purchaseInvoices]);
 
   return (
     <div className={styles.root}>
@@ -219,7 +229,7 @@ export default function DashboardSummary({ filters }) {
             )}
           </div>
         </div>
-        {chart.loading ? (
+        {chartBusy ? (
           <div className={styles.chartEmpty}><span className="spinner" /></div>
         ) : combinedData.length === 0 ? (
           <div className={styles.chartEmpty}>Brak faktur w wybranym okresie</div>
@@ -284,7 +294,7 @@ export default function DashboardSummary({ filters }) {
             </ResponsiveContainer>
           </div>
         )}
-        {!chart.loading && (
+        {!chartBusy && (
           <div className={styles.summaryWrap}>
             <div className={styles.summaryHeading}>W wybranym okresie:</div>
             <div className={styles.summaryBar}>

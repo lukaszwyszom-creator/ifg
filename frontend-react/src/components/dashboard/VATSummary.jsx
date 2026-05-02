@@ -1,19 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useAppStore } from '../../store/useAppStore';
 import { buildPlnSummary } from './dashboardAggregation';
-import { buildInvoiceParams, fetchAllInvoices, resolveEffectiveFilters } from './dashboardQuery';
+import { buildInvoicePoolKey, buildInvoicePoolQuery, resolveEffectiveFilters } from './dashboardQuery';
 import styles from './VATSummary.module.css';
 
 const VAT_RATES = ['23', '8', '5', '0'];
-
-function monthRange(prefix) {
-  const [y, m] = String(prefix || currentMonthPrefix()).split('-').map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  const month = String(m).padStart(2, '0');
-  return {
-    from: `${y}-${month}-01`,
-    to: `${y}-${month}-${String(lastDay).padStart(2, '0')}`,
-  };
-}
 
 function monthLabel(prefix) {
   if (!prefix) return '';
@@ -81,12 +72,31 @@ function createEmptyRateRow() {
 }
 
 export default function VATSummary({ filters }) {
+  const loadInvoicePool = useAppStore((s) => s.loadInvoicePool);
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ saleNet: 0, saleVat: 0, purchaseNet: 0, purchaseVat: 0 });
   const [loading, setLoading] = useState(false);
 
   const { monthPrefix: periodPrefix } = resolveEffectiveFilters(filters);
-  const { from, to } = monthRange(periodPrefix);
+
+  const saleQuery = buildInvoicePoolQuery(filters, 'sale', { defaultToCurrentMonth: true });
+  const purchaseQuery = buildInvoicePoolQuery(filters, 'purchase', { defaultToCurrentMonth: true });
+  const salePoolKey = buildInvoicePoolKey(saleQuery);
+  const purchasePoolKey = buildInvoicePoolKey(purchaseQuery);
+
+  const saleEntry = useAppStore((s) => s.invoicePool?.sale?.[salePoolKey]);
+  const purchaseEntry = useAppStore((s) => s.invoicePool?.purchase?.[purchasePoolKey]);
+  const saleLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`sale:${salePoolKey}`]));
+  const purchaseLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`purchase:${purchasePoolKey}`]));
+
+  const saleInvoices = useMemo(
+    () => (Array.isArray(saleEntry?.items) ? saleEntry.items : []),
+    [saleEntry]
+  );
+  const purchaseInvoices = useMemo(
+    () => (Array.isArray(purchaseEntry?.items) ? purchaseEntry.items : []),
+    [purchaseEntry]
+  );
 
   const delta = totals.saleVat - totals.purchaseVat;
   const deltaLabel = delta > 0
@@ -100,81 +110,11 @@ export default function VATSummary({ filters }) {
 
     setLoading(true);
 
-    const saleParams = buildInvoiceParams(filters, 'sale');
-    const purchaseParams = buildInvoiceParams(filters, 'purchase');
-
     Promise.all([
-      fetchAllInvoices(saleParams),
-      fetchAllInvoices(purchaseParams),
+      loadInvoicePool({ direction: 'sale', filters, options: { defaultToCurrentMonth: true } }),
+      loadInvoicePool({ direction: 'purchase', filters, options: { defaultToCurrentMonth: true } }),
     ])
-      .then(([saleInvoices, purchaseInvoices]) => {
-        if (cancelled) return;
-
-        const rateMap = {
-          '23': createEmptyRateRow(),
-          '8': createEmptyRateRow(),
-          '5': createEmptyRateRow(),
-          '0': createEmptyRateRow(),
-          inne: createEmptyRateRow(),
-        };
-
-        const aggregateInto = (invoices, side) => {
-          for (const inv of invoices) {
-            if ((inv.status ?? '') === 'rejected') continue;
-            if ((inv.currency ?? 'PLN').toUpperCase() !== 'PLN') continue;
-            for (const item of inv.items || []) {
-              const rate = resolveRate(item);
-              const row = rateMap[rate] || (rateMap.inne = createEmptyRateRow());
-              const net = toNum(item.net_total);
-              const vat = toNum(item.vat_total);
-
-              if (side === 'sale') {
-                row.saleNet += net;
-                row.saleVat += vat;
-              } else {
-                row.purchaseNet += net;
-                row.purchaseVat += vat;
-              }
-            }
-          }
-        };
-
-        aggregateInto(saleInvoices, 'sale');
-        aggregateInto(purchaseInvoices, 'purchase');
-
-        const orderedRates = [...VAT_RATES];
-        if (
-          rateMap.inne.saleNet > 0
-          || rateMap.inne.saleVat > 0
-          || rateMap.inne.purchaseNet > 0
-          || rateMap.inne.purchaseVat > 0
-        ) {
-          orderedRates.push('inne');
-        }
-
-        const finalRows = orderedRates.map((rate) => {
-          const row = rateMap[rate];
-          return {
-            rate,
-            saleNet: +row.saleNet.toFixed(2),
-            saleVat: +row.saleVat.toFixed(2),
-            purchaseNet: +row.purchaseNet.toFixed(2),
-            purchaseVat: +row.purchaseVat.toFixed(2),
-            deltaVat: +(row.purchaseVat - row.saleVat).toFixed(2),
-          };
-        });
-
-        const saleSummary = buildPlnSummary(saleInvoices);
-        const purchaseSummary = buildPlnSummary(purchaseInvoices);
-
-        setRows(finalRows);
-        setTotals({
-          saleNet: saleSummary.netto,
-          saleVat: saleSummary.vat,
-          purchaseNet: purchaseSummary.netto,
-          purchaseVat: purchaseSummary.vat,
-        });
-      })
+      .catch(() => null)
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -182,7 +122,80 @@ export default function VATSummary({ filters }) {
     return () => {
       cancelled = true;
     };
-  }, [from, to, filters]);
+  }, [filters, loadInvoicePool, salePoolKey, purchasePoolKey]);
+
+  useEffect(() => {
+    if (saleLoading || purchaseLoading) {
+      setLoading(true);
+      return;
+    }
+
+    const rateMap = {
+      '23': createEmptyRateRow(),
+      '8': createEmptyRateRow(),
+      '5': createEmptyRateRow(),
+      '0': createEmptyRateRow(),
+      inne: createEmptyRateRow(),
+    };
+
+    const aggregateInto = (invoices, side) => {
+      for (const inv of invoices) {
+        if ((inv.status ?? '') === 'rejected') continue;
+        if ((inv.currency ?? 'PLN').toUpperCase() !== 'PLN') continue;
+        for (const item of inv.items || []) {
+          const rate = resolveRate(item);
+          const row = rateMap[rate] || (rateMap.inne = createEmptyRateRow());
+          const net = toNum(item.net_total);
+          const vat = toNum(item.vat_total);
+
+          if (side === 'sale') {
+            row.saleNet += net;
+            row.saleVat += vat;
+          } else {
+            row.purchaseNet += net;
+            row.purchaseVat += vat;
+          }
+        }
+      }
+    };
+
+    aggregateInto(saleInvoices, 'sale');
+    aggregateInto(purchaseInvoices, 'purchase');
+
+    const orderedRates = [...VAT_RATES];
+    if (
+      rateMap.inne.saleNet > 0
+      || rateMap.inne.saleVat > 0
+      || rateMap.inne.purchaseNet > 0
+      || rateMap.inne.purchaseVat > 0
+    ) {
+      orderedRates.push('inne');
+    }
+
+    const finalRows = orderedRates.map((rate) => {
+      const row = rateMap[rate];
+      return {
+        rate,
+        saleNet: +row.saleNet.toFixed(2),
+        saleVat: +row.saleVat.toFixed(2),
+        purchaseNet: +row.purchaseNet.toFixed(2),
+        purchaseVat: +row.purchaseVat.toFixed(2),
+        deltaVat: +(row.purchaseVat - row.saleVat).toFixed(2),
+      };
+    });
+
+    const saleSummary = buildPlnSummary(saleInvoices);
+    const purchaseSummary = buildPlnSummary(purchaseInvoices);
+
+    setRows(finalRows);
+    setTotals({
+      saleNet: saleSummary.netto,
+      saleVat: saleSummary.vat,
+      purchaseNet: purchaseSummary.netto,
+      purchaseVat: purchaseSummary.vat,
+    });
+    setLoading(false);
+  }, [saleInvoices, purchaseInvoices, saleLoading, purchaseLoading]);
 
   if (loading) return <div className={styles.card}><span className="spinner" /></div>;
 

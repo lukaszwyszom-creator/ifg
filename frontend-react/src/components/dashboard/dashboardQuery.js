@@ -1,5 +1,3 @@
-import { invoicesApi } from '../../api/invoices';
-
 export function currentMonthPrefix() {
   const now = new Date();
   const y = now.getFullYear();
@@ -22,51 +20,90 @@ function normalizeContractorFilter(raw) {
   return contractor.length >= 3 ? contractor : '';
 }
 
-export function resolveEffectiveFilters(filters = {}) {
-  const periodPrefix = filters?.month || currentMonthPrefix();
-  const month = monthRange(periodPrefix);
+function toIsoDate(value) {
+  const text = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
 
-  const issueDateFrom = filters?.issue_date_from || '';
-  const issueDateTo = filters?.issue_date_to || '';
+function toMonthPrefix(value) {
+  const text = String(value || '').trim();
+  return /^\d{4}-\d{2}$/.test(text) ? text : '';
+}
+
+function invoiceIssueDate(invoice) {
+  return String(invoice?.issue_date || '').slice(0, 10);
+}
+
+export function resolveEffectiveFilters(filters = {}, options = {}) {
+  const {
+    defaultToCurrentMonth = true,
+  } = options;
+
+  const monthPrefix = toMonthPrefix(filters?.month);
+  const explicitFrom = toIsoDate(filters?.issue_date_from);
+  const explicitTo = toIsoDate(filters?.issue_date_to);
+  const explicitBefore = toIsoDate(filters?.issue_date_before);
   const contractorFilter = normalizeContractorFilter(filters?.contractor);
-  const status = filters?.status || '';
+  const status = String(filters?.status || '').trim();
 
-  const dateRangeActive = !!(issueDateFrom || issueDateTo);
-  const useImplicitMonthRange = !dateRangeActive && !contractorFilter;
+  let from = explicitFrom;
+  let to = explicitTo;
+
+  if (!from && !to && monthPrefix) {
+    const month = monthRange(monthPrefix);
+    from = month.from;
+    to = month.to;
+  }
+
+  if (!from && !to && !explicitBefore && defaultToCurrentMonth) {
+    const currentMonth = monthRange(currentMonthPrefix());
+    from = currentMonth.from;
+    to = currentMonth.to;
+  }
 
   return {
-    from: useImplicitMonthRange ? month.from : issueDateFrom,
-    to: useImplicitMonthRange ? month.to : issueDateTo,
-    monthPrefix: periodPrefix,
+    from,
+    to,
+    before: explicitBefore,
+    monthPrefix: monthPrefix || currentMonthPrefix(),
     status,
     contractorFilter,
   };
 }
 
-export function buildInvoiceParams(filters = {}, direction) {
-  const resolved = resolveEffectiveFilters(filters);
-
+export function buildInvoicePoolQuery(filters = {}, direction, options = {}) {
+  const resolved = resolveEffectiveFilters(filters, options);
   return {
     direction,
     ...(resolved.from && { issue_date_from: resolved.from }),
     ...(resolved.to && { issue_date_to: resolved.to }),
+    ...(resolved.before && { issue_date_before: resolved.before }),
     ...(resolved.status && { status: resolved.status }),
     ...(resolved.contractorFilter && { number_filter: resolved.contractorFilter }),
   };
 }
 
-export async function fetchAllInvoices(baseParams) {
-  let page = 1;
-  const size = 100;
-  let total = 0;
-  const items = [];
+export function buildInvoicePoolKey(query = {}) {
+  const normalized = Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== null && String(value) !== '')
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(normalized);
+}
 
-  do {
-    const res = await invoicesApi.list({ ...baseParams, page, size });
-    total = Number(res?.total || 0);
-    items.push(...(res?.items || []));
-    page += 1;
-  } while (items.length < total);
+export function filterInvoicesFromPool(invoices = [], filters = {}, options = {}) {
+  const resolved = resolveEffectiveFilters(filters, options);
+  const from = resolved.from;
+  const to = resolved.to;
+  const before = resolved.before;
+  const status = resolved.status;
 
-  return items;
+  return invoices.filter((invoice) => {
+    const issueDate = invoiceIssueDate(invoice);
+    if (!issueDate) return false;
+    if (from && issueDate < from) return false;
+    if (to && issueDate > to) return false;
+    if (before && issueDate >= before) return false;
+    if (status && String(invoice?.status || '') !== status) return false;
+    return true;
+  });
 }

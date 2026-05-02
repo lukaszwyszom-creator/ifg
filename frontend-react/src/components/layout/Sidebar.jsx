@@ -5,16 +5,8 @@ import { ksefApi } from '../../api/ksef';
 import styles from './Sidebar.module.css';
 import logo from '../../assets/logo-ifg.png';
 
-function formatCurrentMonthLabel() {
-  const monthYear = new Intl.DateTimeFormat('pl-PL', {
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date());
-  return `Faktury - ${monthYear}`;
-}
-
 const NAV_ITEMS = [
-  { to: '/invoices', label: formatCurrentMonthLabel(), icon: '📄' },
+  { to: '/invoices', label: 'Faktury sprzedaży', icon: '📄' },
   { to: '/dashboard', label: 'Sprzedaż / Zakup', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
   { to: '/stock', label: 'Magazyn', icon: '📦' },

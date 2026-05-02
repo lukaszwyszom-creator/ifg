@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { invoicesApi } from '../api/invoices';
+import { buildInvoicePoolKey, buildInvoicePoolQuery } from '../components/dashboard/dashboardQuery';
 
 function disconnectedKsefConnection() {
   return {
@@ -20,12 +22,38 @@ function currentMonthValue() {
   return `${y}-${m}`;
 }
 
+function emptyInvoicePool() {
+  return { sale: {}, purchase: {} };
+}
+
+async function fetchInvoicesAllPages(baseQuery) {
+  const size = 100;
+  let page = 1;
+  let total = 0;
+  const items = [];
+
+  do {
+    const response = await invoicesApi.list({ ...baseQuery, page, size });
+    const pageItems = Array.isArray(response?.items) ? response.items : [];
+    total = Number(response?.total ?? pageItems.length);
+    items.push(...pageItems);
+    if (page * size >= total) break;
+    page += 1;
+  } while (true);
+
+  return items;
+}
+
 export const useAppStore = create(
   persist(
-    (set) => ({
+    (set, get) => ({
       // NIP sprzedawcy zapamiętany do operacji KSeF
       sellerNip: '',
       ksefConnection: disconnectedKsefConnection(),
+
+      invoicePool: emptyInvoicePool(),
+      invoicePoolLoading: {},
+      invoicePoolErrors: {},
 
       // Filtry wspólne
       filters: {
@@ -46,6 +74,109 @@ export const useAppStore = create(
 
       setFilters: (patch) =>
         set((s) => ({ filters: { ...s.filters, ...patch } })),
+
+      loadInvoicePool: async ({ direction = 'sale', filters = {}, options = {}, force = false } = {}) => {
+        const query = buildInvoicePoolQuery(filters, direction, options);
+        const key = buildInvoicePoolKey(query);
+        const requestKey = `${direction}:${key}`;
+
+        if (!force) {
+          const cachedItems = get().invoicePool?.[direction]?.[key]?.items;
+          if (Array.isArray(cachedItems)) {
+            return cachedItems;
+          }
+          const inFlight = get().invoicePoolLoading?.[requestKey];
+          if (inFlight) {
+            return inFlight;
+          }
+        }
+
+        const request = (async () => {
+          try {
+            const items = await fetchInvoicesAllPages(query);
+            set((state) => {
+              const byDirection = state.invoicePool?.[direction] || {};
+              const nextDirectionPool = {
+                ...byDirection,
+                [key]: {
+                  key,
+                  query,
+                  direction,
+                  items,
+                  total: items.length,
+                  loadedAt: Date.now(),
+                },
+              };
+              const nextErrors = { ...(state.invoicePoolErrors || {}) };
+              delete nextErrors[requestKey];
+              return {
+                invoicePool: {
+                  ...(state.invoicePool || emptyInvoicePool()),
+                  [direction]: nextDirectionPool,
+                },
+                invoicePoolErrors: nextErrors,
+              };
+            });
+            return items;
+          } catch (error) {
+            set((state) => ({
+              invoicePoolErrors: {
+                ...(state.invoicePoolErrors || {}),
+                [requestKey]: error,
+              },
+            }));
+            throw error;
+          } finally {
+            set((state) => {
+              const nextLoading = { ...(state.invoicePoolLoading || {}) };
+              delete nextLoading[requestKey];
+              return { invoicePoolLoading: nextLoading };
+            });
+          }
+        })();
+
+        set((state) => ({
+          invoicePoolLoading: {
+            ...(state.invoicePoolLoading || {}),
+            [requestKey]: request,
+          },
+        }));
+
+        return request;
+      },
+
+      refreshAllInvoicePools: async () => {
+        const pool = get().invoicePool || emptyInvoicePool();
+        const tasks = [];
+
+        for (const direction of ['sale', 'purchase']) {
+          const entries = Object.values(pool?.[direction] || {});
+          for (const entry of entries) {
+            const query = entry?.query;
+            if (!query) continue;
+            tasks.push(
+              get().loadInvoicePool({
+                direction,
+                filters: {
+                  month: '',
+                  issue_date_from: query.issue_date_from || '',
+                  issue_date_to: query.issue_date_to || '',
+                  issue_date_before: query.issue_date_before || '',
+                  status: query.status || '',
+                  contractor: query.number_filter || '',
+                },
+                options: { defaultToCurrentMonth: false },
+                force: true,
+              }).catch(() => null)
+            );
+          }
+        }
+
+        if (tasks.length === 0) return;
+        await Promise.all(tasks);
+      },
+
+      clearInvoicePool: () => set({ invoicePool: emptyInvoicePool(), invoicePoolLoading: {}, invoicePoolErrors: {} }),
 
       resetFilters: () =>
         set({

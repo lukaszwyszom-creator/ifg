@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { invoicesApi } from '../../api/invoices';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { buildInvoicePoolKey, buildInvoicePoolQuery, filterInvoicesFromPool } from '../dashboard/dashboardQuery';
 import Pagination from '../common/Pagination';
 import InvoiceCardList from './InvoiceCardList';
 
@@ -16,72 +17,77 @@ export default function InvoiceList({
   showKsefStatus = true,
   limit,
   hidePager = false,
+  emptyMsg,
+  sourceItems,
   onItemsChange,
   onOpenInvoice,
 }) {
-  const [data, setData] = useState({ items: [], total: 0 });
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const loadInvoicePool = useAppStore((s) => s.loadInvoicePool);
 
   const size = limit ?? 20;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const contractorFilter = String(filters.contractor || '').trim();
+  const poolQuery = useMemo(
+    () => buildInvoicePoolQuery(filters, direction, { defaultToCurrentMonth: false }),
+    [filters, direction]
+  );
+  const poolKey = useMemo(() => buildInvoicePoolKey(poolQuery), [poolQuery]);
 
-      // Filtr miesiąca przekazujemy jawnie do API (parametr `month=YYYY-MM`).
-      // Backend rozwija go na issue_date_from/to. Dzięki temu nagłówek UI
-      // i dane na liście są zawsze w jednym miesiącu — brak rozjazdów.
-      const dateFrom = filters.issue_date_from || '';
-      const dateTo   = filters.issue_date_to   || '';
-      const useMonth = !!filters.month && !dateFrom && !dateTo && contractorFilter.length < 3;
+  const poolEntry = useAppStore((s) => s.invoicePool?.[direction]?.[poolKey]);
+  const poolLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`${direction}:${poolKey}`]));
 
-      const params = {
-        page,
-        size,
-        direction,
-        ...(filters.status  && { status: filters.status }),
-        ...(useMonth        && { month: filters.month }),
-        ...(dateFrom        && { issue_date_from: dateFrom }),
-        ...(dateTo          && { issue_date_to: dateTo }),
-        ...(contractorFilter.length >= 3 && { number_filter: contractorFilter }),
-      };
-      const res = await invoicesApi.list(params);
-      setData(res);
-      if (onItemsChange) {
-        onItemsChange(Array.isArray(res?.items) ? res.items : []);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [page, size, filters, direction, onItemsChange]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Odśwież listę zakupowych po synchronizacji z KSeF
   useEffect(() => {
-    if (direction !== 'purchase') return;
-    const handler = () => load();
-    window.addEventListener('ksef:invoices-synced', handler);
-    return () => window.removeEventListener('ksef:invoices-synced', handler);
-  }, [direction, load]);
+    if (Array.isArray(sourceItems)) return;
+    loadInvoicePool({ direction, filters, options: { defaultToCurrentMonth: false } }).catch(() => null);
+  }, [sourceItems, loadInvoicePool, direction, filters, poolKey]);
 
-  // Eksponuj reload przez ref (opcjonalnie) — proste triggery
+  const baseItems = useMemo(
+    () => (Array.isArray(sourceItems)
+      ? sourceItems
+      : (Array.isArray(poolEntry?.items) ? poolEntry.items : [])),
+    [sourceItems, poolEntry]
+  );
+
+  const filteredItems = useMemo(
+    () => filterInvoicesFromPool(baseItems, filters, { defaultToCurrentMonth: false }),
+    [baseItems, filters]
+  );
+
+  const pagedItems = useMemo(() => {
+    if (hidePager) return filteredItems.slice(0, size);
+    const offset = (page - 1) * size;
+    return filteredItems.slice(offset, offset + size);
+  }, [filteredItems, hidePager, page, size]);
+
+  const loading = !Array.isArray(sourceItems) && poolLoading && !poolEntry;
+
+  const reload = useCallback(() => {
+    if (Array.isArray(sourceItems)) return Promise.resolve(sourceItems);
+    return loadInvoicePool({ direction, filters, options: { defaultToCurrentMonth: false }, force: true });
+  }, [sourceItems, loadInvoicePool, direction, filters]);
+
+  useEffect(() => {
+    if (!onItemsChange) return;
+    onItemsChange(filteredItems);
+  }, [onItemsChange, filteredItems]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters, direction]);
 
   return (
     <div>
       <InvoiceCardList
-        items={data.items}
+        items={pagedItems}
         direction={direction}
         showKsefStatus={showKsefStatus}
         loading={loading}
-        onRefresh={load}
+        onRefresh={reload}
         onOpenInvoice={onOpenInvoice}
-        emptyMsg="Brak faktur"
+        emptyMsg={emptyMsg ?? 'Brak faktur'}
       />
       {!hidePager && (
-        <Pagination page={page} total={data.total} size={size} onPage={setPage} />
+        <Pagination page={page} total={filteredItems.length} size={size} onPage={setPage} />
       )}
     </div>
   );

@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/useAuthStore';
+import { useAppStore } from './store/useAppStore';
 import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import SimpleView from './pages/simple/SimpleView';
@@ -13,6 +15,16 @@ function PrivateRoute({ children }) {
 }
 
 export default function App() {
+  const refreshAllInvoicePools = useAppStore((s) => s.refreshAllInvoicePools);
+
+  useEffect(() => {
+    const handler = () => {
+      refreshAllInvoicePools().catch(() => null);
+    };
+    window.addEventListener('ksef:invoices-synced', handler);
+    return () => window.removeEventListener('ksef:invoices-synced', handler);
+  }, [refreshAllInvoicePools]);
+
   return (
     <BrowserRouter>
       <Routes>

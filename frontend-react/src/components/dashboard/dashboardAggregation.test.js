@@ -110,6 +110,21 @@ test('Sidebar: zawiera etykietę "Sprzedaż / Zakup"', () => {
   );
 });
 
+test('Sidebar: etykieta faktur sprzedaży jest stała (bez miesiąca)', () => {
+  const src = readFileSync(
+    join(__dir, '../layout/Sidebar.jsx'),
+    'utf-8',
+  );
+  assert.ok(
+    src.includes("label: 'Faktury sprzedaży'"),
+    'Sidebar powinien mieć stałą etykietę "Faktury sprzedaży"',
+  );
+  assert.ok(
+    !src.includes('Faktury -'),
+    'Sidebar nie powinien dynamicznie doklejać miesiąca do etykiety faktur',
+  );
+});
+
 test('Sidebar: nav item i label mają white-space nowrap (jedna linia)', () => {
   const src = readFileSync(
     join(__dir, '../layout/Sidebar.module.css'),
@@ -221,6 +236,38 @@ test('AdvancedDashboard: ukrywa kolumnę Status KSeF w zestawieniach sprzedaży 
     'utf-8',
   );
   assert.ok(src.includes('showKsefStatus={false}'), 'brak wyłączenia showKsefStatus w dashboardzie');
+});
+
+test('SimpleView: selectedMonth steruje filtrem month i nagłówkiem sprzedaży', () => {
+  const src = readFileSync(
+    join(__dir, '../../pages/simple/SimpleView.jsx'),
+    'utf-8',
+  );
+  assert.ok(src.includes('selectedMonth'), 'brak stanu selectedMonth');
+  assert.ok(src.includes('filters={saleMonthFilters}'), 'InvoiceList powinien używać selectedMonth przez saleMonthFilters');
+  assert.ok(src.includes('Suma sprzedaży wybranego miesiąca:'), 'brak nagłówka podsumowania miesiąca');
+  assert.ok(src.includes('Brak faktur sprzedaży w ${selectedMonthLocative}'), 'brak pustego stanu zależnego od selectedMonth');
+});
+
+test('InvoiceList: ignoruje stare odpowiedzi requestów (race condition miesiąca)', () => {
+  const src = readFileSync(
+    join(__dir, '../invoice/InvoiceList.jsx'),
+    'utf-8',
+  );
+  assert.ok(src.includes('requestSeqRef'), 'brak sekwencji requestów chroniącej przed stale response');
+  assert.ok(src.includes('const requestSeq = ++requestSeqRef.current;'), 'brak inkrementacji sekwencji per request');
+  assert.ok(src.includes('if (requestSeq !== requestSeqRef.current) return;'), 'brak guardu ignorującego stary response');
+  assert.ok(src.includes('requestSeqRef.current += 1;'), 'brak unieważniania requestów przy unmount');
+});
+
+test('InvoiceList: przy filters.month odfiltrowuje odpowiedź po issue_date na ten miesiąc', () => {
+  const src = readFileSync(
+    join(__dir, '../invoice/InvoiceList.jsx'),
+    'utf-8',
+  );
+  assert.ok(src.includes('const rawItems = Array.isArray(res?.items) ? res.items : [];'), 'brak normalizacji listy odpowiedzi');
+  assert.ok(src.includes("rawItems.filter((inv) => String(inv?.issue_date || '').slice(0, 7) === monthFilter)"), 'brak guardu filtrującego po issue_date i monthFilter');
+  assert.ok(src.includes('onItemsChange(items);'), 'onItemsChange powinno dostawać już odfiltrowane elementy');
 });
 
 test('VATSummary: nie mapuje nieparsowalnej stawki VAT do 0%', () => {

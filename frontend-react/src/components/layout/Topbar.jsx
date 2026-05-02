@@ -3,11 +3,7 @@ import KSeFConnectionTile from './KSeFConnectionTile';
 import styles from './Topbar.module.css';
 
 function getCurrentMonthYear() {
-  const monthYear = new Intl.DateTimeFormat('pl-PL', {
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date());
-  return monthYear;
+  return String(new Date().getFullYear());
 }
 
 export default function Topbar({ onMenuToggle }) {
@@ -15,7 +11,7 @@ export default function Topbar({ onMenuToggle }) {
   const monthYear = getCurrentMonthYear();
   const invoicesTitle = (
     <>
-      <span className={styles.pageTitlePrefix}>Faktury bieżące sprzedaży - </span>
+      <span className={styles.pageTitlePrefix}>Faktury sprzedaż - </span>
       <span className={styles.pageTitleAccent}>{monthYear}</span>
     </>
   );
