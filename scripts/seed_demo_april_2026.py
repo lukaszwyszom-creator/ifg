@@ -65,6 +65,7 @@ class InvoiceSpec:
     issue_date: date
     net_amount: Decimal
     vat_rate: Decimal = Decimal("23")
+    due_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -136,14 +137,14 @@ CONTRACTORS = (
 )
 
 INVOICES = (
-    InvoiceSpec("APR2026_SALE_01", "sale_1", "firma_testowa", "sale", date(2026, 4, 5), Decimal("1000.00")),
-    InvoiceSpec("APR2026_SALE_02", "sale_2", "ikona", "sale", date(2026, 4, 7), Decimal("2000.00")),
-    InvoiceSpec("APR2026_SALE_03", "sale_3", "firma_testowa", "sale", date(2026, 4, 11), Decimal("1500.00")),
-    InvoiceSpec("APR2026_SALE_04", "sale_4", "deutsche_test", "sale", date(2026, 4, 18), Decimal("5000.00")),
-    InvoiceSpec("APR2026_PURCHASE_01", "purchase_1", "biuro_rachunkowe_alfa", "purchase", date(2026, 4, 3), Decimal("800.00")),
-    InvoiceSpec("APR2026_PURCHASE_02", "purchase_2", "cloud_services_polska", "purchase", date(2026, 4, 10), Decimal("1200.00")),
-    InvoiceSpec("APR2026_PURCHASE_03", "purchase_3", "cloud_services_polska", "purchase", date(2026, 4, 15), Decimal("2000.00")),
-    InvoiceSpec("APR2026_PURCHASE_04", "purchase_4", "office_supply", "purchase", date(2026, 4, 20), Decimal("300.00")),
+    InvoiceSpec("APR2026_SALE_01", "sale_1", "firma_testowa", "sale", date(2026, 4, 5), Decimal("1000.00"), due_date=date(2026, 4, 19)),
+    InvoiceSpec("APR2026_SALE_02", "sale_2", "ikona", "sale", date(2026, 4, 7), Decimal("2000.00"), due_date=date(2026, 4, 21)),
+    InvoiceSpec("APR2026_SALE_03", "sale_3", "firma_testowa", "sale", date(2026, 4, 11), Decimal("1500.00"), due_date=date(2026, 4, 25)),
+    InvoiceSpec("APR2026_SALE_04", "sale_4", "deutsche_test", "sale", date(2026, 4, 18), Decimal("5000.00"), due_date=date(2026, 5, 2)),
+    InvoiceSpec("APR2026_PURCHASE_01", "purchase_1", "biuro_rachunkowe_alfa", "purchase", date(2026, 4, 3), Decimal("800.00"), due_date=date(2026, 5, 3)),
+    InvoiceSpec("APR2026_PURCHASE_02", "purchase_2", "cloud_services_polska", "purchase", date(2026, 4, 10), Decimal("1200.00"), due_date=date(2026, 5, 10)),
+    InvoiceSpec("APR2026_PURCHASE_03", "purchase_3", "cloud_services_polska", "purchase", date(2026, 4, 15), Decimal("2000.00"), due_date=date(2026, 5, 15)),
+    InvoiceSpec("APR2026_PURCHASE_04", "purchase_4", "office_supply", "purchase", date(2026, 4, 20), Decimal("300.00"), due_date=date(2026, 5, 20)),
 )
 
 TRANSACTIONS = (
@@ -288,6 +289,8 @@ def create_invoice_via_service(session, invoice_service: InvoiceService, actor: 
     existing = find_existing_invoice_orm(session, spec, contractor)
     if existing is not None:
         ensure_invoice_seed_key(existing, spec)
+        if existing.due_date is None and spec.due_date is not None:
+            existing.due_date = spec.due_date
         session.flush()
         if not existing.number_local:
             invoice_service.mark_as_ready(existing.id, actor)
@@ -302,6 +305,7 @@ def create_invoice_via_service(session, invoice_service: InvoiceService, actor: 
         "buyer_id": contractor.id,
         "issue_date": spec.issue_date,
         "sale_date": spec.issue_date,
+        "due_date": spec.due_date,
         "currency": "PLN",
         "direction": spec.direction,
         "buyer_snapshot": {"seed_key": spec.seed_key} if spec.direction == "sale" else None,
