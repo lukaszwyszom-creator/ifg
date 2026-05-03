@@ -56,6 +56,7 @@ def _make_item() -> InvoiceItem:
 def _make_invoice(**kwargs) -> Invoice:
     defaults = dict(
         id=uuid4(),
+        number_local="FV/1/04/2026",
         status=InvoiceStatus.SENDING,
         issue_date=date(2026, 4, 7),
         sale_date=date(2026, 4, 7),
@@ -68,7 +69,14 @@ def _make_invoice(**kwargs) -> Invoice:
             "postal_code": "00-001",
             "city": "Warszawa",
         },
-        buyer_snapshot={"nip": "1234563218", "name": "Nabywca S.A."},
+        buyer_snapshot={
+            "nip": "1234563218",
+            "name": "Nabywca S.A.",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
         items=[_make_item()],
         total_net=Decimal("100.00"),
         total_vat=Decimal("23.00"),

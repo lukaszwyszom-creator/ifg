@@ -295,3 +295,25 @@ test('VATSummary: parsuje stawki z przecinkiem i symbolem %', () => {
     'normalizacja vat_rate powinna obsługiwać zapis "23%" i "23,0"',
   );
 });
+
+test('VATSummary: bucket 0% zawsze wymusza VAT = 0', () => {
+  const src = readFileSync(
+    join(__dir, './VATSummary.jsx'),
+    'utf-8',
+  );
+  assert.ok(
+    src.includes("const vat = rate === '0' ? 0 : toNum(item.vat_total);"),
+    'dla stawki 0% VAT musi być wymuszony na 0 niezależnie od wartości z item.vat_total',
+  );
+});
+
+test('VATSummary: parsuje wariant stawki VAT_0', () => {
+  const src = readFileSync(
+    join(__dir, './VATSummary.jsx'),
+    'utf-8',
+  );
+  assert.ok(
+    src.includes('normalized.match(/-?\\d+(?:\\.\\d+)?/)'),
+    'toNumericRate powinno wyciągać token liczbowy także z formatu VAT_0',
+  );
+});

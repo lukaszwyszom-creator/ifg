@@ -82,12 +82,27 @@ def _item(
 def _invoice(**overrides) -> Invoice:
     defaults: dict = dict(
         id=uuid4(),
+        number_local="FV/1/04/2026",
         status=InvoiceStatus.READY_FOR_SUBMISSION,
         issue_date=date(2026, 4, 6),
         sale_date=date(2026, 4, 6),
         currency="PLN",
-        seller_snapshot={"nip": SELLER_NIP, "name": "Sprzedawca"},
-        buyer_snapshot={"nip": BUYER_NIP, "name": "Nabywca"},
+        seller_snapshot={
+            "nip": SELLER_NIP,
+            "name": "Sprzedawca",
+            "street": "ul. Sprzedawcy",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot={
+            "nip": BUYER_NIP,
+            "name": "Nabywca",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
         items=[_item()],
         total_net=Decimal("100.00"),
         total_vat=Decimal("23.00"),
@@ -301,7 +316,16 @@ class TestNIPChecksum:
 
     def test_validate_for_ksef_rejects_invalid_nip_checksum(self):
         """validate_for_ksef rzuca gdy NIP sprzedawcy ma złą sumę kontrolną."""
-        inv = _invoice(seller_snapshot={"nip": "1234567890", "name": "Firma"})
+        inv = _invoice(
+            seller_snapshot={
+                "nip": "1234567890",
+                "name": "Firma",
+                "street": "ul. Testowa",
+                "building_no": "1",
+                "postal_code": "00-001",
+                "city": "Warszawa",
+            }
+        )
         with pytest.raises(InvalidInvoiceError, match="NIP sprzedawcy"):
             inv.validate_for_ksef()
 

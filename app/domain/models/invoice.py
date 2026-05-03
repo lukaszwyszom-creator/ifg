@@ -107,6 +107,13 @@ class Invoice:
             raise InvalidStatusTransitionError(
                 f"Niedozwolone przejście: {self.status.value} → {target.value}"
             )
+        if target in {InvoiceStatus.ACCEPTED, InvoiceStatus.REJECTED} and self.direction == "sale":
+            try:
+                self.validate_sale_formal_requirements(require_number_local=True)
+            except InvalidInvoiceError as exc:
+                raise InvalidStatusTransitionError(
+                    f"Niedozwolone przejście do {target.value}: {exc}"
+                ) from exc
         self.status = target
 
     # -----------------------
@@ -145,11 +152,82 @@ class Invoice:
                 f"Faktura musi mieć status '{InvoiceStatus.READY_FOR_SUBMISSION.value}' "
                 f"przed wysyłką do KSeF (aktualnie: '{self.status.value}')."
             )
+        if self.direction == "sale":
+            self.validate_sale_formal_requirements(require_number_local=False)
         self.validate_vat()
         if self.invoice_type in _CORRECTION_TYPES:
             self.validate_kor()
         if self.invoice_type in (InvoiceType.ZAL, InvoiceType.ROZ):
             self.validate_zal()
+
+    def validate_sale_formal_requirements(self, *, require_number_local: bool) -> None:
+        """Walidacja minimalnych wymagań formalnych dla faktur sprzedaży."""
+        if self.direction != "sale":
+            return
+
+        if self.issue_date is None:
+            raise InvalidInvoiceError("Dla faktury sale wymagane jest issue_date.")
+        if self.sale_date is None:
+            raise InvalidInvoiceError("Dla faktury sale wymagane jest sale_date.")
+
+        if require_number_local:
+            number_local = (self.number_local or "").strip()
+            if not number_local:
+                raise InvalidInvoiceError(
+                    "Dla faktury sale wymagane jest number_local przed wysyłką lub statusem końcowym (status końcowy wymaga number_local)."
+                )
+
+        self._validate_party_snapshot(self.seller_snapshot, label="sprzedawcy")
+        self._validate_party_snapshot(self.buyer_snapshot, label="nabywcy")
+
+        if not self.items:
+            raise InvalidInvoiceError("Faktura sale musi zawierać co najmniej jedną pozycję.")
+
+        for idx, item in enumerate(self.items, start=1):
+            if not str(item.name or "").strip():
+                raise InvalidInvoiceError(f"Pozycja #{idx}: wymagane pole name.")
+            if item.quantity is None or item.quantity <= Decimal("0"):
+                raise InvalidInvoiceError(f"Pozycja #{idx}: quantity musi być > 0.")
+            if item.unit_price_net is None:
+                raise InvalidInvoiceError(f"Pozycja #{idx}: wymagane pole unit_price_net.")
+            if item.vat_rate is None:
+                raise InvalidInvoiceError(f"Pozycja #{idx}: wymagane pole vat_rate.")
+
+        computed_net = sum((item.net_total for item in self.items), Decimal("0"))
+        computed_vat = sum((item.vat_total for item in self.items), Decimal("0"))
+        computed_gross = sum((item.gross_total for item in self.items), Decimal("0"))
+        tolerance = Decimal("0.01") * max(1, len(self.items))
+
+        if abs(computed_net - self.total_net) > tolerance:
+            raise InvalidInvoiceError(
+                f"Niespójność sum: total_net z pozycji={computed_net}, total_net faktury={self.total_net}."
+            )
+        if abs(computed_vat - self.total_vat) > tolerance:
+            raise InvalidInvoiceError(
+                f"Niespójność sum: total_vat z pozycji={computed_vat}, total_vat faktury={self.total_vat}."
+            )
+        if abs(computed_gross - self.total_gross) > tolerance:
+            raise InvalidInvoiceError(
+                f"Niespójność sum: total_gross z pozycji={computed_gross}, total_gross faktury={self.total_gross}."
+            )
+        if abs((self.total_net + self.total_vat) - self.total_gross) > Decimal("0.01"):
+            raise InvalidInvoiceError(
+                "Niespójność sum: total_net + total_vat względem total_gross."
+            )
+
+    @staticmethod
+    def _validate_party_snapshot(snapshot: dict, *, label: str) -> None:
+        snap = snapshot or {}
+        name = str(snap.get("name") or "").strip()
+        nip = str(snap.get("nip") or "").strip()
+        if not name:
+            raise InvalidInvoiceError(f"Niekompletny snapshot {label}: wymagane pole name.")
+        if not nip:
+            raise InvalidInvoiceError(f"Niekompletny snapshot {label}: wymagane pole nip.")
+        if not _has_minimum_address(snap):
+            raise InvalidInvoiceError(
+                f"Niekompletny snapshot {label}: wymagane minimum danych adresowych."
+            )
 
     def validate_vat(self) -> None:
         """Waliduje pola wymagane dla każdej faktury (NIP, sumy).
@@ -365,3 +443,22 @@ def _is_valid_nip(nip: str) -> bool:
         return False
     checksum = sum(int(stripped[i]) * _NIP_WEIGHTS[i] for i in range(9)) % 11
     return checksum == int(stripped[9])
+
+
+def _has_minimum_address(snapshot: dict) -> bool:
+    if not snapshot:
+        return False
+
+    address_text = str(snapshot.get("address") or "").strip()
+    if address_text:
+        return True
+
+    street = str(snapshot.get("street") or "").strip()
+    building_no = str(snapshot.get("building_no") or "").strip()
+    apartment_no = str(snapshot.get("apartment_no") or "").strip()
+    postal_code = str(snapshot.get("postal_code") or "").strip()
+    city = str(snapshot.get("city") or "").strip()
+
+    has_street_line = bool(street or building_no or apartment_no)
+    has_locality = bool(city or postal_code)
+    return has_street_line and has_locality

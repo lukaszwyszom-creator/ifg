@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.domain.enums import InvoiceStatus, TransmissionStatus
-from app.domain.exceptions import KSeFNotConnectedError
+from app.domain.exceptions import InvalidInvoiceError, KSeFNotConnectedError
 from app.integrations.ksef.client import KSeFClient, KSeFClientError, KSeFSessionExpiredError
 from app.integrations.ksef.exceptions import KSeFMappingError
 from app.integrations.ksef.mapper import KSeFMapper
@@ -93,6 +93,10 @@ class SubmitInvoiceJobHandler:
             raise KSeFNotConnectedError("KSeF not connected")
 
     def _submit_invoice_to_ksef(self, invoice):
+        direction = str(getattr(invoice, "direction", "") or "").strip().lower()
+        if direction == "sale":
+            invoice.validate_sale_formal_requirements(require_number_local=True)
+
         seller_nip = self._resolve_seller_nip(invoice)
         self._ensure_ksef_connected(seller_nip)
         ctx = self._ksef_session_service.get_session_context(seller_nip)
@@ -208,6 +212,21 @@ class SubmitInvoiceJobHandler:
             exc,
         )
         self._mark_permanent_failure(transmission, "MAPPING_ERROR", str(exc))
+
+    def _handle_sale_validation_error(
+        self,
+        transmission_id: UUID,
+        invoice_id: UUID,
+        transmission,
+        exc: InvalidInvoiceError,
+    ) -> None:
+        logger.error(
+            "submit_invoice: walidacja sale-first nie przeszla dla faktury %s (transmisja %s): %s",
+            invoice_id,
+            transmission_id,
+            exc,
+        )
+        self._mark_permanent_failure(transmission, "SALE_FORMAL_INVALID", str(exc))
 
     def _handle_missing_session_error(
         self,
@@ -339,6 +358,9 @@ class SubmitInvoiceJobHandler:
 
         except KSeFSessionExpiredError as exc:
             self._handle_session_expired_error(transmission_id, invoice, transmission, exc)
+
+        except InvalidInvoiceError as exc:
+            self._handle_sale_validation_error(transmission_id, invoice_id, transmission, exc)
 
         except KSeFClientError as exc:
             self._handle_ksef_client_error(invoice, transmission, exc)

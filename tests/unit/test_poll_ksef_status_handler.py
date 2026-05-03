@@ -35,12 +35,42 @@ def _make_payload(transmission_id=None) -> dict:
 def _make_sending_invoice() -> Invoice:
     from datetime import date
     from decimal import Decimal
+    from app.domain.models.invoice import InvoiceItem
     now = datetime.now(UTC)
     return Invoice(
-        id=uuid4(), status=InvoiceStatus.SENDING,
+        id=uuid4(), number_local="FV/1/01/2026", status=InvoiceStatus.SENDING,
         issue_date=date(2026, 1, 15), sale_date=date(2026, 1, 15),
-        currency="PLN", seller_snapshot={}, buyer_snapshot={}, items=[],
-        total_net=Decimal("0"), total_vat=Decimal("0"), total_gross=Decimal("0"),
+        currency="PLN",
+        seller_snapshot={
+            "nip": "1000000035",
+            "name": "Sprzedawca",
+            "street": "ul. Sprzedawcy",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot={
+            "nip": "1000000070",
+            "name": "Nabywca",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
+        items=[
+            InvoiceItem(
+                name="Usluga",
+                quantity=Decimal("1"),
+                unit="szt.",
+                unit_price_net=Decimal("100"),
+                vat_rate=Decimal("23"),
+                net_total=Decimal("100"),
+                vat_total=Decimal("23"),
+                gross_total=Decimal("123"),
+                sort_order=1,
+            )
+        ],
+        total_net=Decimal("100"), total_vat=Decimal("23"), total_gross=Decimal("123"),
         created_at=now, updated_at=now,
     )
 

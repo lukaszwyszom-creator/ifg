@@ -7,6 +7,7 @@ import VATSummary from '../../components/dashboard/VATSummary';
 import TransmissionTable from '../../components/dashboard/TransmissionTable';
 import InvoiceList from '../../components/invoice/InvoiceList';
 import Filters from '../../components/common/Filters';
+import { formatCurrencyPLN } from '../../utils/amountFormatting';
 import OpenInvoicesPanel from './OpenInvoicesPanel';
 import styles from './AdvancedDashboard.module.css';
 
@@ -107,7 +108,43 @@ export default function AdvancedDashboard() {
     };
   }, [tab, openLoaded]);
 
-  const fmtMoney = (value) => `${Number(value ?? 0).toFixed(2)} PLN`;
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    if (!y || !m || !d) return '—';
+    return `${d}.${m}.${y}`;
+  };
+  const fmtInvoiceNumber = (numberLocal, ksefReferenceNumber) => {
+    const local = String(numberLocal || '').trim();
+    if (local) {
+      const withoutPrefix = local.replace(/^FV[\s\/-]*/i, '').trim();
+      return withoutPrefix || local;
+    }
+    if (ksefReferenceNumber) {
+      return `[KSeF] ${ksefReferenceNumber}`;
+    }
+    return '—';
+  };
+  const termInfo = (dueDateIso) => {
+    if (!dueDateIso) {
+      return { text: '—', cls: '' };
+    }
+    const due = new Date(dueDateIso);
+    if (Number.isNaN(due.getTime())) {
+      return { text: '—', cls: '' };
+    }
+    const today = new Date();
+    due.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
+    if (diffDays > 0) {
+      return { text: `+${diffDays} dni`, cls: styles.termAhead };
+    }
+    if (diffDays < 0) {
+      return { text: `${diffDays} dni`, cls: styles.termOverdue };
+    }
+    return { text: '0 dni', cls: styles.termToday };
+  };
   const settlementRows = settlementTab === 'debtors' ? settlements.debtors : settlements.creditors;
   const sumDebt = settlements.debtors.reduce((acc, r) => acc + Number(r.remaining_amount ?? 0), 0);
   const sumCredit = settlements.creditors.reduce((acc, r) => acc + Number(r.remaining_amount ?? 0), 0);
@@ -159,16 +196,16 @@ export default function AdvancedDashboard() {
         )}
 
         {tab === 'settlements' && (
-          <div className={styles.settlementsPanel}>
+          <div className={`${styles.settlementsPanel} ${styles.settlementsPanelSticky}`}>
             <div className={styles.settlementTabs}>
               <button
-                className={`${styles.settlementTab} ${settlementTab === 'debtors' ? styles.settlementTabActive : ''}`}
+                className={`${styles.settlementTab} ${settlementTab === 'debtors' ? `${styles.settlementTabActive} ${styles.settlementTabDebtorsActive}` : ''}`}
                 onClick={() => setSettlementTab('debtors')}
               >
                 Dłużnicy
               </button>
               <button
-                className={`${styles.settlementTab} ${settlementTab === 'creditors' ? styles.settlementTabActive : ''}`}
+                className={`${styles.settlementTab} ${settlementTab === 'creditors' ? `${styles.settlementTabActive} ${styles.settlementTabCreditorsActive}` : ''}`}
                 onClick={() => setSettlementTab('creditors')}
               >
                 Wierzyciele
@@ -185,57 +222,73 @@ export default function AdvancedDashboard() {
 
             {!settlementsLoading && !settlementsError && settlementsLoaded && (
               <div className={styles.settlementsSummary}>
-                <span>Dłużnicy: <strong>{fmtMoney(sumDebt)}</strong></span>
-                <span>Wierzyciele: <strong>{fmtMoney(sumCredit)}</strong></span>
+                <span className={styles.settlementSummaryItem}>
+                  <span className={styles.settlementSummaryLabel}>Dłużnicy:</span>{' '}
+                  <span className={styles.settlementDebtAmount}>{formatCurrencyPLN(sumDebt)}</span>
+                </span>
+                <span className={styles.settlementSummaryItem}>
+                  <span className={styles.settlementSummaryLabel}>Wierzyciele:</span>{' '}
+                  <span className={styles.settlementCreditAmount}>{formatCurrencyPLN(sumCredit)}</span>
+                </span>
               </div>
             )}
 
             {!settlementsLoading && !settlementsError && (
               <div className={styles.tableWrap}>
-                <table className={styles.settlementTable}>
-                  <thead>
-                    <tr>
-                      <th>Kontrahent</th>
-                      <th>Numer faktury</th>
-                      <th>Data wystawienia</th>
-                      <th>Termin płatności</th>
-                      <th>Kwota brutto</th>
-                      <th>Zapłacono</th>
-                      <th>Pozostało</th>
-                      <th>Opóźnienie</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <div className={styles.settlementTable}>
+                  <div className={styles.settlementHeader}>
+                    <div className={styles.settlementRow}>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.contractorCol}`}>Kontrahent</div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.invoiceNumberCol}`}>
+                        <span className={styles.headerTwoLine}><span>Numer</span><span>faktury</span></span>
+                      </div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.issueDateCol}`}>
+                        <span className={styles.headerTwoLine}><span>Data</span><span>wystawienia</span></span>
+                      </div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.dueDateCol}`}>
+                        <span className={styles.headerTwoLine}><span>Data</span><span>płatności</span></span>
+                      </div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.termCol}`}>Termin</div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.grossCol}`}>
+                        <span className={styles.headerTwoLine}><span>Kwota</span><span>brutto</span></span>
+                      </div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.paidCol}`}>Zapłacono</div>
+                      <div className={`${styles.settlementCell} ${styles.settlementHeadCell} ${styles.remainingCol}`}>Pozostało</div>
+                    </div>
+                  </div>
+
+                  <div className={styles.settlementBody}>
                     {settlementRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className={styles.emptyRow}>Brak rozrachunków</td>
-                      </tr>
+                      <div className={styles.settlementRow}>
+                        <div className={`${styles.settlementCell} ${styles.emptyRow}`}>Brak rozrachunków</div>
+                      </div>
                     ) : (
                       settlementRows.map((item) => {
-                        const overdueDays = item.overdue_days;
-                        const isOverdue = typeof overdueDays === 'number' && overdueDays > 0;
                         const remaining = Number(item.remaining_amount ?? 0);
+                        const paidAmount = Number(item.paid_amount ?? 0);
+                        const hasPaid = paidAmount > 0;
                         const hasRemaining = remaining > 0;
+                        const term = termInfo(item.due_date);
                         return (
-                          <tr key={item.invoice_id}>
-                            <td>{item.contractor_name || '—'}</td>
-                            <td>{item.number_local || '—'}</td>
-                            <td>{item.issue_date || '—'}</td>
-                            <td>{item.due_date || '—'}</td>
-                            <td>{fmtMoney(item.gross_total)}</td>
-                            <td>{fmtMoney(item.paid_amount)}</td>
-                            <td className={hasRemaining ? styles.amountDue : undefined}>
-                              {fmtMoney(item.remaining_amount)}
-                            </td>
-                            <td className={isOverdue ? styles.overdue : undefined}>
-                              {isOverdue ? `${overdueDays} dni` : '—'}
-                            </td>
-                          </tr>
+                          <div className={styles.settlementRow} key={item.invoice_id}>
+                            <div className={`${styles.settlementCell} ${styles.contractorCol} ${styles.contractorCell}`} title={item.contractor_name || '—'}>
+                              <span className={styles.contractorText}>{item.contractor_name || '—'}</span>
+                            </div>
+                            <div className={`${styles.settlementCell} ${styles.invoiceNumberCol}`}>{fmtInvoiceNumber(item.number_local, item.ksef_reference_number)}</div>
+                            <div className={`${styles.settlementCell} ${styles.issueDateCol}`}>{fmtDate(item.issue_date)}</div>
+                            <div className={`${styles.settlementCell} ${styles.dueDateCol}`}>{fmtDate(item.due_date)}</div>
+                            <div className={`${styles.settlementCell} ${styles.termCol} ${term.cls}`.trim()}>{term.text}</div>
+                            <div className={`${styles.settlementCell} ${styles.grossCol}`}>{formatCurrencyPLN(item.gross_total)}</div>
+                            <div className={`${styles.settlementCell} ${styles.paidCol} ${hasPaid ? styles.amountPaid : ''}`.trim()}>{formatCurrencyPLN(item.paid_amount)}</div>
+                            <div className={`${styles.settlementCell} ${styles.remainingCol} ${hasPaid ? styles.amountPaid : (hasRemaining ? styles.amountDue : '')}`.trim()}>
+                              {formatCurrencyPLN(item.remaining_amount)}
+                            </div>
+                          </div>
                         );
                       })
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
               </div>
             )}
           </div>

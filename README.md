@@ -16,3 +16,15 @@ Aktualny stan:
 - Jeśli faktura jest już `READY_FOR_SUBMISSION` i nie ma `number_local`, `mark-ready` nadaje numer lokalny.
 - Jeśli faktura jest już `READY_FOR_SUBMISSION` i ma `number_local`, `mark-ready` zwraca fakturę bez zmian.
 - Dla statusów `SENDING`, `ACCEPTED`, `REJECTED` wywołanie `mark-ready` jest niedozwolone i zwraca `409`.
+
+## IFG Agent v7: Settlement Analysis (Debtors / Creditors)
+
+Lokalny agent (`python -m agent.ifg_agent "..."`) zawiera analizę rozrachunków na danych demo:
+- `receivables` (należności) dla faktur `sale`,
+- `payables` (zobowiązania) dla faktur `purchase`,
+- `overdue` dla faktur po `due_date`, które nie mają statusu `paid`.
+
+W raporcie CLI pojawia się sekcja:
+- `=== SETTLEMENT ANALYSIS ===`
+- `receivables_total`, `payables_total`, `overdue_total`
+- `Top overdue: kontrahent | kwota | dni po terminie`

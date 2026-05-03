@@ -20,6 +20,13 @@ PASSWORD  = "admin123"
 BUYER_PL  = "695322e7-4ade-48a5-8057-274441853751"
 BUYER_DE  = "8badc66c-4f4c-4529-89f0-d65c919cbcad"
 
+QUALITY_REQUIRED_SNAPSHOT_FIELDS = (
+    ("seller_snapshot", "name"),
+    ("seller_snapshot", "nip"),
+    ("buyer_snapshot", "name"),
+    ("buyer_snapshot", "nip"),
+)
+
 
 def login():
     r = requests.post(f"{BASE_URL}/api/v1/auth/login",
@@ -37,10 +44,58 @@ def post_invoice(token, data):
     if r.status_code not in (200, 201):
         print(f"  BŁĄD {r.status_code}: {r.text[:120]}")
         return None
-    inv = r.json()
-    num = inv.get('number_local') or '(szkic)'
+    created = r.json()
+
+    mark = requests.post(
+        f"{BASE_URL}/api/v1/invoices/{created['id']}/mark-ready",
+        headers=h(token),
+        timeout=10,
+    )
+    if mark.status_code not in (200, 201):
+        print(f"  BŁĄD mark-ready {mark.status_code}: {mark.text[:160]}")
+        return None
+
+    inv = mark.json()
+    num = inv.get('number_local') or '(brak numeru)'
     print(f"  ✓ {num:20}  {inv['total_gross']:>10} {inv['currency']}  {inv['issue_date']}")
     return inv
+
+
+def _is_blank(value):
+    return value is None or str(value).strip() == ""
+
+
+def post_seed_quality_check(token, created_invoices):
+    errors = []
+
+    for inv in created_invoices:
+        invoice_id = inv.get("id")
+        if not invoice_id:
+            errors.append("invoice_id=<brak>: brak id w odpowiedzi API")
+            continue
+
+        get_resp = requests.get(
+            f"{BASE_URL}/api/v1/invoices/{invoice_id}",
+            headers=h(token),
+            timeout=10,
+        )
+        if get_resp.status_code != 200:
+            errors.append(f"invoice_id={invoice_id}: GET zwrócił {get_resp.status_code}")
+            continue
+
+        payload = get_resp.json()
+
+        if _is_blank(payload.get("number_local")):
+            errors.append(f"invoice_id={invoice_id}: number_local jest puste")
+
+        for snap_key, field_key in QUALITY_REQUIRED_SNAPSHOT_FIELDS:
+            snapshot = payload.get(snap_key) or {}
+            if _is_blank(snapshot.get(field_key)):
+                errors.append(
+                    f"invoice_id={invoice_id}: {snap_key}.{field_key} jest puste"
+                )
+
+    return errors
 
 
 SALE_MARCH = [
@@ -176,24 +231,41 @@ def main():
     print("=== Seed faktur miesięcznych ===\n")
     token = login()
     print(f"✓ Zalogowano\n")
+    created = []
 
     print("[1/4] Sprzedaż – marzec 2026 (4 faktury)")
     for inv in SALE_MARCH:
-        post_invoice(token, inv)
+        saved = post_invoice(token, inv)
+        if saved is not None:
+            created.append(saved)
 
     print("\n[2/4] Sprzedaż – kwiecień 2026 (7 faktur)")
     for inv in SALE_APRIL:
-        post_invoice(token, inv)
+        saved = post_invoice(token, inv)
+        if saved is not None:
+            created.append(saved)
 
     print("\n[3/4] Zakupy – marzec 2026 (9 faktur)")
     for inv in PURCHASE_MARCH:
-        post_invoice(token, inv)
+        saved = post_invoice(token, inv)
+        if saved is not None:
+            created.append(saved)
 
     print("\n[4/4] Zakupy – kwiecień 2026 (7 faktur)")
     for inv in PURCHASE_APRIL:
-        post_invoice(token, inv)
+        saved = post_invoice(token, inv)
+        if saved is not None:
+            created.append(saved)
 
-    print("\n✓ Gotowe!")
+    print("\n[CHECK] Walidacja jakości danych po seedingu")
+    quality_errors = post_seed_quality_check(token, created)
+    if quality_errors:
+        print("✗ Wykryto błędy jakości danych:")
+        for err in quality_errors:
+            print(f"  - {err}")
+        sys.exit(1)
+
+    print("\n✓ Gotowe! Walidacja jakości: OK")
 
 
 if __name__ == "__main__":

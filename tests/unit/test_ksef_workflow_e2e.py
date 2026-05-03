@@ -29,12 +29,27 @@ def _make_ready_invoice() -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
+        number_local="FV/1/04/2026",
         status=InvoiceStatus.SENDING,
         issue_date=date(2026, 4, 6),
         sale_date=date(2026, 4, 6),
         currency="PLN",
-        seller_snapshot={"nip": "1000000035", "name": "Sprzedawca Sp. z o.o."},
-        buyer_snapshot={"nip": "1000000070", "name": "Nabywca S.A."},
+        seller_snapshot={
+            "nip": "1000000035",
+            "name": "Sprzedawca Sp. z o.o.",
+            "street": "ul. Sprzedawcy",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot={
+            "nip": "1000000070",
+            "name": "Nabywca S.A.",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
         items=[
             InvoiceItem(
                 name="Usługa projektowa",

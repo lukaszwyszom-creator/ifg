@@ -5,6 +5,7 @@ Nie modyfikuje żadnego kodu aplikacji IFG.
 """
 from __future__ import annotations
 
+from agent.demo_data_validator import DemoDataValidationReport
 from agent.git_guard import DiffReport
 from agent.rules_loader import RulesBundle
 from agent.runner import CommandResult, TestError
@@ -42,6 +43,7 @@ def build_diagnostic_prompt(
     test_errors: list[TestError],
     error_summary: dict[str, int],
     diff_report: DiffReport,
+    demo_validation_report: DemoDataValidationReport,
 ) -> str:
     """Zbuduj prompt diagnostyczny po polsku.
 
@@ -88,6 +90,16 @@ def build_diagnostic_prompt(
         diff_guard_lines.append("- none")
     diff_guard_section = "\n".join(diff_guard_lines)
 
+    demo_validation_lines = [
+        f"valid: {demo_validation_report.valid}",
+        "errors:",
+    ]
+    if demo_validation_report.errors:
+        demo_validation_lines.extend(f"- {error}" for error in demo_validation_report.errors)
+    else:
+        demo_validation_lines.append("- none")
+    demo_validation_section = "\n".join(demo_validation_lines)
+
     return f"""\
 === COPILOT FIX PROMPT ===
 
@@ -105,6 +117,9 @@ TEST ERROR SUMMARY:
 
 TEST ERRORS:
 {errors_section}
+
+DEMO DATA VALIDATION:
+{demo_validation_section}
 
 DIFF GUARD:
 {diff_guard_section}

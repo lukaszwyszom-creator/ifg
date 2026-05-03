@@ -342,6 +342,16 @@ class TestMarkReady:
         assert res.status_code == 409
         assert status_name in res.json()["error"]["message"]
 
+    def test_mark_ready_invalid_snapshot_returns_422(self, client, mock_invoice_service):
+        mock_invoice_service.mark_as_ready.side_effect = InvalidInvoiceError(
+            "Niekompletny snapshot sprzedawcy: wymagane pola name i nip muszą być niepuste."
+        )
+
+        res = client.post(f"/api/v1/invoices/{uuid4()}/mark-ready")
+
+        assert res.status_code == 422
+        assert "Nie można oznaczyć faktury jako gotowej" in res.json()["error"]["message"]
+
 
 # ---------------------------------------------------------------------------
 # PUT /api/v1/invoices/{id}
@@ -402,6 +412,35 @@ class TestUpdateInvoice:
 
         assert res.status_code == 409
         assert "Analiza" in res.json()["error"]["message"]
+
+
+class TestCreateInvoiceValidation:
+    def test_create_invoice_missing_company_data_returns_422(self, client, mock_invoice_service):
+        mock_invoice_service.create_invoice.side_effect = InvalidInvoiceError(
+            "Brak kompletnych danych firmy w ustawieniach: wymagane seller_name i seller_nip."
+        )
+
+        payload = {
+            "buyer_id": str(uuid4()),
+            "issue_date": "2026-04-05",
+            "sale_date": "2026-04-05",
+            "currency": "PLN",
+            "direction": "sale",
+            "items": [
+                {
+                    "name": "Usługa",
+                    "quantity": "1",
+                    "unit": "szt.",
+                    "unit_price_net": "100.00",
+                    "vat_rate": "23",
+                }
+            ],
+        }
+
+        res = client.post("/api/v1/invoices/", json=payload)
+
+        assert res.status_code == 422
+        assert "seller_name i seller_nip" in res.json()["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

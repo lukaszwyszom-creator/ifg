@@ -220,16 +220,42 @@ def _make_full_invoice(
     invoice_type: InvoiceType = InvoiceType.VAT,
     correction_of_ksef_number: str | None = None,
     correction_of_invoice_id=None,
+    direction: str = "sale",
 ) -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
+        number_local="FV/1/04/2026",
         status=InvoiceStatus.READY_FOR_SUBMISSION,
         issue_date=date(2026, 4, 5),
         sale_date=date(2026, 4, 5),
         currency="PLN",
-        seller_snapshot={"nip": seller_nip, "name": "Firma A"},
-        buyer_snapshot=({"nip": buyer_nip, "name": "Firma B"} if buyer_nip else {"name": "Firma B"}),
+        seller_snapshot={
+            "nip": seller_nip,
+            "name": "Firma A",
+            "street": "ul. A",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot=(
+            {
+                "nip": buyer_nip,
+                "name": "Firma B",
+                "street": "ul. B",
+                "building_no": "2",
+                "postal_code": "30-001",
+                "city": "Krakow",
+            }
+            if buyer_nip
+            else {
+                "name": "Firma B",
+                "street": "ul. B",
+                "building_no": "2",
+                "postal_code": "30-001",
+                "city": "Krakow",
+            }
+        ),
         items=[InvoiceItem(
             name="Usługa", quantity=Decimal("1"), unit="szt.",
             unit_price_net=Decimal(total_net), vat_rate=Decimal("23"),
@@ -244,6 +270,7 @@ def _make_full_invoice(
         invoice_type=invoice_type,
         correction_of_ksef_number=correction_of_ksef_number,
         correction_of_invoice_id=correction_of_invoice_id,
+        direction=direction,
     )
 
 
@@ -265,8 +292,21 @@ class TestValidateForKSeF:
             _make_full_invoice(buyer_nip="123").validate_for_ksef()
 
     def test_missing_buyer_nip_passes(self):
-        """Brak NIP nabywcy jest dozwolony (nabywca może być osobą fizyczną)."""
-        _make_full_invoice(buyer_nip=None).validate_for_ksef()
+        """Dla purchase brak NIP nabywcy przechodzi bez nowych guardów sale."""
+        _make_full_invoice(buyer_nip=None, direction="purchase").validate_for_ksef()
+
+    def test_sale_requires_number_local_before_send(self):
+        inv = _make_full_invoice(direction="sale")
+        inv.number_local = None
+        with pytest.raises(InvalidInvoiceError, match="number_local"):
+            inv.validate_sale_formal_requirements(require_number_local=True)
+
+    def test_sale_requires_minimum_address(self):
+        inv = _make_full_invoice(direction="sale")
+        inv.number_local = "FV/1/04/2026"
+        inv.buyer_snapshot = {"name": "Firma B", "nip": "1000000070"}
+        with pytest.raises(InvalidInvoiceError, match="adresowych"):
+            inv.validate_for_ksef()
 
     def test_totals_inconsistent_raises(self):
         with pytest.raises(InvalidInvoiceError, match="Niespójność sum"):

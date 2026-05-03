@@ -111,6 +111,121 @@ class TestCreateInvoice:
         service.invoice_repository.add.assert_called_once()
         service.audit_service.record.assert_called_once()
 
+    @patch("app.services.invoice_service.settings")
+    def test_create_sale_uses_seller_from_company_buyer_from_contractor(
+        self, mock_settings, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        mock_settings.seller_nip = "1234567890"
+        mock_settings.seller_name = "Nasza Firma"
+        mock_settings.seller_street = "ul. Firmowa"
+        mock_settings.seller_building_no = "1"
+        mock_settings.seller_apartment_no = None
+        mock_settings.seller_postal_code = "00-001"
+        mock_settings.seller_city = "Warszawa"
+        mock_settings.seller_country = "PL"
+
+        buyer_id = uuid4()
+        data = _valid_create_data(buyer_id)
+        data["direction"] = "sale"
+
+        contractor_mock = MagicMock()
+        contractor_mock.nip = "0987654321"
+        contractor_mock.name = "Kontrahent"
+        contractor_mock.street = "ul. Klienta"
+        contractor_mock.building_no = "5"
+        contractor_mock.apartment_no = None
+        contractor_mock.postal_code = "30-001"
+        contractor_mock.city = "Kraków"
+        contractor_mock.voivodeship = None
+        contractor_mock.county = None
+        contractor_mock.commune = None
+        contractor_mock.country = "PL"
+        contractor_mock.krs = None
+        contractor_mock.legal_form = None
+        contractor_mock.regon = None
+        service.contractor_repository.get_by_id.return_value = contractor_mock
+        service.contractor_override_repository.get_active_by_contractor_id.return_value = None
+
+        expected = MagicMock()
+        service.invoice_repository.add.return_value = expected
+
+        service.create_invoice(data, actor)
+
+        created_invoice = service.invoice_repository.add.call_args.args[0]
+        assert created_invoice.direction == "sale"
+        assert created_invoice.seller_snapshot["name"] == "Nasza Firma"
+        assert created_invoice.seller_snapshot["nip"] == "1234567890"
+        assert created_invoice.buyer_snapshot["name"] == "Kontrahent"
+        assert created_invoice.buyer_snapshot["nip"] == "0987654321"
+
+    @patch("app.services.invoice_service.settings")
+    def test_create_purchase_uses_seller_from_contractor_buyer_from_company(
+        self, mock_settings, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        mock_settings.seller_nip = "1234567890"
+        mock_settings.seller_name = "Nasza Firma"
+        mock_settings.seller_street = "ul. Firmowa"
+        mock_settings.seller_building_no = "1"
+        mock_settings.seller_apartment_no = None
+        mock_settings.seller_postal_code = "00-001"
+        mock_settings.seller_city = "Warszawa"
+        mock_settings.seller_country = "PL"
+
+        buyer_id = uuid4()
+        data = _valid_create_data(buyer_id)
+        data["direction"] = "purchase"
+
+        contractor_mock = MagicMock()
+        contractor_mock.nip = "0987654321"
+        contractor_mock.name = "Dostawca"
+        contractor_mock.street = "ul. Dostawcy"
+        contractor_mock.building_no = "5"
+        contractor_mock.apartment_no = None
+        contractor_mock.postal_code = "30-001"
+        contractor_mock.city = "Kraków"
+        contractor_mock.voivodeship = None
+        contractor_mock.county = None
+        contractor_mock.commune = None
+        contractor_mock.country = "PL"
+        contractor_mock.krs = None
+        contractor_mock.legal_form = None
+        contractor_mock.regon = None
+        service.contractor_repository.get_by_id.return_value = contractor_mock
+        service.contractor_override_repository.get_active_by_contractor_id.return_value = None
+
+        expected = MagicMock()
+        service.invoice_repository.add.return_value = expected
+
+        service.create_invoice(data, actor)
+
+        created_invoice = service.invoice_repository.add.call_args.args[0]
+        assert created_invoice.direction == "purchase"
+        assert created_invoice.seller_snapshot["name"] == "Dostawca"
+        assert created_invoice.seller_snapshot["nip"] == "0987654321"
+        assert created_invoice.buyer_snapshot["name"] == "Nasza Firma"
+        assert created_invoice.buyer_snapshot["nip"] == "1234567890"
+
+    @patch("app.services.invoice_service.settings")
+    def test_create_rejects_missing_company_name_or_nip(
+        self, mock_settings, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        mock_settings.seller_nip = ""
+        mock_settings.seller_name = ""
+        mock_settings.seller_street = "ul. Firmowa"
+        mock_settings.seller_building_no = "1"
+        mock_settings.seller_apartment_no = None
+        mock_settings.seller_postal_code = "00-001"
+        mock_settings.seller_city = "Warszawa"
+        mock_settings.seller_country = "PL"
+
+        buyer_id = uuid4()
+        data = _valid_create_data(buyer_id)
+        service.contractor_repository.get_by_id.return_value = MagicMock()
+        service.contractor_override_repository.get_active_by_contractor_id.return_value = None
+
+        with pytest.raises(InvalidInvoiceError, match="seller_name i seller_nip"):
+            service.create_invoice(data, actor)
+
     def test_item_negative_quantity_raises(self, service: InvoiceService, actor: AuthenticatedUser):
         data = _valid_create_data()
         data["items"][0]["quantity"] = "-1"
@@ -474,6 +589,70 @@ class TestMarkAsReady:
 
         with pytest.raises(InvalidStatusTransitionError):
             service.mark_as_ready(sample_invoice.id, actor)
+
+    def test_mark_as_ready_rejects_incomplete_seller_snapshot(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+    ):
+        sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        sample_invoice.number_local = None
+        sample_invoice.seller_snapshot = {"name": "", "nip": ""}
+        sample_invoice.buyer_snapshot = {
+            "name": "Nabywca",
+            "nip": "1000000070",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        }
+        service.invoice_repository.lock_for_update.return_value = sample_invoice
+
+        with pytest.raises(InvalidInvoiceError, match="snapshot sprzedawcy"):
+            service.mark_as_ready(sample_invoice.id, actor)
+
+    def test_mark_as_ready_rejects_incomplete_buyer_snapshot(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+    ):
+        sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        sample_invoice.number_local = None
+        sample_invoice.seller_snapshot = {
+            "name": "Sprzedawca",
+            "nip": "1000000035",
+            "street": "ul. Sprzedawcy",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        }
+        sample_invoice.buyer_snapshot = {"name": "", "nip": ""}
+        service.invoice_repository.lock_for_update.return_value = sample_invoice
+
+        with pytest.raises(InvalidInvoiceError, match="snapshot nabywcy"):
+            service.mark_as_ready(sample_invoice.id, actor)
+
+    def test_mark_as_ready_purchase_does_not_apply_sale_formal_guard(
+        self,
+        service: InvoiceService,
+        actor: AuthenticatedUser,
+        sample_invoice: Invoice,
+    ):
+        sample_invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        sample_invoice.direction = "purchase"
+        sample_invoice.number_local = None
+        sample_invoice.seller_snapshot = {"name": "", "nip": ""}
+        sample_invoice.buyer_snapshot = {"name": "", "nip": ""}
+        service.invoice_repository.lock_for_update.return_value = sample_invoice
+        service.invoice_repository.get_next_sequence_number.return_value = 1
+        service.invoice_repository.exists_by_number.return_value = False
+        service.invoice_repository.update.return_value = sample_invoice
+
+        result = service.mark_as_ready(sample_invoice.id, actor)
+
+        assert result.number_local is not None
 
 
 class TestIsInvoiceEditable:

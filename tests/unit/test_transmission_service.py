@@ -50,9 +50,11 @@ class TestSubmitInvoice:
         invoice_id = uuid4()
         invoice = MagicMock()
         invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        invoice.direction = "sale"
         invoice.updated_at = datetime.now(UTC)
         invoice.can_transition_to = MagicMock(return_value=True)
         invoice.validate_for_ksef = MagicMock()
+        invoice.validate_sale_formal_requirements = MagicMock()
         service._invoice_repo.lock_for_update.return_value = invoice
         service._transmission_repo.get_active_for_invoice.return_value = None
         service._transmission_repo.get_by_idempotency_key.return_value = None
@@ -74,6 +76,37 @@ class TestSubmitInvoice:
         assert result == transmission
         service._job_repo.add.assert_called_once()
         assert service._audit_service.record.call_count == 2
+        invoice.validate_sale_formal_requirements.assert_called_once_with(require_number_local=True)
+
+    def test_purchase_does_not_run_sale_formal_guard(self, service: TransmissionService, actor: AuthenticatedUser):
+        invoice_id = uuid4()
+        invoice = MagicMock()
+        invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        invoice.direction = "purchase"
+        invoice.updated_at = datetime.now(UTC)
+        invoice.can_transition_to = MagicMock(return_value=True)
+        invoice.validate_for_ksef = MagicMock()
+        invoice.validate_sale_formal_requirements = MagicMock()
+        service._invoice_repo.lock_for_update.return_value = invoice
+        service._transmission_repo.get_active_for_invoice.return_value = None
+        service._transmission_repo.get_by_idempotency_key.return_value = None
+
+        transmission = MagicMock()
+        transmission.id = uuid4()
+        transmission.invoice_id = invoice_id
+        transmission.status = TransmissionStatus.QUEUED
+        service._transmission_repo.add.return_value = transmission
+
+        from unittest.mock import patch
+
+        with patch('app.services.transmission_service.KSeFMapper') as mock_mapper:
+            mock_mapper.invoice_to_xml.return_value = b'<xml/>'
+            mock_mapper.xml_content_hash.return_value = 'hash-1'
+
+            result = service.submit_invoice(invoice_id, actor)
+
+        assert result == transmission
+        invoice.validate_sale_formal_requirements.assert_not_called()
 
     def test_returns_existing_transmission_for_same_idempotency_key(self, service: TransmissionService, actor: AuthenticatedUser):
         invoice_id = uuid4()
@@ -155,6 +188,72 @@ class TestRetryTransmission:
 
         with pytest.raises(InvalidInvoiceError, match="Przekroczono"):
             service.retry_transmission(uuid4(), actor)
+
+    def test_retry_sale_without_number_local_is_rejected(self, service: TransmissionService, actor: AuthenticatedUser):
+        t = MagicMock()
+        t.id = uuid4()
+        t.status = TransmissionStatus.FAILED_RETRYABLE
+        t.attempt_no = 1
+        t.invoice_id = uuid4()
+        service._transmission_repo.lock_for_update.return_value = t
+
+        invoice = MagicMock()
+        invoice.direction = "sale"
+        invoice.validate_for_ksef = MagicMock()
+        invoice.validate_sale_formal_requirements = MagicMock(
+            side_effect=InvalidInvoiceError("Dla faktury sale wymagane jest number_local")
+        )
+        service._invoice_repo.lock_for_update.return_value = invoice
+        service._transmission_repo.get_active_for_invoice.return_value = None
+
+        with pytest.raises(InvalidInvoiceError, match="number_local"):
+            service.retry_transmission(t.id, actor)
+
+        service._job_repo.add.assert_not_called()
+
+    def test_retry_sale_with_incomplete_snapshot_is_rejected(self, service: TransmissionService, actor: AuthenticatedUser):
+        t = MagicMock()
+        t.id = uuid4()
+        t.status = TransmissionStatus.FAILED_RETRYABLE
+        t.attempt_no = 1
+        t.invoice_id = uuid4()
+        service._transmission_repo.lock_for_update.return_value = t
+
+        invoice = MagicMock()
+        invoice.direction = "sale"
+        invoice.validate_for_ksef = MagicMock(
+            side_effect=InvalidInvoiceError("Niekompletny snapshot sprzedawcy")
+        )
+        invoice.validate_sale_formal_requirements = MagicMock()
+        service._invoice_repo.lock_for_update.return_value = invoice
+        service._transmission_repo.get_active_for_invoice.return_value = None
+
+        with pytest.raises(InvalidInvoiceError, match="snapshot"):
+            service.retry_transmission(t.id, actor)
+
+        service._job_repo.add.assert_not_called()
+
+    def test_retry_purchase_is_not_blocked_by_sale_guard(self, service: TransmissionService, actor: AuthenticatedUser):
+        t = MagicMock()
+        t.id = uuid4()
+        t.status = TransmissionStatus.FAILED_RETRYABLE
+        t.attempt_no = 1
+        t.invoice_id = uuid4()
+        service._transmission_repo.lock_for_update.return_value = t
+
+        invoice = MagicMock()
+        invoice.direction = "purchase"
+        invoice.validate_for_ksef = MagicMock()
+        invoice.validate_sale_formal_requirements = MagicMock()
+        service._invoice_repo.lock_for_update.return_value = invoice
+        service._transmission_repo.get_active_for_invoice.return_value = None
+
+        result = service.retry_transmission(t.id, actor)
+
+        assert result == t
+        invoice.validate_for_ksef.assert_not_called()
+        invoice.validate_sale_formal_requirements.assert_not_called()
+        service._job_repo.add.assert_called_once()
 
 
 class TestGetTransmission:

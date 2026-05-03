@@ -7,7 +7,7 @@ import pytest
 
 from app.domain.enums import InvoiceStatus
 from app.domain.exceptions import InvalidStatusTransitionError
-from app.domain.models.invoice import Invoice
+from app.domain.models.invoice import Invoice, InvoiceItem
 
 
 def _make_invoice(status: InvoiceStatus = InvoiceStatus.READY_FOR_SUBMISSION) -> Invoice:
@@ -18,12 +18,38 @@ def _make_invoice(status: InvoiceStatus = InvoiceStatus.READY_FOR_SUBMISSION) ->
         issue_date=date(2026, 1, 15),
         sale_date=date(2026, 1, 15),
         currency="PLN",
-        seller_snapshot={},
-        buyer_snapshot={},
-        items=[],
-        total_net=Decimal("0"),
-        total_vat=Decimal("0"),
-        total_gross=Decimal("0"),
+        seller_snapshot={
+            "nip": "1000000035",
+            "name": "Sprzedawca",
+            "street": "ul. Sprzedawcy",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot={
+            "nip": "1000000070",
+            "name": "Nabywca",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
+        items=[
+            InvoiceItem(
+                name="Usluga",
+                quantity=Decimal("1"),
+                unit="szt.",
+                unit_price_net=Decimal("100"),
+                vat_rate=Decimal("23"),
+                net_total=Decimal("100"),
+                vat_total=Decimal("23"),
+                gross_total=Decimal("123"),
+                sort_order=1,
+            )
+        ],
+        total_net=Decimal("100"),
+        total_vat=Decimal("23"),
+        total_gross=Decimal("123"),
         created_at=now,
         updated_at=now,
     )
@@ -37,13 +63,32 @@ class TestTransitionTo:
 
     def test_sending_to_accepted(self):
         inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.ACCEPTED)
         assert inv.status == InvoiceStatus.ACCEPTED
 
     def test_sending_to_rejected(self):
         inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.REJECTED)
         assert inv.status == InvoiceStatus.REJECTED
+
+    def test_sending_to_accepted_without_number_raises(self):
+        inv = _make_invoice(InvoiceStatus.SENDING)
+        with pytest.raises(InvalidStatusTransitionError, match="wymaga number_local"):
+            inv.transition_to(InvoiceStatus.ACCEPTED)
+
+    def test_sending_to_rejected_without_number_raises(self):
+        inv = _make_invoice(InvoiceStatus.SENDING)
+        with pytest.raises(InvalidStatusTransitionError, match="wymaga number_local"):
+            inv.transition_to(InvoiceStatus.REJECTED)
+
+    def test_purchase_sending_to_accepted_without_number_is_allowed(self):
+        inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.direction = "purchase"
+        inv.number_local = None
+        inv.transition_to(InvoiceStatus.ACCEPTED)
+        assert inv.status == InvoiceStatus.ACCEPTED
 
     def test_ready_to_accepted_raises(self):
         inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
@@ -67,12 +112,14 @@ class TestTransitionTo:
 
     def test_full_happy_path(self):
         inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.SENDING)
         inv.transition_to(InvoiceStatus.ACCEPTED)
         assert inv.status == InvoiceStatus.ACCEPTED
 
     def test_full_rejection_path(self):
         inv = _make_invoice(InvoiceStatus.READY_FOR_SUBMISSION)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.SENDING)
         inv.transition_to(InvoiceStatus.REJECTED)
         assert inv.status == InvoiceStatus.REJECTED
@@ -84,6 +131,7 @@ class TestInvoiceTransmissionConsistencyCommit10:
     def test_accepted_invoice_has_ksef_reference_number(self):
         """Faktura ACCEPTED powinna mieć numer KSeF (pole nie-None)."""
         inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.ACCEPTED)
         inv.ksef_reference_number = "KSeF/001/2026/04"
 
@@ -93,6 +141,7 @@ class TestInvoiceTransmissionConsistencyCommit10:
     def test_rejected_invoice_has_no_ksef_reference_number(self):
         """Faktura REJECTED nie powinna mieć numeru KSeF."""
         inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.REJECTED)
 
         assert inv.status == InvoiceStatus.REJECTED
@@ -101,6 +150,7 @@ class TestInvoiceTransmissionConsistencyCommit10:
     def test_accepted_without_upo_still_valid(self):
         """Sukces bez UPO (upo_status='failed') nie powoduje błędu faktury."""
         inv = _make_invoice(InvoiceStatus.SENDING)
+        inv.number_local = "FV/1/01/2026"
         inv.transition_to(InvoiceStatus.ACCEPTED)
         inv.ksef_reference_number = "KSeF/001/2026/04"
 

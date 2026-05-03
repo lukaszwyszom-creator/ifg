@@ -143,8 +143,13 @@ def mark_invoice_as_ready(
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
     actor: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> InvoiceResponse:
-    invoice = invoice_service.mark_as_ready(invoice_id, actor)
-    return InvoiceResponse.from_domain(invoice)
+    try:
+        invoice = invoice_service.mark_as_ready(invoice_id, actor)
+        return InvoiceResponse.from_domain(invoice)
+    except InvalidInvoiceError as exc:
+        raise InvalidInvoiceError(f"Nie można oznaczyć faktury jako gotowej: {exc.message}") from exc
+    except InvalidStatusTransitionError as exc:
+        raise ConflictError(exc.message) from exc
 
 
 @router.put("/{invoice_id}", response_model=InvoiceResponse)

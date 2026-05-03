@@ -1,7 +1,7 @@
 /* InvoiceCardList.module.css */
 
 .container {
-  --invoice-grid-columns: 62px 86px minmax(168px, 1fr) 112px 86px 56px 86px 92px 64px;
+  --invoice-grid-columns: 62px 86px minmax(168px, 1fr) 112px 110px 90px 86px 92px 64px;
   --invoice-grid-gap: 6px;
   display: flex;
   flex-direction: column;
@@ -13,7 +13,7 @@
 }
 
 .noKsef {
-  --invoice-grid-columns: 62px 86px minmax(212px, 1fr) 112px 86px 56px 86px 64px;
+  --invoice-grid-columns: 62px 86px minmax(212px, 1fr) 112px 110px 90px 86px 64px;
 }
 
 .loadingState,

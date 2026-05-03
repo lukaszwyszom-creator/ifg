@@ -38,12 +38,27 @@ def _make_invoice() -> Invoice:
     now = datetime.now(UTC)
     return Invoice(
         id=uuid4(),
+        number_local="FV/1/04/2026",
         status=InvoiceStatus.SENDING,
         issue_date=datetime(2026, 4, 5).date(),
         sale_date=datetime(2026, 4, 5).date(),
         currency="PLN",
-        seller_snapshot={"nip": "1000000035", "name": "Seller"},
-        buyer_snapshot={"nip": "1000000070", "name": "Buyer"},
+        seller_snapshot={
+            "nip": "1000000035",
+            "name": "Seller",
+            "street": "ul. Seller",
+            "building_no": "1",
+            "postal_code": "00-001",
+            "city": "Warszawa",
+        },
+        buyer_snapshot={
+            "nip": "1000000070",
+            "name": "Buyer",
+            "street": "ul. Buyer",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
+        },
         items=[
             InvoiceItem(
                 name="Item", quantity=Decimal("1"), unit="szt.",
@@ -130,6 +145,42 @@ class TestSubmitInvoiceHandler:
 
         assert transmission.status == TransmissionStatus.FAILED_PERMANENT
         assert transmission.error_code == "MAPPING_ERROR"
+
+    def test_degraded_sale_before_send_marks_permanent_without_send(self, handler: SubmitInvoiceJobHandler):
+        """Sale zdegradowana po enqueue (np. brak number_local) nie jest wysyłana do KSeF."""
+        transmission = MagicMock()
+        handler._transmission_repo.lock_for_update.return_value = transmission
+
+        invoice = _make_invoice()
+        invoice.number_local = None
+        handler._invoice_repo.get_by_id.return_value = invoice
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
+
+        handler.handle(_make_payload())
+
+        assert transmission.status == TransmissionStatus.FAILED_PERMANENT
+        assert transmission.error_code == "SALE_FORMAL_INVALID"
+        handler._ksef_client.send_invoice.assert_not_called()
+
+    def test_purchase_without_number_local_is_not_blocked_by_sale_guard(self, handler: SubmitInvoiceJobHandler):
+        """Purchase nie przechodzi przez sale guard i może być wysłana przez worker."""
+        transmission = MagicMock()
+        handler._transmission_repo.lock_for_update.return_value = transmission
+
+        invoice = _make_invoice()
+        invoice.direction = "purchase"
+        invoice.number_local = None
+        handler._invoice_repo.get_by_id.return_value = invoice
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
+
+        send_result = MagicMock()
+        send_result.reference_number = "REF-PURCHASE"
+        handler._ksef_client.send_invoice.return_value = send_result
+
+        handler.handle(_make_payload())
+
+        assert transmission.status == TransmissionStatus.SUBMITTED
+        handler._ksef_client.send_invoice.assert_called_once()
 
 
 class TestSubmitInvoiceHandlerCommit10:

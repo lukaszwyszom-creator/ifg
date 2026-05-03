@@ -31,7 +31,7 @@
 }
 
 .deltaDeductible {
-  color: #60a5fa;
+  color: #22c55e;
 }
 
 .deltaNeutral {
@@ -78,8 +78,14 @@
 
 .netCol {
   padding-right: 4px !important;
+  text-align: right !important;
 }
 
 .vatCol {
   padding-left: 4px !important;
+}
+
+.sectionSep {
+  padding-left: 24px !important;
+  border-left: 1px solid var(--color-border);
 }

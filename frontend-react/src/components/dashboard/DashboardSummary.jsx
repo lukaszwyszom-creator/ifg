@@ -7,9 +7,8 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import { buildPlnSummary } from './dashboardAggregation';
 import { buildInvoicePoolKey, buildInvoicePoolQuery, resolveEffectiveFilters } from './dashboardQuery';
+import { formatCurrencyPLN, formatSignedCurrencyPLN } from '../../utils/amountFormatting';
 import styles from './DashboardSummary.module.css';
-
-const fmtPln = (n) => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN`;
 
 // ---- helpers ----
 function toSlashDate(isoDate) {
@@ -109,8 +108,8 @@ function CombinedTooltip({ active, payload }) {
   const pt = payload[0].payload;
   const formatDaily = (value) => {
     const num = Number(value || 0);
-    if (num === 0) return '0,00';
-    return `${num > 0 ? '+' : ''}${num.toLocaleString('pl-PL', { minimumFractionDigits: 2 })}`;
+    if (num === 0) return '0,00 zł';
+    return formatSignedCurrencyPLN(num);
   };
 
   const saleDeltaClass = pt.dailySale === 0 ? styles.tooltipDeltaNeutral : styles.tooltipDeltaSale;
@@ -120,11 +119,11 @@ function CombinedTooltip({ active, payload }) {
     <div className={styles.tooltip}>
       <div className={styles.tooltipDate}>do dnia {toSlashDate(pt.fullDate)} Netto:</div>
       <div className={styles.tooltipValue}>
-        Sprzedaż: {pt.cumSale.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+        Sprzedaż: {formatCurrencyPLN(pt.cumSale)}
         <span className={`${styles.tooltipSubInline} ${saleDeltaClass}`}> ({formatDaily(pt.dailySale)})</span>
       </div>
       <div className={styles.tooltipValueBlue}>
-        Zakupy: {pt.cumPurchase.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+        Zakupy: {formatCurrencyPLN(pt.cumPurchase)}
         <span className={`${styles.tooltipSubInline} ${purchaseDeltaClass}`}> ({formatDaily(pt.dailyPurchase)})</span>
       </div>
     </div>
@@ -302,29 +301,29 @@ export default function DashboardSummary({ filters }) {
               {' — '}
               <span className={styles.summaryNetLabel}>Netto:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValueSale}`}>{fmtPln(saleSummary.netto)}</span>
+              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValueSale}`}>{formatCurrencyPLN(saleSummary.netto)}</span>
               {' | '}
               <span className={styles.summarySecondaryLabel}>VAT:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(saleSummary.vat)}</span>
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.vat)}</span>
               {' | '}
               <span className={styles.summarySecondaryLabel}>Brutto:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(saleSummary.brutto)}</span>
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.brutto)}</span>
               {' / '}
               <span className={styles.summaryPurchase}>ZAKUP</span>
               {' — '}
               <span className={styles.summaryNetLabel}>Netto:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValuePurchase}`}>{fmtPln(purchaseSummary.netto)}</span>
+              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValuePurchase}`}>{formatCurrencyPLN(purchaseSummary.netto)}</span>
               {' | '}
               <span className={styles.summarySecondaryLabel}>VAT:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(purchaseSummary.vat)}</span>
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.vat)}</span>
               {' | '}
               <span className={styles.summarySecondaryLabel}>Brutto:</span>
               {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{fmtPln(purchaseSummary.brutto)}</span>
+              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.brutto)}</span>
             </div>
           </div>
         )}

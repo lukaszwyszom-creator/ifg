@@ -65,14 +65,38 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.settlementsSummary strong {
-  color: var(--color-text);
+.settlementSummaryItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.settlementSummaryLabel {
+  color: #ffffff;
+}
+
+.settlementDebtAmount {
+  color: #ffd54a;
+  font-weight: 700;
+}
+
+.settlementCreditAmount {
+  color: #4ea1ff;
+  font-weight: 700;
 }
 
 .settlementsPanel {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  --settlements-grid-columns: minmax(220px, 1fr) minmax(82px, 90px) 92px 92px 70px 100px 100px 100px;
+}
+
+.settlementsPanelSticky {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
 }
 
 .settlementTabs {
@@ -95,6 +119,20 @@
   border-color: var(--color-gold);
 }
 
+.settlementTabDebtorsActive {
+  background: #edb439;
+  color: #1a1a1a;
+  border-color: #edb439;
+  font-weight: 700;
+}
+
+.settlementTabCreditorsActive {
+  background: #2f6fdd;
+  color: #ffffff;
+  border-color: #2f6fdd;
+  font-weight: 700;
+}
+
 .settlementState {
   min-height: 90px;
   display: flex;
@@ -103,29 +141,107 @@
 }
 
 .tableWrap {
-  overflow-x: auto;
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 300px);
+  overflow: hidden;
 }
 
 .settlementTable {
   width: 100%;
-  border-collapse: collapse;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
 }
 
-.settlementTable th,
-.settlementTable td {
+.settlementHeader {
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--color-border);
+}
+
+.settlementBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.settlementRow {
+  display: grid;
+  grid-template-columns: var(--settlements-grid-columns);
+  column-gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settlementCell {
   text-align: left;
   padding: 8px;
+  min-width: 0;
   white-space: nowrap;
 }
 
-.settlementTable th {
+.settlementHeadCell {
   color: var(--color-text-2);
   font-weight: 600;
+  white-space: normal;
+  line-height: 1.2;
+  background: var(--color-surface);
+}
+
+.headerTwoLine {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.1;
+  gap: 1px;
+}
+
+.contractorCol,
+.contractorCell {
+  overflow: hidden;
+}
+
+.grossCol,
+.paidCol,
+.remainingCol {
+  text-align: right;
+}
+
+.termCol {
+  text-align: center;
+}
+
+.issueDateCol,
+.dueDateCol {
+  text-align: center;
+}
+
+.invoiceNumberCol,
+.issueDateCol,
+.dueDateCol,
+.termCol {
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contractorText {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .emptyRow {
+  grid-column: 1 / -1;
   text-align: center;
   color: var(--color-text-3);
 }
@@ -139,6 +255,41 @@
   color: var(--color-error);
 }
 
+.amountPaid {
+  color: #e8891a;
+  font-weight: 600;
+}
+
+.termAhead {
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.termOverdue {
+  color: var(--color-error);
+  font-weight: 700;
+}
+
+.termToday {
+  color: var(--color-text-2);
+  font-weight: 600;
+}
+
 .overdueRow {
   background-color: rgba(220, 53, 69, 0.06);
+}
+
+@media (max-width: 960px) {
+  .settlementsPanelSticky {
+    top: 8px;
+    max-height: calc(100vh - 96px);
+  }
+
+  .tableWrap {
+    max-height: calc(100vh - 280px);
+  }
+
+  .settlementsPanel {
+    --settlements-grid-columns: minmax(220px, 1fr) minmax(82px, 90px) 92px 92px 70px 100px 100px 100px;
+  }
 }

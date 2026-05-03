@@ -83,6 +83,10 @@ class InvoiceService:
         if buyer_id is None:
             raise InvalidInvoiceError("Nabywca (buyer_id) jest wymagany.")
 
+        direction = (data.get("direction") or "sale").strip().lower()
+        if direction not in {"sale", "purchase"}:
+            raise InvalidInvoiceError("Pole 'direction' musi mieć wartość: sale albo purchase.")
+
         raw_items: list[dict] = data.get("items", [])
         if not raw_items:
             raise InvalidInvoiceError(
@@ -102,8 +106,17 @@ class InvoiceService:
         if due_date is None:
             due_date = issue_date + timedelta(days=14)
 
-        buyer_snapshot = self._resolve_buyer_snapshot(buyer_id)
-        seller_snapshot = self._build_seller_snapshot()
+        counterparty_snapshot = self._resolve_buyer_snapshot(buyer_id)
+        company_snapshot = self._build_company_snapshot()
+        if direction == "sale":
+            self._validate_company_snapshot(company_snapshot)
+
+        if direction == "sale":
+            seller_snapshot = company_snapshot
+            buyer_snapshot = counterparty_snapshot
+        else:
+            seller_snapshot = counterparty_snapshot
+            buyer_snapshot = company_snapshot
         items = InvoiceTotalsCalculator.build_items(raw_items)
         total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
@@ -125,7 +138,7 @@ class InvoiceService:
             id=uuid4(),
             number_local=None,
             status=InvoiceStatus.READY_FOR_SUBMISSION,
-            direction=data.get("direction", "sale"),
+            direction=direction,
             issue_date=issue_date,
             sale_date=sale_date,
             delivery_date=delivery_date,
@@ -215,10 +228,23 @@ class InvoiceService:
             )
 
         buyer_snapshot = self._resolve_buyer_snapshot(buyer_id)
+        direction = (invoice.direction or "sale").strip().lower()
+        company_snapshot = self._build_company_snapshot()
+        if direction == "sale":
+            self._validate_company_snapshot(company_snapshot)
+
+        if direction == "sale":
+            invoice.buyer_snapshot = buyer_snapshot
+            invoice.seller_snapshot = company_snapshot
+        elif direction == "purchase":
+            invoice.seller_snapshot = buyer_snapshot
+            invoice.buyer_snapshot = company_snapshot
+        else:
+            raise InvalidInvoiceError("Pole 'direction' musi mieć wartość: sale albo purchase.")
+
         items = InvoiceTotalsCalculator.build_items(raw_items)
         total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
-        invoice.buyer_snapshot = buyer_snapshot
         invoice.issue_date = issue_date
         invoice.sale_date = sale_date
         invoice.delivery_date = delivery_date
@@ -399,6 +425,9 @@ class InvoiceService:
                         f"'{invoice.status.value}'."
                     )
 
+                if invoice.direction == "sale":
+                    invoice.validate_sale_formal_requirements(require_number_local=False)
+
                 if invoice.number_local:
                     logger.info(
                         "mark-ready idempotent hit: invoice_id=%s number=%s",
@@ -486,7 +515,7 @@ class InvoiceService:
         return InvoiceMapper.build_contractor_snapshot(contractor, override)
 
     @staticmethod
-    def _build_seller_snapshot() -> dict:
+    def _build_company_snapshot() -> dict:
         return {
             "nip": settings.seller_nip,
             "name": settings.seller_name,
@@ -497,3 +526,13 @@ class InvoiceService:
             "city": settings.seller_city,
             "country": settings.seller_country,
         }
+
+    @staticmethod
+    def _validate_company_snapshot(company_snapshot: dict) -> None:
+        name = str(company_snapshot.get("name") or "").strip()
+        nip = str(company_snapshot.get("nip") or "").strip()
+        if not name or not nip:
+            raise InvalidInvoiceError(
+                "Brak kompletnych danych firmy w ustawieniach: wymagane seller_name i seller_nip."
+            )
+

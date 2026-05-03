@@ -133,6 +133,8 @@ class TransmissionService:
 
     def _validate_invoice_before_enqueue(self, invoice) -> None:
         invoice.validate_for_ksef()
+        if invoice.direction == "sale":
+            invoice.validate_sale_formal_requirements(require_number_local=True)
         self._ensure_ksef_session_connected(invoice)
 
     def _create_queued_transmission(self, invoice_id: UUID, idempotency_key: str, now: datetime) -> TransmissionORM:
@@ -234,6 +236,14 @@ class TransmissionService:
                 f"Przekroczono maksymalną liczbę prób ({MAX_RETRY_ATTEMPTS}) "
                 f"dla transmisji {transmission_id}."
             )
+
+        invoice = self._invoice_repo.lock_for_update(transmission.invoice_id)
+        if invoice is None:
+            raise NotFoundError(f"Nie znaleziono faktury {transmission.invoice_id}.")
+
+        direction = str(getattr(invoice, "direction", "") or "").strip().lower()
+        if direction == "sale":
+            self._validate_invoice_before_enqueue(invoice)
 
         # Guard: blokuj retry gdy inna transmisja dla tej faktury jest już aktywna
         other_active = self._transmission_repo.get_active_for_invoice(

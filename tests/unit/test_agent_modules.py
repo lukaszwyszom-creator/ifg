@@ -4,8 +4,10 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
+from agent.demo_data_validator import validate_demo_invoices, validate_repo_demo_data
 from agent.git_guard import (
     DiffReport,
     _merge_changed_files,
@@ -22,6 +24,7 @@ from agent.runner import (
     summarize_error_types,
 )
 from agent.rules_loader import RulesBundle, load_rules
+from agent.settlement_analyzer import analyze_settlements
 
 _PY = sys.executable  # ścieżka do aktywnego interpretera Python
 
@@ -126,6 +129,296 @@ class TestErrorPostProcessing:
             ]
         )
         assert summary == {"assertion": 2, "domain": 1}
+
+
+class TestDemoDataValidator:
+    def test_demo_invoice_without_due_date_reports_error(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-001",
+                    "issue_date": "2026-04-01",
+                    "direction": "sale",
+                    "buyer_id": "buyer-1",
+                    "buyer_name": "Acme Buyer",
+                    "total_gross": "123.00",
+                }
+            ]
+        )
+        assert report.valid is False
+        assert any("invoice INV-001: missing due_date" == error for error in report.errors)
+
+    def test_demo_invoice_with_due_date_passes(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-002",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "purchase",
+                    "seller_name": "Acme Seller",
+                    "contractor_slug": "acme",
+                    "total_gross": "999.00",
+                }
+            ]
+        )
+        assert report.valid is True
+        assert report.errors == []
+
+    def test_demo_validator_error_message_is_readable(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-003",
+                    "due_date": "2026-04-15",
+                    "direction": "sale",
+                    "buyer_id": "buyer-1",
+                    "buyer_name": "Acme Buyer",
+                    "total_gross": "80.00",
+                }
+            ]
+        )
+        assert any("invoice INV-003: missing issue_date" == error for error in report.errors)
+
+    def test_purchase_invoice_without_seller_name_reports_error(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-004",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "purchase",
+                    "contractor_slug": "supplier-a",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
+        assert report.valid is False
+        assert any(
+            "invoice INV-004: missing seller_name for purchase invoice (missing_seller_name)" == error
+            for error in report.errors
+        )
+
+    def test_sale_invoice_without_buyer_name_reports_error(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-005",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "sale",
+                    "buyer_id": "buyer-a",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
+        assert report.valid is False
+        assert any(
+            "invoice INV-005: missing buyer_name for sale invoice (missing_buyer_name)" == error
+            for error in report.errors
+        )
+
+    def test_invoice_with_complete_names_passes(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-006",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "sale",
+                    "customer_name": "Customer One",
+                    "buyer_id": "buyer-a",
+                    "total_gross": "10.00",
+                },
+                {
+                    "seed_key": "INV-007",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "purchase",
+                    "vendor_name": "Vendor One",
+                    "contractor_slug": "vendor-a",
+                    "total_gross": "10.00",
+                },
+            ]
+        )
+        assert report.valid is True
+        assert report.errors == []
+
+    def test_invoice_with_only_id_and_no_resolve_reports_error(self):
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-008",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "sale",
+                    "buyer_id": "unknown-buyer-id",
+                    "total_gross": "10.00",
+                }
+            ],
+            contractor_name_lookup={},
+        )
+        assert report.valid is False
+        assert any(
+            "invoice INV-008: missing buyer_name for sale invoice (missing_buyer_name)" == error
+            for error in report.errors
+        )
+
+    def test_repo_demo_seed_data_has_due_dates_for_settlements(self):
+        root = Path(__file__).resolve().parents[2]
+        report = validate_repo_demo_data(str(root))
+        assert not any("missing due_date" in error for error in report.errors)
+        assert report.checked_invoices > 0
+
+    def test_contractor_lookup_prefers_april_contractors_over_baseline_on_conflict(self):
+        from agent.demo_data_validator import _merge_contractor_lookups
+
+        merged = _merge_contractor_lookups(
+            contractors_lookup={"conflict-id": "Name From April Contractors"},
+            baseline_lookup={"conflict-id": "Name From Baseline"},
+        )
+
+        report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-009",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-15",
+                    "direction": "sale",
+                    "buyer_id": "conflict-id",
+                    "total_gross": "10.00",
+                }
+            ],
+            contractor_name_lookup=merged,
+        )
+
+        assert report.valid is True
+        assert report.errors == []
+        assert merged["conflict-id"] == "Name From April Contractors"
+
+
+class TestSettlementAnalyzer:
+    def test_sale_invoice_goes_to_receivables(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "SALE-001",
+                    "direction": "sale",
+                    "due_date": "2999-01-15",
+                    "total_gross": "123.45",
+                }
+            ]
+        )
+        assert len(report.receivables) == 1
+        assert report.receivables[0].invoice_id == "SALE-001"
+        assert len(report.payables) == 0
+
+    def test_purchase_invoice_goes_to_payables(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "PURCHASE-001",
+                    "direction": "purchase",
+                    "due_date": "2999-01-15",
+                    "total_gross": "200.00",
+                }
+            ]
+        )
+        assert len(report.payables) == 1
+        assert report.payables[0].invoice_id == "PURCHASE-001"
+        assert len(report.receivables) == 0
+
+    def test_due_date_in_past_is_overdue_when_unpaid(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "SALE-OVERDUE",
+                    "direction": "sale",
+                    "due_date": "2000-01-01",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
+        assert len(report.overdue) == 1
+        assert report.overdue[0].invoice_id == "SALE-OVERDUE"
+        assert report.overdue[0].days_overdue > 0
+
+    def test_due_date_in_future_is_not_overdue(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "SALE-NOT-OVERDUE",
+                    "direction": "sale",
+                    "due_date": "2999-01-01",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
+        assert report.overdue == []
+
+    def test_totals_are_calculated_correctly(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "SALE-100",
+                    "direction": "sale",
+                    "due_date": "2999-01-01",
+                    "total_gross": "100.00",
+                },
+                {
+                    "seed_key": "PURCHASE-30",
+                    "direction": "purchase",
+                    "due_date": "2999-01-01",
+                    "total_gross": "30.00",
+                },
+                {
+                    "seed_key": "SALE-OVERDUE-20",
+                    "direction": "sale",
+                    "due_date": "2000-01-01",
+                    "total_gross": "20.00",
+                },
+            ]
+        )
+        assert report.totals["receivables_total"] == Decimal("120.00")
+        assert report.totals["payables_total"] == Decimal("30.00")
+        assert report.totals["overdue_total"] == Decimal("20.00")
+
+    def test_invoice_with_only_net_amount_is_excluded_from_totals(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "SALE-NET-ONLY",
+                    "direction": "sale",
+                    "due_date": "2000-01-01",
+                    "net_amount": "999.99",
+                },
+                {
+                    "seed_key": "SALE-GROSS-OK",
+                    "direction": "sale",
+                    "due_date": "2999-01-01",
+                    "total_gross": "100.00",
+                },
+            ]
+        )
+        assert report.totals["receivables_total"] == Decimal("100.00")
+        assert report.totals["overdue_total"] == Decimal("0.00")
+        assert any("SALE-NET-ONLY" in warning for warning in report.warnings)
+
+    def test_sale_invoice_without_due_date_generates_warning_and_is_not_overdue(self):
+        report = analyze_settlements(
+            [
+                {
+                    "seed_key": "INV-001",
+                    "direction": "sale",
+                    "total_gross": "150.00",
+                }
+            ]
+        )
+
+        assert len(report.receivables) == 1
+        assert report.receivables[0].invoice_id == "INV-001"
+        assert report.overdue == []
+        assert any("invoice INV-001: missing due_date" == warning for warning in report.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +559,19 @@ class TestGitGuard:
 
 class TestPrompts:
     def test_build_prompt_uses_summary_and_classified_errors(self):
+        demo_report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-OK",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-14",
+                    "direction": "sale",
+                    "buyer_id": "buyer",
+                    "buyer_name": "Buyer OK",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
         prompt = build_diagnostic_prompt(
             task="Napraw test",
             test_result=CommandResult(
@@ -290,14 +596,30 @@ class TestPrompts:
                 blocked=False,
                 reasons=[],
             ),
+            demo_validation_report=demo_report,
         )
         assert "TEST ERROR SUMMARY:" in prompt
         assert "assertion: 1" in prompt
         assert "tests/unit/test_alpha.py::test_one | assertion | AssertionError: expected 1 == 2" in prompt
+        assert "DEMO DATA VALIDATION:" in prompt
+        assert "valid: True" in prompt
         assert "STDOUT:" not in prompt
         assert "STDERR:" not in prompt
 
     def test_build_prompt_contains_diff_guard_blocked_and_reasons(self):
+        demo_report = validate_demo_invoices(
+            [
+                {
+                    "seed_key": "INV-OK",
+                    "issue_date": "2026-04-01",
+                    "due_date": "2026-04-14",
+                    "direction": "sale",
+                    "buyer_id": "buyer",
+                    "buyer_name": "Buyer OK",
+                    "total_gross": "10.00",
+                }
+            ]
+        )
         prompt = build_diagnostic_prompt(
             task="Napraw test",
             test_result=CommandResult(
@@ -322,6 +644,7 @@ class TestPrompts:
                 blocked=True,
                 reasons=["blocked path: app/domain/invoice.py"],
             ),
+            demo_validation_report=demo_report,
         )
         assert "DIFF GUARD:" in prompt
         assert "blocked: True" in prompt
@@ -346,6 +669,7 @@ class TestPrompts:
                 blocked=False,
                 reasons=[],
             ),
+            demo_validation_report=validate_demo_invoices([]),
         )
         assert "OGRANICZENIA NAPRAWY:" in prompt
         assert "nie zmieniaj app/domain/ bez wyraźnej zgody" in prompt
@@ -371,6 +695,7 @@ class TestPrompts:
                 blocked=False,
                 reasons=[],
             ),
+            demo_validation_report=validate_demo_invoices([]),
         )
         assert "Brak wczytanych rulesów z repo." in prompt
 
@@ -393,6 +718,7 @@ class TestPrompts:
                 blocked=False,
                 reasons=[],
             ),
+            demo_validation_report=validate_demo_invoices([]),
         )
         assert "Brak sklasyfikowanych błędów pytest." in prompt
 

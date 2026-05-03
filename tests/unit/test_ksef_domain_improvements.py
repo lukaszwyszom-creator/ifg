@@ -74,6 +74,10 @@ def _make_invoice(**kwargs) -> Invoice:
         buyer_snapshot={
             "nip": "1000000070",
             "name": "Nabywca S.A.",
+            "street": "ul. Nabywcy",
+            "building_no": "2",
+            "postal_code": "30-001",
+            "city": "Krakow",
         },
         items=[_make_item()],
         total_net=Decimal("100.00"),

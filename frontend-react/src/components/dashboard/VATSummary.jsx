@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
+import { formatCurrencyPLN, formatSignedCurrencyPLN } from '../../utils/amountFormatting';
 import { buildPlnSummary } from './dashboardAggregation';
 import { buildInvoicePoolKey, buildInvoicePoolQuery, resolveEffectiveFilters } from './dashboardQuery';
 import styles from './VATSummary.module.css';
@@ -40,16 +41,12 @@ function toNumericRate(value) {
   const text = String(value).trim();
   if (!text) return null;
   const normalized = text.replace('%', '').replace(',', '.');
-  const parsed = Number(normalized);
+  const directParsed = Number(normalized);
+  if (Number.isFinite(directParsed)) return directParsed;
+  const numericToken = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!numericToken) return null;
+  const parsed = Number(numericToken[0]);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function signedAmount(value) {
-  const n = Number(value || 0);
-  const abs = Math.abs(n).toFixed(2);
-  if (n > 0) return `+${abs}`;
-  if (n < 0) return `-${abs}`;
-  return abs;
 }
 
 function resolveRate(item) {
@@ -100,10 +97,10 @@ export default function VATSummary({ filters }) {
 
   const delta = totals.saleVat - totals.purchaseVat;
   const deltaLabel = delta > 0
-    ? 'Należny (do zapłaty)'
+    ? 'VAT należny (do zapłaty):'
     : delta < 0
-      ? 'Naliczony (do odliczenia)'
-      : 'VAT do rozliczenia: 0,00';
+      ? 'VAT naliczony (do odliczenia/zwrotu):'
+      : 'VAT do rozliczenia:';
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +143,7 @@ export default function VATSummary({ filters }) {
           const rate = resolveRate(item);
           const row = rateMap[rate] || (rateMap.inne = createEmptyRateRow());
           const net = toNum(item.net_total);
-          const vat = toNum(item.vat_total);
+          const vat = rate === '0' ? 0 : toNum(item.vat_total);
 
           if (side === 'sale') {
             row.saleNet += net;
@@ -204,9 +201,9 @@ export default function VATSummary({ filters }) {
   return (
     <div className={styles.card}>
       <div className="card-header">
-        <span className={`card-title ${styles.monthTitle}`}>Zestawienie VAT - miesiąc {monthLabel(periodPrefix)}</span>
+        <span className={`card-title ${styles.monthTitle}`}>Zestawienie VAT - {monthLabel(periodPrefix)}</span>
         <span className={`${styles.deltaBadge} ${delta > 0 ? styles.deltaDue : delta < 0 ? styles.deltaDeductible : styles.deltaNeutral}`}>
-          {deltaLabel}: {Math.abs(delta).toFixed(2)}
+          {deltaLabel} {formatCurrencyPLN(Math.abs(delta))}
         </span>
       </div>
 
@@ -221,7 +218,7 @@ export default function VATSummary({ filters }) {
           <tr>
             <th className={styles.netCol}>Netto</th>
             <th className={styles.vatCol}>VAT</th>
-            <th className={styles.netCol}>Netto</th>
+            <th className={`${styles.netCol} ${styles.sectionSep}`}>Netto</th>
             <th className={styles.vatCol}>VAT</th>
           </tr>
         </thead>
@@ -234,22 +231,22 @@ export default function VATSummary({ filters }) {
           {rows.map((r) => (
             <tr key={r.rate}>
               <td className={styles.rate}>{r.rate === 'inne' ? 'inne' : `${r.rate}%`}</td>
-              <td className={styles.netCol}>{r.saleNet.toFixed(2)}</td>
-              <td className={styles.vatCol}>{r.saleVat.toFixed(2)}</td>
-              <td className={styles.netCol}>{r.purchaseNet.toFixed(2)}</td>
-              <td className={styles.vatCol}>{r.purchaseVat.toFixed(2)}</td>
-              <td className={r.deltaVat >= 0 ? styles.deltaDue : styles.deltaDeductible}>{signedAmount(r.deltaVat)}</td>
+              <td className={styles.netCol}>{formatCurrencyPLN(r.saleNet)}</td>
+              <td className={styles.vatCol}>{formatCurrencyPLN(r.saleVat)}</td>
+              <td className={`${styles.netCol} ${styles.sectionSep}`}>{formatCurrencyPLN(r.purchaseNet)}</td>
+              <td className={styles.vatCol}>{formatCurrencyPLN(r.purchaseVat)}</td>
+              <td className={r.deltaVat >= 0 ? styles.deltaDue : styles.deltaDeductible}>{formatSignedCurrencyPLN(r.deltaVat)}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr className={styles.totalRow}>
             <td>SUMA</td>
-            <td className={styles.netCol}>{totals.saleNet.toFixed(2)}</td>
-            <td className={styles.vatCol}>{totals.saleVat.toFixed(2)}</td>
-            <td className={styles.netCol}>{totals.purchaseNet.toFixed(2)}</td>
-            <td className={styles.vatCol}>{totals.purchaseVat.toFixed(2)}</td>
-            <td className={tableDelta >= 0 ? styles.deltaDue : styles.deltaDeductible}>{signedAmount(tableDelta)}</td>
+            <td className={styles.netCol}>{formatCurrencyPLN(totals.saleNet)}</td>
+            <td className={styles.vatCol}>{formatCurrencyPLN(totals.saleVat)}</td>
+            <td className={`${styles.netCol} ${styles.sectionSep}`}>{formatCurrencyPLN(totals.purchaseNet)}</td>
+            <td className={styles.vatCol}>{formatCurrencyPLN(totals.purchaseVat)}</td>
+            <td className={tableDelta >= 0 ? styles.deltaDue : styles.deltaDeductible}>{formatSignedCurrencyPLN(tableDelta)}</td>
           </tr>
         </tfoot>
       </table>

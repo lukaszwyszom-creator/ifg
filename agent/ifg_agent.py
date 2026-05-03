@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import sys
 
+from agent.demo_data_validator import validate_repo_demo_data
 from agent.git_guard import check_git_diff
 from agent.prompts import build_diagnostic_prompt
 from agent.rules_loader import load_rules
+from agent.settlement_analyzer import analyze_repo_settlements
 from agent.runner import (
     deduplicate_test_errors,
     parse_pytest_output,
@@ -66,7 +68,47 @@ def _print_test_error_summary(error_summary) -> None:
         print("none: 0")
 
 
-def _print_report(task: str, result, rules_bundle, diff_report, test_errors, error_summary) -> None:
+def _print_demo_data_validation(report) -> None:
+    print("=== DEMO DATA VALIDATION ===")
+    print(f"valid: {report.valid}")
+    print("errors:")
+    if report.errors:
+        for error in report.errors:
+            print(f"- {error}")
+    else:
+        print("- none")
+
+
+def _print_settlement_analysis(report) -> None:
+    print("=== SETTLEMENT ANALYSIS ===")
+    print(f"receivables_total: {report.totals['receivables_total']}")
+    print(f"payables_total: {report.totals['payables_total']}")
+    print(f"overdue_total: {report.totals['overdue_total']}")
+    print("warnings:")
+    if report.warnings:
+        for warning in report.warnings:
+            print(f"- {warning}")
+    else:
+        print("- none")
+    print()
+    print("Top overdue:")
+    if report.overdue:
+        for item in report.overdue[:5]:
+            print(f"- {item.contractor} | {item.amount} | {item.days_overdue} dni po terminie")
+    else:
+        print("- none")
+
+
+def _print_report(
+    task: str,
+    result,
+    rules_bundle,
+    diff_report,
+    test_errors,
+    error_summary,
+    demo_validation_report,
+    settlement_report,
+) -> None:
     _print_separator("═")
     print("IFG AGENT v1 – RAPORT DIAGNOSTYCZNY")
     _print_separator("═")
@@ -110,6 +152,12 @@ def _print_report(task: str, result, rules_bundle, diff_report, test_errors, err
     _print_test_errors(test_errors)
 
     _print_separator()
+    _print_demo_data_validation(demo_validation_report)
+
+    _print_separator()
+    _print_settlement_analysis(settlement_report)
+
+    _print_separator()
     _print_diff_guard(diff_report)
 
     _print_separator()
@@ -122,6 +170,7 @@ def _print_report(task: str, result, rules_bundle, diff_report, test_errors, err
         test_errors,
         error_summary,
         diff_report,
+        demo_validation_report,
     )
     print(prompt)
     _print_separator("═")
@@ -143,9 +192,20 @@ def main() -> int:
     parsed_errors = parse_pytest_output("\n".join(part for part in [result.stdout, result.stderr] if part))
     test_errors = deduplicate_test_errors(parsed_errors)
     error_summary = summarize_error_types(test_errors)
+    demo_validation_report = validate_repo_demo_data()
+    settlement_report = analyze_repo_settlements()
     diff_report = check_git_diff()
 
-    _print_report(task, result, rules_bundle, diff_report, test_errors, error_summary)
+    _print_report(
+        task,
+        result,
+        rules_bundle,
+        diff_report,
+        test_errors,
+        error_summary,
+        demo_validation_report,
+        settlement_report,
+    )
 
     return 0 if (result.returncode == 0 and not result.timed_out) else 1
 
