@@ -84,6 +84,7 @@ export default function SimpleView() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const loadInvoicePool = useAppStore((s) => s.loadInvoicePool);
+  const refreshAllInvoicePools = useAppStore((s) => s.refreshAllInvoicePools);
 
   const selectedYear = Number(String(selectedMonth).slice(0, 4)) || new Date().getFullYear();
   const yearFilters = useMemo(() => ({
@@ -177,6 +178,7 @@ export default function SimpleView() {
     setSaving(true);
     try {
       const inv = await invoicesApi.create(payload);
+      await refreshAllInvoicePools({ force: true });
       setSaved(inv);
       setShowForm(false);
       setRefreshKey((k) => k + 1);
@@ -214,6 +216,7 @@ export default function SimpleView() {
     setSaving(true);
     try {
       const updated = await invoicesApi.update(activeInvoice.id, payload);
+      await refreshAllInvoicePools({ force: true });
       setSaved(updated);
       setActiveInvoice(null);
       setRefreshKey((k) => k + 1);

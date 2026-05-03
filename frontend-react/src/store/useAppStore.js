@@ -26,6 +26,8 @@ function emptyInvoicePool() {
   return { sale: {}, purchase: {} };
 }
 
+const INVOICE_POOL_TTL_MS = 60_000;
+
 async function fetchInvoicesAllPages(baseQuery) {
   const size = 100;
   let page = 1;
@@ -80,14 +82,18 @@ export const useAppStore = create(
         const key = buildInvoicePoolKey(query);
         const requestKey = `${direction}:${key}`;
 
+        const inFlight = get().invoicePoolLoading?.[requestKey];
+        if (inFlight) {
+          return inFlight;
+        }
+
         if (!force) {
-          const cachedItems = get().invoicePool?.[direction]?.[key]?.items;
-          if (Array.isArray(cachedItems)) {
+          const cacheEntry = get().invoicePool?.[direction]?.[key];
+          const cachedItems = cacheEntry?.items;
+          const loadedAt = Number(cacheEntry?.loadedAt ?? 0);
+          const isFresh = loadedAt > 0 && Date.now() - loadedAt < INVOICE_POOL_TTL_MS;
+          if (Array.isArray(cachedItems) && isFresh) {
             return cachedItems;
-          }
-          const inFlight = get().invoicePoolLoading?.[requestKey];
-          if (inFlight) {
-            return inFlight;
           }
         }
 
@@ -145,7 +151,7 @@ export const useAppStore = create(
         return request;
       },
 
-      refreshAllInvoicePools: async () => {
+      refreshAllInvoicePools: async ({ force = true } = {}) => {
         const pool = get().invoicePool || emptyInvoicePool();
         const tasks = [];
 
@@ -166,7 +172,7 @@ export const useAppStore = create(
                   contractor: query.number_filter || '',
                 },
                 options: { defaultToCurrentMonth: false },
-                force: true,
+                force,
               }).catch(() => null)
             );
           }
