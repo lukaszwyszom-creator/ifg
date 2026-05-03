@@ -13,9 +13,12 @@ def test_list_open_invoices_with_paid_amount_returns_decimal_paid_amount() -> No
         (
             "inv-1",
             "FV/1/04/2026",
+            None,
             {"name": "Nabywca A"},
             {"name": "Sprzedawca A"},
+            "EUR",
             date(2026, 4, 1),
+            date(2026, 4, 15),
             {"total_gross": "456.78"},
             "partially_paid",
             "VAT",
@@ -30,8 +33,10 @@ def test_list_open_invoices_with_paid_amount_returns_decimal_paid_amount() -> No
     assert len(rows) == 1
     assert rows[0].invoice_id == "inv-1"
     assert rows[0].contractor_name == "Nabywca A"
+    assert rows[0].due_date == date(2026, 4, 15)
     assert rows[0].gross_total == Decimal("456.78")
     assert rows[0].paid_amount == Decimal("123.45")
+    assert rows[0].currency == "EUR"
 
 
 def test_list_open_invoices_with_paid_amount_accepts_direction_and_month_range() -> None:

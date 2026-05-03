@@ -369,8 +369,11 @@ class PaymentService:
                 {
                     "invoice_id": row.invoice_id,
                     "number_local": row.number_local,
+                    "ksef_reference_number": row.ksef_reference_number,
                     "contractor_name": row.contractor_name,
+                    "currency": row.currency,
                     "issue_date": row.issue_date,
+                    "due_date": row.due_date,
                     "gross_total": row.gross_total,
                     "paid_amount": row.paid_amount,
                     "remaining_amount": remaining_amount,

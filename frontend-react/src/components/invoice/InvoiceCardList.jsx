@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { invoicesApi } from '../../api/invoices';
+import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceActions from './InvoiceActions';
 import { getInvoiceOpenMode } from './invoiceOpenMode';
 import styles from './InvoiceCardList.module.css';
@@ -99,7 +100,7 @@ const getRemainingAmountInfo = (invoice) => {
   };
 };
 
-const formatMoney = (amount, currency) => `${amount.toFixed(2)} ${currency || 'PLN'}`;
+const formatMoney = (amount, currency) => formatAmountByCurrency(amount, currency);
 
 const formatDateDDMMYYYY = (dateStr) => {
   if (!dateStr) return '—';
@@ -371,7 +372,11 @@ export default function InvoiceCardList({
 
                 <div className={`${styles.cell} ${styles.invoiceCellTerm}`}>
                   <span className={styles.label}>Termin</span>
-                  <span className={styles.value}>{getPaymentTermLabel(invoice)}</span>
+                  <span className={styles.value}>
+                    {invoice.due_date
+                      ? formatDateDDMMYYYY(invoice.due_date)
+                      : getPaymentTermLabel(invoice)}
+                  </span>
                 </div>
 
                 <div

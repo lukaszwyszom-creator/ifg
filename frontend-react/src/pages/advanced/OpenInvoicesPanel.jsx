@@ -1,5 +1,6 @@
 // Wydzielony panel widoku "Otwarte" — używa danych z props.
 // Logika fetch + zarządzanie stanem pozostają w kontenerze (AdvancedDashboard).
+import { formatAmountByCurrency, formatAmountNeutral } from '../../utils/amountFormatting';
 import styles from './AdvancedDashboard.module.css';
 
 function calculateOverdueDays(dueDate) {
@@ -28,8 +29,6 @@ function remainingFor(invoice) {
   return null;
 }
 
-const fmtMoney = (value) => `${Number(value ?? 0).toFixed(2)} PLN`;
-
 export default function OpenInvoicesPanel({ invoices, summary, loading, error, loaded }) {
   const rows = invoices.map((inv) => ({
     invoice: inv,
@@ -56,14 +55,14 @@ export default function OpenInvoicesPanel({ invoices, summary, loading, error, l
       {!loading && !error && loaded && (
         <>
           <div className={styles.settlementsSummary}>
-            <span>Do odzyskania: <strong>{fmtMoney(totalRecover)}</strong></span>
-            <span>Do zapłaty: <strong>{fmtMoney(totalToPay)}</strong></span>
+            <span>Do odzyskania: <strong>{formatAmountNeutral(totalRecover)}</strong></span>
+            <span>Do zapłaty: <strong>{formatAmountNeutral(totalToPay)}</strong></span>
           </div>
           <div className={styles.settlementsSummary}>
             <span>Struktura przeterminowania:</span>
-            <span>1-30 dni po terminie: <strong>{fmtMoney(overdue0to30)}</strong></span>
-            <span>31-60 dni po terminie: <strong>{fmtMoney(overdue30to60)}</strong></span>
-            <span>60+ dni po terminie: <strong>{fmtMoney(overdue60plus)}</strong></span>
+            <span>1-30 dni po terminie: <strong>{formatAmountNeutral(overdue0to30)}</strong></span>
+            <span>31-60 dni po terminie: <strong>{formatAmountNeutral(overdue30to60)}</strong></span>
+            <span>60+ dni po terminie: <strong>{formatAmountNeutral(overdue60plus)}</strong></span>
           </div>
         </>
       )}
@@ -100,9 +99,9 @@ export default function OpenInvoicesPanel({ invoices, summary, loading, error, l
                       <td className={isOverdue ? styles.overdue : undefined}>
                         {isOverdue ? `${overdueDays} dni` : '—'}
                       </td>
-                      <td>{fmtMoney(invoice.total_gross)}</td>
+                      <td>{formatAmountByCurrency(invoice.total_gross, invoice.currency || 'PLN')}</td>
                       <td className={hasRemaining ? styles.amountDue : undefined}>
-                        {remaining === null ? '—' : fmtMoney(remaining)}
+                        {remaining === null ? '—' : formatAmountByCurrency(remaining, invoice.currency || 'PLN')}
                       </td>
                     </tr>
                   );

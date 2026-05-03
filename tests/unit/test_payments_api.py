@@ -28,8 +28,11 @@ def test_get_settlements_returns_200_and_payload() -> None:
             {
                 "invoice_id": str(uuid4()),
                 "number_local": "FV/1/04/2026",
+                "ksef_reference_number": None,
                 "contractor_name": "Alfa",
+                "currency": "EUR",
                 "issue_date": "2026-04-01",
+                "due_date": "2026-04-15",
                 "gross_total": "1000.00",
                 "paid_amount": "100.00",
                 "remaining_amount": "900.00",
@@ -55,6 +58,8 @@ def test_get_settlements_returns_200_and_payload() -> None:
         assert "debtors" in body
         assert "creditors" in body
         assert body["debtors"][0]["number_local"] == "FV/1/04/2026"
+        assert body["debtors"][0]["due_date"] == "2026-04-15"
+        assert body["debtors"][0]["currency"] == "EUR"
 
         payment_service.get_settlement_summary.assert_called_once_with(side="all", month="2026-04")
     finally:

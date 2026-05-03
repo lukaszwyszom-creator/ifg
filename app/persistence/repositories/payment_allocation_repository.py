@@ -17,8 +17,11 @@ from app.persistence.models.payment_allocation import PaymentAllocationORM
 class SettlementOpenInvoiceRow:
     invoice_id: UUID
     number_local: str | None
+    ksef_reference_number: str | None
     contractor_name: str | None
+    currency: str
     issue_date: date
+    due_date: date | None
     gross_total: Decimal
     paid_amount: Decimal
     payment_status: str
@@ -146,9 +149,12 @@ class PaymentAllocationRepository:
             select(
                 InvoiceORM.id,
                 InvoiceORM.number_local,
+                InvoiceORM.ksef_reference_number,
                 InvoiceORM.buyer_snapshot_json,
                 InvoiceORM.seller_snapshot_json,
+                InvoiceORM.currency,
                 InvoiceORM.issue_date,
+                InvoiceORM.due_date,
                 InvoiceORM.totals_json,
                 InvoiceORM.payment_status,
                 InvoiceORM.invoice_type,
@@ -166,9 +172,12 @@ class PaymentAllocationRepository:
             .group_by(
                 InvoiceORM.id,
                 InvoiceORM.number_local,
+                InvoiceORM.ksef_reference_number,
                 InvoiceORM.buyer_snapshot_json,
                 InvoiceORM.seller_snapshot_json,
+                InvoiceORM.currency,
                 InvoiceORM.issue_date,
+                InvoiceORM.due_date,
                 InvoiceORM.totals_json,
                 InvoiceORM.payment_status,
                 InvoiceORM.invoice_type,
@@ -190,9 +199,12 @@ class PaymentAllocationRepository:
         for (
             invoice_id,
             number_local,
+            ksef_reference_number,
             buyer_snapshot_json,
             seller_snapshot_json,
+            currency,
             issue_date,
+            due_date,
             totals_json,
             payment_status,
             invoice_type,
@@ -208,8 +220,11 @@ class PaymentAllocationRepository:
                 SettlementOpenInvoiceRow(
                     invoice_id=invoice_id,
                     number_local=number_local,
+                    ksef_reference_number=ksef_reference_number,
                     contractor_name=contractor_name,
+                    currency=str(currency or "PLN").strip().upper() or "PLN",
                     issue_date=issue_date,
+                    due_date=due_date,
                     gross_total=Decimal(str((totals_json or {}).get("total_gross", 0))),
                     paid_amount=Decimal(str(sum_paid)),
                     payment_status=payment_status,

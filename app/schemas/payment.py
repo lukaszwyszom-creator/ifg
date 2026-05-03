@@ -111,8 +111,11 @@ class ImportResultResponse(BaseModel):
 class SettlementItemResponse(BaseModel):
     invoice_id: UUID
     number_local: str | None = None
+    ksef_reference_number: str | None = None
     contractor_name: str | None = None
+    currency: str
     issue_date: date
+    due_date: date | None = None
     gross_total: Decimal
     paid_amount: Decimal
     remaining_amount: Decimal

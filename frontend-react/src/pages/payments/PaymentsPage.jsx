@@ -3,6 +3,7 @@ import { paymentsApi } from '../../api/payments';
 import Table from '../../components/common/Table';
 import StatusBadge from '../../components/common/StatusBadge';
 import Pagination from '../../components/common/Pagination';
+import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import styles from './PaymentsPage.module.css';
 
 // ─── CSV Import ──────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ function AllocatePanel({ transaction, onDone, onClose }) {
         value={invoiceId}
         onChange={(e) => setInvoiceId(e.target.value)}
       />
-      <label className={styles.fieldLabel} style={{ marginTop: 8 }}>Kwota (PLN)</label>
+      <label className={styles.fieldLabel} style={{ marginTop: 8 }}>Kwota (zł)</label>
       <input
         className="input"
         type="number"
@@ -188,9 +189,9 @@ export default function PaymentsPage() {
       key: 'amount',
       label: 'Kwota',
       width: 110,
-      render: (v) => (
+      render: (v, row) => (
         <span className={v >= 0 ? styles.positive : styles.negative}>
-          {Number(v).toFixed(2)} PLN
+          {formatAmountByCurrency(v, row.currency)}
         </span>
       ),
     },

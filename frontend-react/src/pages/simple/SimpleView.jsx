@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { invoicesApi } from '../../api/invoices';
 import { useAppStore } from '../../store/useAppStore';
 import { buildInvoicePoolKey, buildInvoicePoolQuery } from '../../components/dashboard/dashboardQuery';
+import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceForm from '../../components/invoice/InvoiceForm';
 import InvoiceList from '../../components/invoice/InvoiceList';
 import styles from './SimpleView.module.css';
@@ -49,11 +50,6 @@ const resolveAmount = (invoice, fields) => {
   }
   return null;
 };
-
-const formatPln = (amount) => `${new Intl.NumberFormat('pl-PL', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-}).format(amount)} PLN`;
 
 const calculateStrictSum = (invoices, fields) => {
   let total = 0;
@@ -127,24 +123,34 @@ export default function SimpleView() {
     return yearPoolItems.filter((inv) => String(inv?.issue_date || '').slice(0, 7) === month);
   }, [yearPoolItems, selectedMonth]);
 
-  const monthlySummary = useMemo(() => {
-    // Dodatkowy guard UI: podsumowanie liczymy tylko z wybranego miesiąca.
-    // Chroni przed ewentualnymi starymi danymi w buforze listy.
+  const monthlySummaryByCurrency = useMemo(() => {
+    // Podsumowanie jest liczone per waluta, aby nie mieszać agregatów wielowalutowych.
+    const grouped = new Map();
+    for (const invoice of monthInvoices) {
+      const currency = String(invoice?.currency || 'PLN').trim().toUpperCase() || 'PLN';
+      if (!grouped.has(currency)) grouped.set(currency, []);
+      grouped.get(currency).push(invoice);
+    }
 
-    const gross = calculateStrictSum(monthInvoices, GROSS_FIELDS);
-    const net = calculateStrictSum(monthInvoices, NET_FIELDS);
-    const vat = calculateStrictSum(monthInvoices, VAT_FIELDS);
+    return Array.from(grouped.entries())
+      .map(([currency, invoices]) => {
+        const gross = calculateStrictSum(invoices, GROSS_FIELDS);
+        const net = calculateStrictSum(invoices, NET_FIELDS);
+        const vat = calculateStrictSum(invoices, VAT_FIELDS);
 
-    const missing = [];
-    if (!net.available) missing.push(`netto: ${NET_FIELDS.join(', ')}`);
-    if (!vat.available) missing.push(`VAT: ${VAT_FIELDS.join(', ')}`);
+        const missing = [];
+        if (!net.available) missing.push(`netto: ${NET_FIELDS.join(', ')}`);
+        if (!vat.available) missing.push(`VAT: ${VAT_FIELDS.join(', ')}`);
 
-    return {
-      gross,
-      net,
-      vat,
-      missing,
-    };
+        return {
+          currency,
+          gross,
+          net,
+          vat,
+          missing,
+        };
+      })
+      .sort((a, b) => a.currency.localeCompare(b.currency));
   }, [monthInvoices]);
 
   const selectedMonthLocative = useMemo(
@@ -170,9 +176,17 @@ export default function SimpleView() {
     });
   }, [monthsWithData, selectedYear]);
 
-  const netText = monthlySummary.net.available ? formatPln(monthlySummary.net.value) : '—';
-  const vatText = monthlySummary.vat.available ? formatPln(monthlySummary.vat.value) : '—';
-  const grossText = monthlySummary.gross.available ? formatPln(monthlySummary.gross.value) : '—';
+  const isMixedCurrencySummary = monthlySummaryByCurrency.length > 1;
+  const singleCurrencySummary = monthlySummaryByCurrency[0] || null;
+  const netText = singleCurrencySummary?.net.available
+    ? formatAmountByCurrency(singleCurrencySummary.net.value, singleCurrencySummary.currency)
+    : '—';
+  const vatText = singleCurrencySummary?.vat.available
+    ? formatAmountByCurrency(singleCurrencySummary.vat.value, singleCurrencySummary.currency)
+    : '—';
+  const grossText = singleCurrencySummary?.gross.available
+    ? formatAmountByCurrency(singleCurrencySummary.gross.value, singleCurrencySummary.currency)
+    : '—';
 
   const handleCreate = async (payload) => {
     setSaving(true);
@@ -271,20 +285,37 @@ export default function SimpleView() {
         <div className={styles.summaryRow}>
           <div className={styles.monthSummary}>
             <span className={styles.monthSummaryTitleMain}>Suma sprzedaży wybranego miesiąca:</span>
-            <span className={styles.monthSummaryLabel}>Netto:</span>{' '}
-            <span className={`${styles.monthSummaryValue} ${styles.monthSummaryValueStrong}`}>{netText}</span>
-            <span className={styles.monthSummarySeparator}> | </span>
-            <span className={styles.monthSummaryLabel}>VAT:</span>{' '}
-            <span className={styles.monthSummaryValue}>{vatText}</span>
-            <span className={styles.monthSummarySeparator}> | </span>
-            <span className={styles.monthSummaryLabel}>Brutto:</span>{' '}
-            <span className={styles.monthSummaryValue}>{grossText}</span>
-            {monthlySummary.missing.length > 0 && (
+            {!isMixedCurrencySummary && (
               <>
+                <span className={styles.monthSummaryLabel}>Netto:</span>{' '}
+                <span className={`${styles.monthSummaryValue} ${styles.monthSummaryValueStrong}`}>{netText}</span>
                 <span className={styles.monthSummarySeparator}> | </span>
-                <span className={styles.monthSummaryMissing}>
-                  brak pól: {monthlySummary.missing.join('; ')}
-                </span>
+                <span className={styles.monthSummaryLabel}>VAT:</span>{' '}
+                <span className={styles.monthSummaryValue}>{vatText}</span>
+                <span className={styles.monthSummarySeparator}> | </span>
+                <span className={styles.monthSummaryLabel}>Brutto:</span>{' '}
+                <span className={styles.monthSummaryValue}>{grossText}</span>
+                {singleCurrencySummary?.missing.length > 0 && (
+                  <>
+                    <span className={styles.monthSummarySeparator}> | </span>
+                    <span className={styles.monthSummaryMissing}>
+                      brak pól: {singleCurrencySummary.missing.join('; ')}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+            {isMixedCurrencySummary && (
+              <>
+                <span className={styles.monthSummarySeparator}> </span>
+                <span className={styles.monthSummaryMissing}>Wiele walut - podsumowanie per waluta:</span>
+                {monthlySummaryByCurrency.map((entry) => (
+                  <span key={entry.currency} className={styles.monthSummaryValue}>
+                    {' '}| {entry.currency}: netto {entry.net.available ? formatAmountByCurrency(entry.net.value, entry.currency) : '—'},
+                    {' '}VAT {entry.vat.available ? formatAmountByCurrency(entry.vat.value, entry.currency) : '—'},
+                    {' '}brutto {entry.gross.available ? formatAmountByCurrency(entry.gross.value, entry.currency) : '—'}
+                  </span>
+                ))}
               </>
             )}
           </div>

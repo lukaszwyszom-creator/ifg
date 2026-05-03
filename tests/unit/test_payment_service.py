@@ -88,8 +88,11 @@ def _make_settlement_row(
     return SettlementOpenInvoiceRow(
         invoice_id=uuid4(),
         number_local=number_local,
+        ksef_reference_number=None,
         contractor_name=contractor_name,
+        currency="PLN",
         issue_date=date(2026, 4, 1),
+        due_date=date(2026, 4, 15),
         gross_total=gross,
         paid_amount=Decimal("0.00"),
         payment_status=paid_status,
@@ -315,6 +318,8 @@ class TestSettlementSummary:
         assert payload["invoice_id"] == row.invoice_id
         assert payload["paid_amount"] == Decimal("0.00")
         assert payload["remaining_amount"] == Decimal("1200.00")
+        assert payload["due_date"] == date(2026, 4, 15)
+        assert payload["currency"] == "PLN"
 
     def test_partially_paid_invoice_has_correct_remaining_amount(self, mock_session):
         row = _make_settlement_row(
