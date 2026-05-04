@@ -109,7 +109,7 @@ class SubmitInvoiceJobHandler:
             ctx.initialization_vector,
             xml_bytes,
         )
-        return send_result, idempotency_key
+        return send_result, idempotency_key, xml_bytes
 
     def _enqueue_poll_job(
         self,
@@ -138,10 +138,12 @@ class SubmitInvoiceJobHandler:
         transmission_id: UUID,
         send_result,
         idempotency_key: str,
+        xml_bytes: bytes,
         now: datetime,
     ) -> None:
         transmission.status = TransmissionStatus.SUBMITTED
         transmission.external_reference = send_result.reference_number
+        transmission.xml_content = xml_bytes
         transmission.finished_at = datetime.now(UTC)
         self._enqueue_poll_job(
             transmission_id=transmission_id,
@@ -338,12 +340,13 @@ class SubmitInvoiceJobHandler:
             return
 
         try:
-            send_result, idempotency_key = self._submit_invoice_to_ksef(invoice)
+            send_result, idempotency_key, xml_bytes = self._submit_invoice_to_ksef(invoice)
             self._mark_submitted(
                 transmission=transmission,
                 transmission_id=transmission_id,
                 send_result=send_result,
                 idempotency_key=idempotency_key,
+                xml_bytes=xml_bytes,
                 now=now,
             )
 

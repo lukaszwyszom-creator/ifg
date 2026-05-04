@@ -349,8 +349,6 @@ export default function SimpleView() {
         <div className={styles.section}>
           <InvoiceList
             key={`${refreshKey}-${selectedMonth}`}
-            limit={10}
-            hidePager
             filters={saleMonthFilters}
             sourceItems={monthInvoices}
             emptyMsg={`Brak faktur sprzedaży w ${selectedMonthLocative}`}

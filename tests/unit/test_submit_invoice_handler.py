@@ -182,6 +182,40 @@ class TestSubmitInvoiceHandler:
         assert transmission.status == TransmissionStatus.SUBMITTED
         handler._ksef_client.send_invoice.assert_called_once()
 
+    def test_xml_content_saved_on_submitted(self, handler: SubmitInvoiceJobHandler):
+        """xml_content w transmisji musi być dokładnie tymi xml_bytes, które trafiły do KSeF."""
+        from app.integrations.ksef.mapper import KSeFMapper
+
+        transmission = MagicMock()
+        handler._transmission_repo.lock_for_update.return_value = transmission
+        invoice = _make_invoice()
+        handler._invoice_repo.get_by_id.return_value = invoice
+        handler._ksef_session_service.get_session_context.return_value = _make_session_context()
+
+        send_result = MagicMock()
+        send_result.reference_number = "REF-XML"
+        handler._ksef_client.send_invoice.return_value = send_result
+
+        # Przechwytujemy xml_bytes przekazane do send_invoice
+        captured_xml: list[bytes] = []
+        original_send = handler._ksef_client.send_invoice.side_effect
+
+        def capture_send(*args, **kwargs):
+            # xml_bytes to 5. argument pozycyjny send_invoice
+            captured_xml.append(args[4])
+            return send_result
+
+        handler._ksef_client.send_invoice.side_effect = capture_send
+
+        handler.handle(_make_payload())
+
+        assert transmission.status == TransmissionStatus.SUBMITTED
+        assert len(captured_xml) == 1
+        # xml_content zapisany w transmisji musi być identyczny z wysłanym
+        assert transmission.xml_content == captured_xml[0]
+        # Sanity check: musi to być poprawny XML FA(3)
+        assert b"<Faktura" in captured_xml[0] or b"FA" in captured_xml[0]
+
 
 class TestSubmitInvoiceHandlerCommit10:
     """Commit 10: uzupełnienie pokrycia submit handlera."""

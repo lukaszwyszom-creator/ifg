@@ -24,8 +24,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ksef_keys:/app/ksef_keys:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -49,8 +47,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ksef_keys:/app/ksef_keys:ro
     networks:
       - ifg_prod
 
@@ -83,7 +79,6 @@ services:
 
 volumes:
   postgres_data:
-  ksef_keys:          # wypełnić ręcznie: docker cp lub bind mount na DS723+
 
 networks:
   ifg_prod:

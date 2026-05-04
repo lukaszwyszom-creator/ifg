@@ -24,6 +24,7 @@ class TransmissionORM(Base):
     idempotency_key: Mapped[str] = mapped_column(String(255), index=False)
     external_reference: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     ksef_reference_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    xml_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     upo_xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     upo_status: Mapped[str | None] = mapped_column(String(32), nullable=True)  # pending | fetched | failed
     request_payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
