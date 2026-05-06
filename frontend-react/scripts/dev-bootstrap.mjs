@@ -146,6 +146,10 @@ async function ensureServices() {
   return result;
 }
 
+function warmServices() {
+  void ensureServices();
+}
+
 function renderBootPage(requestPath) {
   const safePath = requestPath || '/login';
   return `<!DOCTYPE html>
@@ -209,9 +213,11 @@ function renderBootPage(requestPath) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const ready = await ensureServices();
+  warmServices();
 
-  if (!ready) {
+  const frontendReady = await ensureFrontend();
+
+  if (!frontendReady) {
     res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(renderBootPage(req.url));
     return;
@@ -232,5 +238,5 @@ server.on('upgrade', async (req, socket, head) => {
 
 server.listen(publicPort, '0.0.0.0', () => {
   log(`Bootstrap nasłuchuje na http://127.0.0.1:${publicPort}`);
-  void ensureServices();
+  warmServices();
 });

@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ksef_environment: str = Field(default="test", alias="KSEF_ENVIRONMENT")
     ksef_auth_token: str | None = Field(default=None, alias="KSEF_AUTH_TOKEN")
     ksef_timeout_seconds: int = Field(default=30, alias="KSEF_TIMEOUT_SECONDS")
+    ksef_auth_redeem_timeout_seconds: int = Field(default=120, alias="KSEF_AUTH_REDEEM_TIMEOUT_SECONDS")
     regon_environment: str = Field(default="production", alias="REGON_ENVIRONMENT")
     regon_api_key: str | None = Field(default=None, alias="REGON_API_KEY")
     regon_wsdl_test: str = Field(

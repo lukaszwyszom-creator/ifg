@@ -125,6 +125,7 @@ def get_ksef_session_service(
         auth_provider=KSeFAuthProvider(
             environment=settings.ksef_environment,
             timeout_seconds=settings.ksef_timeout_seconds,
+            auth_redeem_timeout_seconds=settings.ksef_auth_redeem_timeout_seconds,
         ),
         ksef_client=KSeFClient(
             environment=settings.ksef_environment,

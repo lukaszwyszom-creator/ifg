@@ -78,6 +78,7 @@ def _process_batch() -> int:
             auth_provider=KSeFAuthProvider(
                 environment=settings.ksef_environment,
                 timeout_seconds=settings.ksef_timeout_seconds,
+                auth_redeem_timeout_seconds=settings.ksef_auth_redeem_timeout_seconds,
             ),
             ksef_client=ksef_client,
             audit_service=audit_service,

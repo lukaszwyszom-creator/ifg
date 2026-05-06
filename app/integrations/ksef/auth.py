@@ -46,10 +46,16 @@ class KSeFSession:
 
 
 class KSeFAuthProvider:
-    def __init__(self, environment: str, timeout_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        environment: str,
+        timeout_seconds: int = 30,
+        auth_redeem_timeout_seconds: int = 120,
+    ) -> None:
         self.environment = environment
         self._base_url = _KSEF_URLS.get(environment, _KSEF_URLS["test"])
         self._timeout = timeout_seconds
+        self._auth_redeem_timeout = auth_redeem_timeout_seconds
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -174,10 +180,10 @@ class KSeFAuthProvider:
 
         KSeF 2.0 przetwarza uwierzytelnienie asynchronicznie. Jeśli serwer zwróci
         400 ze statusem 450 (SENT — w toku), ponawiamy żądanie z wykładniczym
-        opóźnieniem przez max 30 sekund.
+        opóźnieniem przez max konfigurowalny czas (domyślnie 120 sekund).
         """
         url = f"{self._base_url}/auth/token/redeem"
-        max_wait_seconds = 30.0
+        max_wait_seconds = float(self._auth_redeem_timeout)
         delay = 0.5
         elapsed = 0.0
 
