@@ -51,7 +51,10 @@ services:
       - ifg_prod
 
   frontend:
-    image: ifg-frontend:latest   # obraz budowany lokalnie na Mac mini i przesyłany przez deploy_ds723.sh
+    image: ifg-frontend:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
     ports:
       - "127.0.0.1:3000:80"
     restart: unless-stopped
