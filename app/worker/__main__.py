@@ -89,6 +89,7 @@ def _process_batch() -> int:
             ),
             ksef_client=ksef_client,
             audit_service=audit_service,
+            invoice_repository=InvoiceRepository(session),
         )
         handlers = _build_handlers(session, ksef_client, ksef_session_service)
 
