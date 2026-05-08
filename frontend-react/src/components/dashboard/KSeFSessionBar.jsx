@@ -151,10 +151,18 @@ export default function KSeFSessionBar() {
         const status = await ksefApi.getSyncPurchaseJobStatus(job_id);
         if (status.status === 'done') {
           done = true;
-          const r = status.result;
+          const r = status.result || {};
+          const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
+          const received = Number.isFinite(Number(r.received)) ? Number(r.received) : 0;
+          const skippedExisting = Number.isFinite(Number(r.skipped_existing))
+            ? Number(r.skipped_existing)
+            : 0;
+          const skippedParse = Number.isFinite(Number(r.skipped_parse))
+            ? Number(r.skipped_parse)
+            : 0;
           setSuccessMsg(
-            `Pobrano ${r.saved} nowych faktur` +
-            ` (od KSeF: ${r.received}, duplikaty: ${r.skipped_existing}, błędy parsowania: ${r.skipped_parse})`
+            `Pobrano ${saved} nowych faktur` +
+            ` (od KSeF: ${received}, duplikaty: ${skippedExisting}, błędy parsowania: ${skippedParse})`
           );
           await refreshAllInvoicePools();
           window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));

@@ -244,6 +244,14 @@ def get_sync_purchase_job_status(
         raw = job.payload_json.get("result")
         if raw:
             result = SyncPurchaseResponse(**raw)
+        else:
+            # Fallback dla starszych workerów/jobów bez zapisanego result.
+            result = SyncPurchaseResponse(
+                saved=int(job.payload_json.get("saved", 0) or 0),
+                received=int(job.payload_json.get("received", 0) or 0),
+                skipped_existing=int(job.payload_json.get("skipped_existing", 0) or 0),
+                skipped_parse=int(job.payload_json.get("skipped_parse", 0) or 0),
+            )
     elif job.status == "failed":
         error = job.last_error
 
