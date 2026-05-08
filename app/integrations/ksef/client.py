@@ -275,86 +275,163 @@ class KSeFClient:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
         Flow:
-        1. POST /sessions/online/{ref}/invoices/query (fallbacki: /sessions/{ref}/invoices/query, /invoices/query)
-           → queryReferenceNumber (202)
-        2. Poll GET {prefix}/{queryRef} dla wybranego prefixu
-        3. Dla każdego ksefReferenceNumber: GET /invoices/{ref} → decrypt AES-256-CBC
+        1. Preferuj GET endpointy sesyjne dla received invoices.
+        2. Jeśli endpoint zwróci query reference, wykonaj polling GET.
+        3. Fallback do historycznych POST endpointów query (dla zgodności wstecznej).
+        4. Dla każdego ksefReferenceNumber: GET /invoices/{ref} → decrypt AES-256-CBC
         Zwraca listę ReceivedInvoiceResult (ksef_reference_number + XML bytes).
         """
-        # 1. Zgłoś zapytanie z fallbackiem pomiędzy wariantami endpointu.
-        query_path_candidates = [
-            f"/sessions/online/{session_reference}/invoices/query",
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        def _extract_invoice_refs(payload: dict | list) -> list[str]:
+            candidates: list[dict] = []
+            if isinstance(payload, list):
+                candidates = [item for item in payload if isinstance(item, dict)]
+            elif isinstance(payload, dict):
+                for key in ("invoiceList", "invoices", "items", "results"):
+                    value = payload.get(key)
+                    if isinstance(value, list):
+                        candidates = [item for item in value if isinstance(item, dict)]
+                        break
+
+            refs: list[str] = []
+            for item in candidates:
+                ref = item.get("ksefReferenceNumber") or item.get("ksefNumber")
+                if isinstance(ref, str) and ref:
+                    refs.append(ref)
+            return refs
+
+        # 1. Najpierw spróbuj GET endpointów, które w TE zgłaszają Allow: GET.
+        get_candidates = [
+            f"/sessions/{session_reference}/invoices/received",
             f"/sessions/{session_reference}/invoices/query",
-            "/invoices/query",
+            f"/sessions/{session_reference}/invoices",
         ]
-        query_body = {
-            "queryCriteria": {
-                "invoiceType": "received",
-                "subjectType": "subject2",
-                "invoicingDateFrom": invoicing_date_from,
-                "invoicingDateTo": invoicing_date_to,
-            },
+        params = {
+            "invoiceType": "received",
+            "subjectType": "subject2",
+            "invoicingDateFrom": invoicing_date_from,
+            "invoicingDateTo": invoicing_date_to,
         }
-        resp = None
-        poll_path_prefix = None
+
+        invoice_refs: list[str] = []
+        query_ref: str | None = None
+        poll_path_prefix: str | None = None
         last_exc: KSeFClientError | None = None
-        for candidate in query_path_candidates:
+
+        for candidate in get_candidates:
             try:
                 resp = self._request_with_retry(
-                    method="POST",
-                    path=candidate,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    json=query_body,
-                )
-                poll_path_prefix = candidate
-                break
-            except KSeFClientError as exc:
-                if exc.status_code not in (404, 405):
-                    raise
-                last_exc = exc
-                logger.warning(
-                    "KSeF query endpoint %s unavailable (%s), trying next fallback",
-                    candidate,
-                    exc.status_code,
-                )
-
-        if resp is None or poll_path_prefix is None:
-            raise last_exc or KSeFClientError("Brak dostępnego endpointu query dla KSeF.")
-
-        query_ref = resp.json()["referenceNumber"]
-        logger.info("KSeF query received invoices: queryRef=%s", query_ref)
-
-        # 2. Polling — max 60s co 3s
-        invoice_refs: list[str] = []
-        for _attempt in range(20):
-            time.sleep(3)
-            try:
-                poll_resp = self._request_with_retry(
                     method="GET",
-                    path=f"{poll_path_prefix}/{query_ref}",
-                    headers={"Authorization": f"Bearer {access_token}"},
+                    path=candidate,
+                    headers=headers,
+                    params=params,
                 )
             except KSeFClientError as exc:
-                if exc.status_code == 202:
-                    # Jeszcze przetwarza — czekamy
+                if exc.status_code in (404, 405):
+                    last_exc = exc
+                    logger.warning(
+                        "KSeF GET endpoint %s unavailable (%s), trying next fallback",
+                        candidate,
+                        exc.status_code,
+                    )
                     continue
                 raise
-            data = poll_resp.json()
-            code = data.get("processingCode", 0)
-            if code == 200:
-                invoice_refs = [
-                    inv["ksefReferenceNumber"]
-                    for inv in data.get("invoiceList", [])
-                ]
+
+            data = resp.json()
+            if isinstance(data, dict) and isinstance(data.get("referenceNumber"), str):
+                query_ref = data["referenceNumber"]
+                poll_path_prefix = candidate
+                logger.info("KSeF query received invoices: queryRef=%s", query_ref)
+                break
+
+            invoice_refs = _extract_invoice_refs(data)
+            if invoice_refs:
                 logger.info(
-                    "KSeF query done: queryRef=%s, count=%d", query_ref, len(invoice_refs)
+                    "KSeF received invoices via %s: count=%d",
+                    candidate,
+                    len(invoice_refs),
                 )
                 break
-            if code >= 400:
-                raise KSeFClientError(
-                    f"KSeF query zakończone błędem: code={code}",
-                    status_code=code,
-                )
+
+            # Sukces bez listy faktur traktujemy jako pusty wynik.
+            if isinstance(data, dict):
+                logger.info("KSeF received invoices via %s: empty result", candidate)
+                invoice_refs = []
+                break
+
+        # 2. Fallback do historycznych POST endpointów query.
+        if not invoice_refs and query_ref is None:
+            query_path_candidates = [
+                f"/sessions/online/{session_reference}/invoices/query",
+                f"/sessions/{session_reference}/invoices/query",
+                "/invoices/query",
+            ]
+            query_body = {
+                "queryCriteria": {
+                    "invoiceType": "received",
+                    "subjectType": "subject2",
+                    "invoicingDateFrom": invoicing_date_from,
+                    "invoicingDateTo": invoicing_date_to,
+                },
+            }
+            for candidate in query_path_candidates:
+                try:
+                    resp = self._request_with_retry(
+                        method="POST",
+                        path=candidate,
+                        headers=headers,
+                        json=query_body,
+                    )
+                    poll_path_prefix = candidate
+                    query_ref = resp.json()["referenceNumber"]
+                    logger.info("KSeF query received invoices: queryRef=%s", query_ref)
+                    break
+                except KSeFClientError as exc:
+                    if exc.status_code not in (404, 405):
+                        raise
+                    last_exc = exc
+                    logger.warning(
+                        "KSeF query endpoint %s unavailable (%s), trying next fallback",
+                        candidate,
+                        exc.status_code,
+                    )
+
+        if not invoice_refs and query_ref is None:
+            raise last_exc or KSeFClientError("Brak dostępnego endpointu query dla KSeF.")
+
+        # 3. Polling query reference — max 60s co 3s
+        if query_ref is not None and poll_path_prefix is not None:
+            invoice_refs = []
+            for _attempt in range(20):
+                time.sleep(3)
+                try:
+                    poll_resp = self._request_with_retry(
+                        method="GET",
+                        path=f"{poll_path_prefix}/{query_ref}",
+                        headers=headers,
+                    )
+                except KSeFClientError as exc:
+                    if exc.status_code == 202:
+                        # Jeszcze przetwarza — czekamy
+                        continue
+                    raise
+                data = poll_resp.json()
+                code = data.get("processingCode", 0)
+                if code == 200:
+                    invoice_refs = [
+                        inv["ksefReferenceNumber"]
+                        for inv in data.get("invoiceList", [])
+                    ]
+                    logger.info(
+                        "KSeF query done: queryRef=%s, count=%d", query_ref, len(invoice_refs)
+                    )
+                    break
+                if code >= 400:
+                    raise KSeFClientError(
+                        f"KSeF query zakończone błędem: code={code}",
+                        status_code=code,
+                    )
 
         # 3. Pobierz i odszyfruj każdą fakturę
         results: list[ReceivedInvoiceResult] = []
