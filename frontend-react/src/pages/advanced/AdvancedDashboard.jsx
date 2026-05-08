@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { paymentsApi } from '../../api/payments';
 import { invoicesApi } from '../../api/invoices';
 import DashboardSummary from '../../components/dashboard/DashboardSummary';
+import KSeFSessionBar from '../../components/dashboard/KSeFSessionBar';
 import VATSummary from '../../components/dashboard/VATSummary';
 import TransmissionTable from '../../components/dashboard/TransmissionTable';
 import InvoiceList from '../../components/invoice/InvoiceList';
@@ -153,6 +154,9 @@ export default function AdvancedDashboard() {
     <div className={styles.page}>
       {/* Statystyki */}
       <DashboardSummary filters={filters} />
+
+      {/* Pasek sesji KSeF (otwieranie/zamykanie + pobieranie zakupowych) */}
+      <KSeFSessionBar />
 
       {/* Filtry */}
       <Filters

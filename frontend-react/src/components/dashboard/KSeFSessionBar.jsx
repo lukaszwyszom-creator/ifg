@@ -126,11 +126,16 @@ export default function KSeFSessionBar() {
     clearMsgs();
     setSyncBusy(true);
     try {
-      // Pobierz faktury z ostatnich 30 dni
+      // Pobierz faktury z ostatnich 365 dni.
       const dateTo = new Date();
       const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
-      const fmt = (d) => d.toISOString().slice(0, 10);
+      dateFrom.setDate(dateFrom.getDate() - 365);
+      const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
 
       const result = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
       setSuccessMsg(`Pobrano ${result.saved} nowych faktur zakupowych`);
@@ -205,7 +210,7 @@ export default function KSeFSessionBar() {
               className="btn btn-secondary btn-sm"
               disabled={syncBusy}
               onClick={handleSyncPurchase}
-              title="Pobierz faktury zakupowe z KSeF (ostatnie 30 dni)"
+              title="Pobierz faktury zakupowe z KSeF (ostatnie 365 dni)"
             >
               {syncBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Pobierz zakupowe'}
             </button>
