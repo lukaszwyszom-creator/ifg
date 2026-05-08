@@ -300,11 +300,12 @@ class KSeFClient:
                 json=query_body,
             )
         except KSeFClientError as exc:
-            if exc.status_code != 404:
+            if exc.status_code not in (404, 405):
                 raise
             logger.warning(
-                "KSeF query endpoint %s not found (404), fallback to %s",
+                "KSeF query endpoint %s unavailable (%s), fallback to %s",
                 session_query_path,
+                exc.status_code,
                 global_query_path,
             )
             resp = self._request_with_retry(
