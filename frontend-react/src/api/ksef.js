@@ -79,4 +79,7 @@ export const ksefApi = {
     client
       .post('/ksef-sessions/sync-purchase', { nip, date_from: dateFrom, date_to: dateTo })
       .then((r) => r.data),
+
+  getSyncPurchaseJobStatus: (jobId) =>
+    client.get(`/ksef-sessions/sync-purchase/jobs/${jobId}`).then((r) => r.data),
 };

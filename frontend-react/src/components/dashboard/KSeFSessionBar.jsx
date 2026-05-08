@@ -137,14 +137,35 @@ export default function KSeFSessionBar() {
         return `${y}-${m}-${day}`;
       };
 
-      const result = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
-      setSuccessMsg(
-        `Pobrano ${result.saved} nowych faktur` +
-        ` (od KSeF: ${result.received}, duplikaty: ${result.skipped_existing}, błędy parsowania: ${result.skipped_parse})`
-      );
-      // Odśwież wspólny pool faktur niezależnie od tego, który moduł jest aktywny.
-      await refreshAllInvoicePools();
-      window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
+      // Enqueue job (szybki request) — bez blokowania HTTP przez 60s
+      const { job_id } = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
+
+      // Polling co 3s max 90s
+      const MAX_POLLS = 30;
+      const POLL_INTERVAL_MS = 3000;
+      let pollCount = 0;
+      let done = false;
+      while (!done && pollCount < MAX_POLLS) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        pollCount++;
+        const status = await ksefApi.getSyncPurchaseJobStatus(job_id);
+        if (status.status === 'done') {
+          done = true;
+          const r = status.result;
+          setSuccessMsg(
+            `Pobrano ${r.saved} nowych faktur` +
+            ` (od KSeF: ${r.received}, duplikaty: ${r.skipped_existing}, błędy parsowania: ${r.skipped_parse})`
+          );
+          await refreshAllInvoicePools();
+          window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
+        } else if (status.status === 'failed') {
+          done = true;
+          throw new Error(status.error || 'Synchronizacja zakończona błędem.');
+        }
+      }
+      if (!done) {
+        setSuccessMsg('Synchronizacja trwa w tle — odśwież listę faktur za chwilę.');
+      }
     } catch (err) {
       const msg =
         err.response?.data?.error?.message ??

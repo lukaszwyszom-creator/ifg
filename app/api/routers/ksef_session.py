@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user, get_ksef_session_service, get_settings_service
+from app.api.deps import get_current_user, get_db_session, get_ksef_session_service, get_settings_service
 from app.core.security import AuthenticatedUser
 from app.schemas.ksef_session import (
     CloseSessionResponse,
@@ -170,25 +170,86 @@ class SyncPurchaseResponse(BaseModel):
     skipped_parse: int
 
 
+class SyncPurchaseJobResponse(BaseModel):
+    job_id: str
+    status: str  # pending | processing | done | failed
+
+
+class SyncPurchaseJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    result: SyncPurchaseResponse | None = None
+    error: str | None = None
+
+
 @router_sessions.post(
     "/sync-purchase",
-    response_model=SyncPurchaseResponse,
+    response_model=SyncPurchaseJobResponse,
+    status_code=202,
     summary="Pobierz faktury zakupowe z KSeF",
     description=(
         "Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat "
-        "i zapisuje nowe do bazy. Wymaga aktywnej sesji KSeF dla podanego NIP."
+        "i zapisuje nowe do bazy. Wymaga aktywnej sesji KSeF dla podanego NIP. "
+        "Operacja jest asynchroniczna — zwraca job_id do odpytywania statusu."
     ),
 )
 def sync_purchase_invoices(
     body: SyncPurchaseRequest,
-    ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
+    session: Annotated[object, Depends(get_db_session)],
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
-) -> SyncPurchaseResponse:
-    """POST /api/v1/ksef-sessions/sync-purchase — synchronizuj faktury zakupowe."""
-    counts = ksef_session_service.sync_received_invoices(
-        nip=body.nip,
-        date_from=body.date_from,
-        date_to=body.date_to,
-        actor_user_id=current_user.user_id,
+) -> SyncPurchaseJobResponse:
+    """POST /api/v1/ksef-sessions/sync-purchase — enqueue job synchronizacji faktur zakupowych."""
+    from uuid import uuid4
+    from datetime import UTC, datetime
+    from app.persistence.models.background_job import BackgroundJob
+
+    job = BackgroundJob(
+        id=uuid4(),
+        job_type="sync_purchase_invoices",
+        payload_json={
+            "nip": body.nip,
+            "date_from": body.date_from.isoformat(),
+            "date_to": body.date_to.isoformat(),
+            "actor_user_id": str(current_user.user_id) if current_user.user_id else None,
+        },
+        status="pending",
+        max_attempts=1,
     )
-    return SyncPurchaseResponse(**counts)
+    session.add(job)
+    session.commit()
+    return SyncPurchaseJobResponse(job_id=str(job.id), status="pending")
+
+
+@router_sessions.get(
+    "/sync-purchase/jobs/{job_id}",
+    response_model=SyncPurchaseJobStatusResponse,
+    summary="Status joba synchronizacji faktur zakupowych",
+)
+def get_sync_purchase_job_status(
+    job_id: UUID,
+    session: Annotated[object, Depends(get_db_session)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> SyncPurchaseJobStatusResponse:
+    """GET /api/v1/ksef-sessions/sync-purchase/jobs/{job_id} — sprawdź status joba."""
+    from app.persistence.models.background_job import BackgroundJob
+    from app.core.exceptions import NotFoundError
+
+    job = session.get(BackgroundJob, job_id)
+    if job is None:
+        raise NotFoundError(f"Job {job_id} nie istnieje.")
+
+    result = None
+    error = None
+    if job.status == "done":
+        raw = job.payload_json.get("result")
+        if raw:
+            result = SyncPurchaseResponse(**raw)
+    elif job.status == "failed":
+        error = job.last_error
+
+    return SyncPurchaseJobStatusResponse(
+        job_id=str(job.id),
+        status=job.status,
+        result=result,
+        error=error,
+    )

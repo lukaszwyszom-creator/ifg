@@ -24,6 +24,7 @@ from app.persistence.repositories.audit_repository import AuditRepository
 from app.services.ksef_session_service import KSeFSessionService
 from app.worker.job_handlers.submit_invoice import SubmitInvoiceJobHandler
 from app.worker.job_handlers.poll_ksef_status import PollKSeFStatusJobHandler
+from app.worker.job_handlers.sync_purchase_invoices import SyncPurchaseInvoicesJobHandler
 
 logger = logging.getLogger("app.worker")
 
@@ -52,6 +53,12 @@ def _build_handlers(session, ksef_client, ksef_session_service):
             invoice_repository=invoice_repo,
             job_repository=job_repo,
             ksef_client=ksef_client,
+            ksef_session_service=ksef_session_service,
+        ),
+        "sync_purchase_invoices": SyncPurchaseInvoicesJobHandler(
+            session=session,
+            invoice_repository=invoice_repo,
+            job_repository=job_repo,
             ksef_session_service=ksef_session_service,
         ),
     }
@@ -104,7 +111,9 @@ def _process_batch() -> int:
                 continue
 
             try:
-                handler.handle(job.payload_json)
+                result = handler.handle(job.payload_json)
+                if isinstance(result, dict):
+                    job.payload_json = {**job.payload_json, "result": result}
                 job.status = "done"
                 logger.info("Job %s (%s) zakończony.", job.id, job.job_type)
             except Exception as exc:  # noqa: BLE001

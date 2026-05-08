@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 # Statusy HTTP traktowane jako przejściowe (warte retry)
 _TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
-# Przyjmowane sukcesowe kody HTTP (202 dla invoice send/session open)
-_SUCCESS_STATUS_CODES = frozenset({200, 201, 202})
+# Przyjmowane sukcesowe kody HTTP (202 dla invoice send/session open, 204 dla close)
+_SUCCESS_STATUS_CODES = frozenset({200, 201, 202, 204})
 
 _USAGE_SYMMETRIC_KEY = "SymmetricKeyEncryption"
 
@@ -275,25 +275,45 @@ class KSeFClient:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
         Flow:
-        1. POST /invoices/query → queryReferenceNumber (202)
-        2. Poll GET /invoices/query/{queryRef} aż processingCode == 200
+        1. POST /sessions/{ref}/invoices/query (fallback: /invoices/query) → queryReferenceNumber (202)
+        2. Poll GET /sessions/{ref}/invoices/query/{queryRef} (fallback: /invoices/query/{queryRef})
         3. Dla każdego ksefReferenceNumber: GET /invoices/{ref} → decrypt AES-256-CBC
         Zwraca listę ReceivedInvoiceResult (ksef_reference_number + XML bytes).
         """
-        # 1. Zgłoś zapytanie
-        resp = self._request_with_retry(
-            method="POST",
-            path="/invoices/query",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={
-                "queryCriteria": {
-                    "invoiceType": "received",
-                    "subjectType": "subject2",
-                    "invoicingDateFrom": invoicing_date_from,
-                    "invoicingDateTo": invoicing_date_to,
-                },
+        # 1. Zgłoś zapytanie (preferuj endpoint sesyjny; fallback dla zgodności)
+        session_query_path = f"/sessions/{session_reference}/invoices/query"
+        global_query_path = "/invoices/query"
+        query_body = {
+            "queryCriteria": {
+                "invoiceType": "received",
+                "subjectType": "subject2",
+                "invoicingDateFrom": invoicing_date_from,
+                "invoicingDateTo": invoicing_date_to,
             },
-        )
+        }
+        poll_path_prefix = f"/sessions/{session_reference}/invoices/query"
+        try:
+            resp = self._request_with_retry(
+                method="POST",
+                path=session_query_path,
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=query_body,
+            )
+        except KSeFClientError as exc:
+            if exc.status_code != 404:
+                raise
+            logger.warning(
+                "KSeF query endpoint %s not found (404), fallback to %s",
+                session_query_path,
+                global_query_path,
+            )
+            resp = self._request_with_retry(
+                method="POST",
+                path=global_query_path,
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=query_body,
+            )
+            poll_path_prefix = "/invoices/query"
         query_ref = resp.json()["referenceNumber"]
         logger.info("KSeF query received invoices: queryRef=%s", query_ref)
 
@@ -304,7 +324,7 @@ class KSeFClient:
             try:
                 poll_resp = self._request_with_retry(
                     method="GET",
-                    path=f"/invoices/query/{query_ref}",
+                    path=f"{poll_path_prefix}/{query_ref}",
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
             except KSeFClientError as exc:
