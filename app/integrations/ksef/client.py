@@ -275,14 +275,18 @@ class KSeFClient:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
         Flow:
-        1. POST /sessions/{ref}/invoices/query (fallback: /invoices/query) → queryReferenceNumber (202)
-        2. Poll GET /sessions/{ref}/invoices/query/{queryRef} (fallback: /invoices/query/{queryRef})
+        1. POST /sessions/online/{ref}/invoices/query (fallbacki: /sessions/{ref}/invoices/query, /invoices/query)
+           → queryReferenceNumber (202)
+        2. Poll GET {prefix}/{queryRef} dla wybranego prefixu
         3. Dla każdego ksefReferenceNumber: GET /invoices/{ref} → decrypt AES-256-CBC
         Zwraca listę ReceivedInvoiceResult (ksef_reference_number + XML bytes).
         """
-        # 1. Zgłoś zapytanie (preferuj endpoint sesyjny; fallback dla zgodności)
-        session_query_path = f"/sessions/{session_reference}/invoices/query"
-        global_query_path = "/invoices/query"
+        # 1. Zgłoś zapytanie z fallbackiem pomiędzy wariantami endpointu.
+        query_path_candidates = [
+            f"/sessions/online/{session_reference}/invoices/query",
+            f"/sessions/{session_reference}/invoices/query",
+            "/invoices/query",
+        ]
         query_body = {
             "queryCriteria": {
                 "invoiceType": "received",
@@ -291,30 +295,32 @@ class KSeFClient:
                 "invoicingDateTo": invoicing_date_to,
             },
         }
-        poll_path_prefix = f"/sessions/{session_reference}/invoices/query"
-        try:
-            resp = self._request_with_retry(
-                method="POST",
-                path=session_query_path,
-                headers={"Authorization": f"Bearer {access_token}"},
-                json=query_body,
-            )
-        except KSeFClientError as exc:
-            if exc.status_code not in (404, 405):
-                raise
-            logger.warning(
-                "KSeF query endpoint %s unavailable (%s), fallback to %s",
-                session_query_path,
-                exc.status_code,
-                global_query_path,
-            )
-            resp = self._request_with_retry(
-                method="POST",
-                path=global_query_path,
-                headers={"Authorization": f"Bearer {access_token}"},
-                json=query_body,
-            )
-            poll_path_prefix = "/invoices/query"
+        resp = None
+        poll_path_prefix = None
+        last_exc: KSeFClientError | None = None
+        for candidate in query_path_candidates:
+            try:
+                resp = self._request_with_retry(
+                    method="POST",
+                    path=candidate,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    json=query_body,
+                )
+                poll_path_prefix = candidate
+                break
+            except KSeFClientError as exc:
+                if exc.status_code not in (404, 405):
+                    raise
+                last_exc = exc
+                logger.warning(
+                    "KSeF query endpoint %s unavailable (%s), trying next fallback",
+                    candidate,
+                    exc.status_code,
+                )
+
+        if resp is None or poll_path_prefix is None:
+            raise last_exc or KSeFClientError("Brak dostępnego endpointu query dla KSeF.")
+
         query_ref = resp.json()["referenceNumber"]
         logger.info("KSeF query received invoices: queryRef=%s", query_ref)
 
