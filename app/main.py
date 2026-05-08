@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.contractors import router as contractors_router
@@ -29,6 +30,18 @@ from app.services.auth_service import AuthService
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend-react" / "dist"
+
+
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles that serves index.html as fallback for SPA routing."""
+
+    async def get_response(self, path: str, scope: dict):
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as exc:
+            if exc.status_code == 404 and scope["method"] in ("GET", "HEAD"):
+                return await super().get_response("index.html", scope)
+            raise
 
 
 @asynccontextmanager
@@ -76,11 +89,11 @@ def create_application() -> FastAPI:
     if settings.enable_warehouse:
         application.include_router(stock_router, prefix=settings.api_v1_prefix)
 
-    # /ui serves the production Vite build when available.
+    # Serve frontend SPA under /ui with SPA fallback to index.html.
     if FRONTEND_DIST_DIR.exists():
         application.mount(
             "/ui",
-            StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True),
+            SPAStaticFiles(directory=str(FRONTEND_DIST_DIR), html=True),
             name="ui",
         )
 
