@@ -324,36 +324,43 @@ class KSeFSessionService:
         date_from: date,
         date_to: date,
         actor_user_id: UUID | None = None,
-    ) -> int:
+    ) -> dict:
         """Pobiera faktury zakupowe z KSeF za podany zakres dat i zapisuje nowe do bazy.
 
         Wymaga aktywnej sesji KSeF dla podanego NIP.
         Pomija faktury już istniejące w bazie (identyfikacja po ksefReferenceNumber).
-        Zwraca liczbę nowo zapisanych faktur.
+        Zwraca słownik: {received, saved, skipped_existing, skipped_parse}.
         """
         if self.invoice_repository is None:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
 
         ctx = self.get_session_context(nip)
 
-        received = self.ksef_client.query_received_invoices(
-            access_token=ctx.access_token,
-            session_reference=ctx.session_reference,
-            symmetric_key=ctx.symmetric_key,
-            iv=ctx.initialization_vector,
-            invoicing_date_from=date_from.isoformat(),
-            invoicing_date_to=date_to.isoformat(),
-        )
+        try:
+            received = self.ksef_client.query_received_invoices(
+                access_token=ctx.access_token,
+                session_reference=ctx.session_reference,
+                symmetric_key=ctx.symmetric_key,
+                iv=ctx.initialization_vector,
+                invoicing_date_from=date_from.isoformat(),
+                invoicing_date_to=date_to.isoformat(),
+            )
+        except KSeFClientError as exc:
+            raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
 
         saved = 0
+        skipped_existing = 0
+        skipped_parse = 0
         for result in received:
             if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
                 logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
+                skipped_existing += 1
                 continue
             try:
                 parsed = parse_fa3_xml(result.xml_bytes)
             except ValueError as exc:
                 logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
+                skipped_parse += 1
                 continue
 
             invoice_type_str = parsed.get("invoice_type", "VAT")
@@ -421,7 +428,12 @@ class KSeFSessionService:
             saved += 1
             logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
 
-        return saved
+        return {
+            "received": len(received),
+            "saved": saved,
+            "skipped_existing": skipped_existing,
+            "skipped_parse": skipped_parse,
+        }
 
     # -------------------------------------------------------------------------
     # PRIVATE HELPERS

@@ -165,6 +165,9 @@ class SyncPurchaseRequest(BaseModel):
 
 class SyncPurchaseResponse(BaseModel):
     saved: int
+    received: int
+    skipped_existing: int
+    skipped_parse: int
 
 
 @router_sessions.post(
@@ -182,10 +185,10 @@ def sync_purchase_invoices(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
 ) -> SyncPurchaseResponse:
     """POST /api/v1/ksef-sessions/sync-purchase — synchronizuj faktury zakupowe."""
-    saved = ksef_session_service.sync_received_invoices(
+    counts = ksef_session_service.sync_received_invoices(
         nip=body.nip,
         date_from=body.date_from,
         date_to=body.date_to,
         actor_user_id=current_user.user_id,
     )
-    return SyncPurchaseResponse(saved=saved)
+    return SyncPurchaseResponse(**counts)

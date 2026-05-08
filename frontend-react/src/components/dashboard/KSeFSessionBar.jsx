@@ -126,10 +126,10 @@ export default function KSeFSessionBar() {
     clearMsgs();
     setSyncBusy(true);
     try {
-      // Pobierz faktury z ostatnich 365 dni.
+      // Pobierz faktury z ostatnich 30 dni (krótsze okno ogranicza timeouty po stronie KSeF).
       const dateTo = new Date();
       const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 365);
+      dateFrom.setDate(dateFrom.getDate() - 30);
       const fmt = (d) => {
         const y = d.getFullYear();
         const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -138,7 +138,10 @@ export default function KSeFSessionBar() {
       };
 
       const result = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
-      setSuccessMsg(`Pobrano ${result.saved} nowych faktur zakupowych`);
+      setSuccessMsg(
+        `Pobrano ${result.saved} nowych faktur` +
+        ` (od KSeF: ${result.received}, duplikaty: ${result.skipped_existing}, błędy parsowania: ${result.skipped_parse})`
+      );
       // Odśwież wspólny pool faktur niezależnie od tego, który moduł jest aktywny.
       await refreshAllInvoicePools();
       window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
@@ -146,6 +149,7 @@ export default function KSeFSessionBar() {
       const msg =
         err.response?.data?.error?.message ??
         err.response?.data?.detail ??
+        err.message ??
         'Błąd synchronizacji faktur';
       setError(msg);
     } finally {
@@ -210,7 +214,7 @@ export default function KSeFSessionBar() {
               className="btn btn-secondary btn-sm"
               disabled={syncBusy}
               onClick={handleSyncPurchase}
-              title="Pobierz faktury zakupowe z KSeF (ostatnie 365 dni)"
+              title="Pobierz faktury zakupowe z KSeF (ostatnie 30 dni)"
             >
               {syncBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Pobierz zakupowe'}
             </button>
