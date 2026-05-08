@@ -1,8 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.contractors import router as contractors_router
@@ -23,6 +25,10 @@ from app.core.middleware import RequestIdMiddleware
 from app.persistence.db import session_scope
 from app.persistence.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthService
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend-react" / "dist"
 
 
 @asynccontextmanager
@@ -69,6 +75,14 @@ def create_application() -> FastAPI:
 
     if settings.enable_warehouse:
         application.include_router(stock_router, prefix=settings.api_v1_prefix)
+
+    # /ui serves the production Vite build when available.
+    if FRONTEND_DIST_DIR.exists():
+        application.mount(
+            "/ui",
+            StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True),
+            name="ui",
+        )
 
     return application
 
