@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.contractors import router as contractors_router
@@ -73,3 +74,8 @@ def create_application() -> FastAPI:
 
 
 app = create_application()
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/ui/", status_code=302)
