@@ -21,7 +21,7 @@ const UI_CONFIG = {
   CONNECTED: {
     label: 'połączony',
     dotClass: styles.green,
-    actionLabel: null,
+    actionLabel: 'Rozłącz',
   },
   ERROR: {
     label: 'błąd',
@@ -149,10 +149,6 @@ export default function KSeFConnectionTile() {
       return;
     }
 
-    if (status.ui_status === 'CONNECTED') {
-      return;
-    }
-
     let nipToUse = sellerNip;
     if (!nipToUse || nipToUse.length !== 10) {
       try {
@@ -187,6 +183,48 @@ export default function KSeFConnectionTile() {
           last_error: 'Brak poprawnego NIP sprzedawcy w ustawieniach.',
         },
       });
+      return;
+    }
+
+    if (status.ui_status === 'CONNECTED') {
+      ksefApi.markStatusMutation();
+      applyStatus({
+        ui_status: 'CONNECTING',
+        details: {
+          reason: 'UNKNOWN',
+          has_session: true,
+          session_expires_at: status?.details?.session_expires_at ?? null,
+          last_error: null,
+        },
+      });
+
+      try {
+        await ksefApi.closeSession(nipToUse);
+        ksefApi.markStatusMutation();
+        applyStatus({
+          ui_status: 'DISCONNECTED',
+          details: {
+            reason: 'NO_SESSION',
+            has_session: false,
+            session_expires_at: null,
+            last_error: null,
+          },
+        });
+      } catch (error) {
+        ksefApi.markStatusMutation();
+        applyStatus({
+          ui_status: 'ERROR',
+          details: {
+            reason: 'UNKNOWN',
+            has_session: false,
+            session_expires_at: null,
+            last_error:
+              error?.response?.data?.error?.message ??
+              error?.response?.data?.detail ??
+              'Nie udało się zamknąć sesji KSeF.',
+          },
+        });
+      }
       return;
     }
 
