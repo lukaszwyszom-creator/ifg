@@ -358,75 +358,84 @@ class KSeFSessionService:
                 continue
             try:
                 parsed = parse_fa3_xml(result.xml_bytes)
-            except ValueError as exc:
+            except (ValueError, Exception) as exc:  # noqa: BLE001
                 logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
                 skipped_parse += 1
                 continue
 
-            invoice_type_str = parsed.get("invoice_type", "VAT")
             try:
-                invoice_type = InvoiceType(invoice_type_str)
-            except ValueError:
-                invoice_type = InvoiceType.VAT
-
-            exchange_rate = parsed.get("exchange_rate")
-            exchange_rate_date_str = parsed.get("exchange_rate_date")
-            exchange_rate_date: date | None = None
-            if exchange_rate_date_str:
+                invoice_type_str = parsed.get("invoice_type", "VAT")
                 try:
-                    from datetime import date as _date
-                    exchange_rate_date = _date.fromisoformat(exchange_rate_date_str)
+                    invoice_type = InvoiceType(invoice_type_str)
                 except ValueError:
-                    pass
+                    invoice_type = InvoiceType.VAT
 
-            items = [
-                InvoiceItem(
-                    name=item["name"],
-                    quantity=Decimal(str(item["quantity"])),
-                    unit=item["unit"],
-                    unit_price_net=Decimal(str(item["unit_price_net"])),
-                    vat_rate=Decimal(str(item["vat_rate"])),
-                    net_total=Decimal(str(item["net_total"])),
-                    vat_total=Decimal(str(item["vat_total"])),
-                    gross_total=Decimal(str(item["gross_total"])),
-                    sort_order=item["sort_order"],
+                exchange_rate = parsed.get("exchange_rate")
+                exchange_rate_date_str = parsed.get("exchange_rate_date")
+                exchange_rate_date: date | None = None
+                if exchange_rate_date_str:
+                    try:
+                        from datetime import date as _date
+                        exchange_rate_date = _date.fromisoformat(exchange_rate_date_str)
+                    except ValueError:
+                        pass
+
+                items = [
+                    InvoiceItem(
+                        name=item["name"] or "",
+                        quantity=Decimal(str(item["quantity"])),
+                        unit=item["unit"] or "szt.",
+                        unit_price_net=Decimal(str(item["unit_price_net"])),
+                        vat_rate=Decimal(str(item["vat_rate"])),
+                        net_total=Decimal(str(item["net_total"])),
+                        vat_total=Decimal(str(item["vat_total"])),
+                        gross_total=Decimal(str(item["gross_total"])),
+                        sort_order=item["sort_order"],
+                    )
+                    for item in parsed.get("items", [])
+                ]
+
+                now = datetime.now(UTC)
+                invoice = Invoice(
+                    id=uuid4(),
+                    status=InvoiceStatus.ACCEPTED,
+                    issue_date=date.fromisoformat(parsed["issue_date"]),
+                    sale_date=date.fromisoformat(parsed["sale_date"]),
+                    currency=parsed.get("currency", "PLN"),
+                    seller_snapshot=parsed["seller_snapshot"],
+                    buyer_snapshot=parsed["buyer_snapshot"],
+                    items=items,
+                    total_net=Decimal(str(parsed.get("total_net", 0))),
+                    total_vat=Decimal(str(parsed.get("total_vat", 0))),
+                    total_gross=Decimal(str(parsed.get("total_gross", 0))),
+                    created_at=now,
+                    updated_at=now,
+                    number_local=parsed.get("number_local"),
+                    ksef_reference_number=result.ksef_reference_number,
+                    invoice_type=invoice_type,
+                    use_split_payment=parsed.get("use_split_payment", False),
+                    self_billing=parsed.get("self_billing", False),
+                    reverse_charge=parsed.get("reverse_charge", False),
+                    reverse_charge_art=parsed.get("reverse_charge_art", False),
+                    reverse_charge_flag=parsed.get("reverse_charge_flag", False),
+                    cash_accounting_method=parsed.get("cash_accounting_method", False),
+                    exchange_rate=exchange_rate,
+                    exchange_rate_date=exchange_rate_date,
+                    direction="purchase",
+                    created_by=actor_user_id,
                 )
-                for item in parsed.get("items", [])
-            ]
 
-            now = datetime.now(UTC)
-            invoice = Invoice(
-                id=uuid4(),
-                status=InvoiceStatus.ACCEPTED,
-                issue_date=date.fromisoformat(parsed["issue_date"]),
-                sale_date=date.fromisoformat(parsed["sale_date"]),
-                currency=parsed.get("currency", "PLN"),
-                seller_snapshot=parsed["seller_snapshot"],
-                buyer_snapshot=parsed["buyer_snapshot"],
-                items=items,
-                total_net=Decimal(str(parsed.get("total_net", 0))),
-                total_vat=Decimal(str(parsed.get("total_vat", 0))),
-                total_gross=Decimal(str(parsed.get("total_gross", 0))),
-                created_at=now,
-                updated_at=now,
-                number_local=parsed.get("number_local"),
-                ksef_reference_number=result.ksef_reference_number,
-                invoice_type=invoice_type,
-                use_split_payment=parsed.get("use_split_payment", False),
-                self_billing=parsed.get("self_billing", False),
-                reverse_charge=parsed.get("reverse_charge", False),
-                reverse_charge_art=parsed.get("reverse_charge_art", False),
-                reverse_charge_flag=parsed.get("reverse_charge_flag", False),
-                cash_accounting_method=parsed.get("cash_accounting_method", False),
-                exchange_rate=exchange_rate,
-                exchange_rate_date=exchange_rate_date,
-                direction="purchase",
-                created_by=actor_user_id,
-            )
-
-            self.invoice_repository.add(invoice)
-            saved += 1
-            logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
+                self.invoice_repository.add(invoice)
+                saved += 1
+                logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "KSeF sync: błąd tworzenia faktury %s: %s",
+                    result.ksef_reference_number,
+                    exc,
+                    exc_info=True,
+                )
+                skipped_parse += 1
 
         return {
             "received": len(received),
