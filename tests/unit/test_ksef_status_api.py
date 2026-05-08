@@ -6,6 +6,8 @@ from unittest import mock
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -93,6 +95,25 @@ class TestKSeFStatusApi:
         assert response.status_code == 200
         assert response.json()["ui_status"] == "DISCONNECTED"
         mock_ksef_session_service.get_connection_status.assert_called_once_with(None)
+
+    def test_close_session_post_alias(self, client, mock_ksef_session_service):
+        session_id = uuid4()
+        mock_ksef_session_service.close_session.return_value = SimpleNamespace(
+            id=session_id,
+            status="terminated",
+            session_reference="ref-123",
+        )
+
+        response = client.post(
+            "/api/v1/ksef-sessions/close",
+            json={"nip": "1234567890"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == str(session_id)
+        assert body["status"] == "terminated"
+        assert body["session_reference"] == "ref-123"
 
 
 class TestKSeFConnectionStatusService:

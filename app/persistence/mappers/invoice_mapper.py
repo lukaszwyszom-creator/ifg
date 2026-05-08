@@ -40,6 +40,13 @@ _ALLOWED_WRITE_STATUSES = frozenset(
 class InvoiceMapper:
 
     @staticmethod
+    def _normalize_direction(raw_direction: str | None) -> str:
+        normalized = (raw_direction or "").strip().lower()
+        if normalized in {"sale", "purchase"}:
+            return normalized
+        return "sale"
+
+    @staticmethod
     def _status_from_db(raw_status: str | None) -> InvoiceStatus:
         normalized = (raw_status or "").strip().lower()
         if normalized in _READ_STATUS_ALIASES:
@@ -101,7 +108,7 @@ class InvoiceMapper:
             exchange_rate=orm.exchange_rate,
             exchange_rate_date=orm.exchange_rate_date,
             advance_amount=orm.advance_amount,
-            direction=orm.direction if orm.direction else "sale",
+            direction=InvoiceMapper._normalize_direction(orm.direction),
             settled_advance_ids=[
                 link.advance_invoice_id for link in orm.advance_links
             ],
@@ -136,7 +143,7 @@ class InvoiceMapper:
             exchange_rate=invoice.exchange_rate,
             exchange_rate_date=invoice.exchange_rate_date,
             advance_amount=invoice.advance_amount,
-            direction=invoice.direction,
+            direction=InvoiceMapper._normalize_direction(invoice.direction),
             created_by=invoice.created_by,
         )
         orm.items = [
@@ -176,7 +183,7 @@ class InvoiceMapper:
         orm.exchange_rate = invoice.exchange_rate
         orm.exchange_rate_date = invoice.exchange_rate_date
         orm.advance_amount = invoice.advance_amount
-        orm.direction = invoice.direction
+        orm.direction = InvoiceMapper._normalize_direction(invoice.direction)
 
         # Bezpieczna aktualizacja kolekcji in-place — unika problemów
         # lazy-load/DetachedInstanceError przy przypisaniu całej nowej listy.

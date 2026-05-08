@@ -25,6 +25,10 @@ router_status = APIRouter(prefix="/ksef", tags=["ksef-session"])
 router_sessions = APIRouter(prefix="/ksef-sessions", tags=["ksef-session"])
 
 
+class CloseSessionRequest(BaseModel):
+    nip: str
+
+
 @router_status.get("/status", response_model=KSeFConnectionStatusResponse)
 def get_ksef_connection_status(
     ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
@@ -98,6 +102,21 @@ def close_session_v2(
 ) -> CloseSessionResponse:
     """DELETE /api/v1/ksef-sessions/?nip=... — zamknij aktywną sesję."""
     orm = ksef_session_service.close_session(nip=nip, actor_user_id=current_user.user_id)
+    return CloseSessionResponse.model_validate(orm)
+
+
+@router_sessions.post(
+    "/close",
+    response_model=CloseSessionResponse,
+    summary="Zamknij sesję KSeF (compat)",
+)
+def close_session_v2_post(
+    body: CloseSessionRequest,
+    ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> CloseSessionResponse:
+    """POST /api/v1/ksef-sessions/close — alias kompatybilny dla środowisk z ograniczonym DELETE."""
+    orm = ksef_session_service.close_session(nip=body.nip, actor_user_id=current_user.user_id)
     return CloseSessionResponse.model_validate(orm)
 
 

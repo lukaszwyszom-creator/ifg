@@ -106,6 +106,14 @@ class TestToDomain:
 
         assert domain.status == InvoiceStatus.READY_FOR_SUBMISSION
 
+    def test_normalizes_legacy_uppercase_purchase_direction(self):
+        orm = _make_invoice_orm()
+        orm.direction = "PURCHASE"
+
+        domain = InvoiceMapper.to_domain(orm)
+
+        assert domain.direction == "purchase"
+
 
 class TestToOrm:
     def test_creates_orm(self, sample_invoice: Invoice):
@@ -130,6 +138,13 @@ class TestToOrm:
 
         with pytest.raises(InvalidInvoiceError, match="do zapisu"):
             InvoiceMapper.to_orm(sample_invoice)
+
+    def test_normalizes_uppercase_direction_on_write(self, sample_invoice: Invoice):
+        sample_invoice.direction = "PURCHASE"
+
+        orm = InvoiceMapper.to_orm(sample_invoice)
+
+        assert orm.direction == "purchase"
 
 
 class TestUpdateOrm:

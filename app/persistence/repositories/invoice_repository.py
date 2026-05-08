@@ -96,7 +96,9 @@ class InvoiceRepository:
                     )
                 )
         if direction is not None:
-            base_stmt = base_stmt.where(InvoiceORM.direction == direction)
+            normalized_direction = direction.strip().lower()
+            if normalized_direction:
+                base_stmt = base_stmt.where(func.lower(InvoiceORM.direction) == normalized_direction)
 
         count_stmt = select(func.count()).select_from(base_stmt.subquery())
         total = self.session.execute(count_stmt).scalar_one()

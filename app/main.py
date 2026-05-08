@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
+from fastapi import HTTPException as FastAPIHTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routers.auth import router as auth_router
 from app.api.routers.contractors import router as contractors_router
@@ -35,11 +37,14 @@ FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend-react" / "dist"
 class SPAStaticFiles(StaticFiles):
     """StaticFiles that serves index.html as fallback for SPA routing."""
 
-    async def get_response(self, path: str, scope: dict):
+    async def get_response(self, path: str, scope: dict[str, Any]):
+        if scope.get("method") not in ("GET", "HEAD"):
+            return await super().get_response(path, scope)
+
         try:
             return await super().get_response(path, scope)
-        except HTTPException as exc:
-            if exc.status_code == 404 and scope["method"] in ("GET", "HEAD"):
+        except (StarletteHTTPException, FastAPIHTTPException) as exc:
+            if getattr(exc, "status_code", None) == 404:
                 return await super().get_response("index.html", scope)
             raise
 

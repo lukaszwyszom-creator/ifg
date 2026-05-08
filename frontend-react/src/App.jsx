@@ -26,7 +26,7 @@ export default function App() {
   }, [refreshAllInvoicePools]);
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/ui">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route

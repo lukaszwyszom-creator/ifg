@@ -73,7 +73,7 @@ export const ksefApi = {
     client.get('/ksef-sessions/active', { params: { nip } }).then((r) => r.data),
 
   closeSession: (nip) =>
-    client.delete('/ksef-sessions/', { params: { nip } }).then((r) => r.data),
+    client.post('/ksef-sessions/close', { nip }).then((r) => r.data),
 
   syncPurchaseInvoices: (nip, dateFrom, dateTo) =>
     client

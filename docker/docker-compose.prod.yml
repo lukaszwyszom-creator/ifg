@@ -4,7 +4,7 @@
 #
 # Różnice względem dev:
 #   - osobny wolumen na klucze KSeF (ksef_keys)
-#   - frontend React zbudowany i serwowany przez nginx
+#   - frontend React build montowany do kontenera API i serwowany pod /ui
 #   - brak expose portu DB na host
 #   - restart: unless-stopped
 
@@ -20,6 +20,8 @@ services:
       TZ: Europe/Warsaw
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - ../frontend-react/dist:/app/frontend-react/dist:ro
     restart: unless-stopped
     depends_on:
       db:
@@ -47,17 +49,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - ifg_prod
-
-  frontend:
-    image: ifg-frontend:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.frontend
-    ports:
-      - "127.0.0.1:3000:80"
-    restart: unless-stopped
     networks:
       - ifg_prod
 
