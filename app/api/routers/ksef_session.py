@@ -1,13 +1,19 @@
 """Endpointy zarządzania sesją KSeF."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user, get_db_session, get_ksef_session_service, get_settings_service
+from app.api.deps import (
+    get_current_user,
+    get_db_session,
+    get_ksef_session_service,
+    get_ksef_sync_service,
+    get_settings_service,
+)
 from app.core.security import AuthenticatedUser
 from app.schemas.ksef_session import (
     CloseSessionResponse,
@@ -16,6 +22,7 @@ from app.schemas.ksef_session import (
     OpenSessionRequest,
 )
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.ksef_sync_service import KSeFSyncService
 from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/ksef/session", tags=["ksef-session"])
@@ -170,6 +177,24 @@ class SyncPurchaseResponse(BaseModel):
     skipped_parse: int
 
 
+class KSeFSyncStatusResponse(BaseModel):
+    scope: str
+    status: str
+    last_success_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    last_error: str | None = None
+    state_json: dict | None = None
+
+
+class KSeFPurchaseSyncRequest(BaseModel):
+    force: bool = False
+
+
+class KSeFPurchaseSyncResponse(BaseModel):
+    counts: SyncPurchaseResponse
+    status: KSeFSyncStatusResponse
+
+
 class SyncPurchaseJobResponse(BaseModel):
     job_id: str
     status: str  # pending | processing | done | failed
@@ -180,6 +205,56 @@ class SyncPurchaseJobStatusResponse(BaseModel):
     status: str
     result: SyncPurchaseResponse | None = None
     error: str | None = None
+
+
+@router_status.get(
+    "/sync/status",
+    response_model=KSeFSyncStatusResponse,
+    summary="Status synchronizacji zakupów KSeF",
+)
+def get_ksef_sync_status(
+    ksef_sync_service: Annotated[KSeFSyncService, Depends(get_ksef_sync_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> KSeFSyncStatusResponse:
+    payload = ksef_sync_service.get_sync_status()
+    # Pola datetime serializujemy do daty-czasu ISO po stronie Pydantic bez dodatkowej logiki.
+    return KSeFSyncStatusResponse(
+        scope=payload["scope"],
+        status=payload["status"],
+        last_success_at=payload["last_success_at"],
+        last_attempt_at=payload["last_attempt_at"],
+        last_error=payload["last_error"],
+        state_json=payload["state_json"],
+    )
+
+
+@router_status.post(
+    "/sync/purchases",
+    response_model=KSeFPurchaseSyncResponse,
+    summary="Ręczne odświeżenie zakupów z KSeF",
+)
+def sync_ksef_purchases_now(
+    body: KSeFPurchaseSyncRequest,
+    ksef_sync_service: Annotated[KSeFSyncService, Depends(get_ksef_sync_service)],
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> KSeFPurchaseSyncResponse:
+    payload = ksef_sync_service.sync_purchase_invoices(
+        force=body.force,
+        actor_user_id=current_user.user_id,
+    )
+    counts = payload["counts"]
+    status = payload["status"]
+    return KSeFPurchaseSyncResponse(
+        counts=SyncPurchaseResponse(**counts),
+        status=KSeFSyncStatusResponse(
+            scope=status["scope"],
+            status=status["status"],
+            last_success_at=status["last_success_at"],
+            last_attempt_at=status["last_attempt_at"],
+            last_error=status["last_error"],
+            state_json=status["state_json"],
+        ),
+    )
 
 
 @router_sessions.post(

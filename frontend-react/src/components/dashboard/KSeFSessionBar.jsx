@@ -18,6 +18,7 @@ export default function KSeFSessionBar() {
   const [busy, setBusy] = useState(false);
   const [checkLoading, setCheckLoading] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(null);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -48,6 +49,20 @@ export default function KSeFSessionBar() {
       checkSession(storedNip);
     }
   }, [storedNip, checkSession]);
+
+  const loadSyncStatus = useCallback(async () => {
+    try {
+      const status = await ksefApi.getPurchaseSyncStatus();
+      setSyncStatus(status);
+    } catch {
+      // Endpoint może być chwilowo niedostępny podczas rolloutu.
+      setSyncStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSyncStatus();
+  }, [loadSyncStatus]);
 
   // Pobierz NIP z backendu jeśli store jest pusty
   useEffect(() => {
@@ -126,54 +141,72 @@ export default function KSeFSessionBar() {
     clearMsgs();
     setSyncBusy(true);
     try {
-      // Pobierz faktury z ostatnich 30 dni (krótsze okno ogranicza timeouty po stronie KSeF).
-      const dateTo = new Date();
-      const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
-      const fmt = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      };
+      // Preferuj nowy endpoint synchroniczny etapu 1.
+      try {
+        const payload = await ksefApi.syncPurchasesNow(false);
+        const r = payload?.counts || {};
+        const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
+        const received = Number.isFinite(Number(r.received)) ? Number(r.received) : 0;
+        const skippedExisting = Number.isFinite(Number(r.skipped_existing))
+          ? Number(r.skipped_existing)
+          : 0;
+        const skippedParse = Number.isFinite(Number(r.skipped_parse))
+          ? Number(r.skipped_parse)
+          : 0;
+        setSuccessMsg(
+          `Pobrano ${saved} nowych faktur` +
+          ` (od KSeF: ${received}, duplikaty: ${skippedExisting}, błędy parsowania: ${skippedParse})`
+        );
+      } catch (syncErr) {
+        // Fallback dla starszego backendu — istniejący async job endpoint.
+        if (syncErr.response?.status !== 404) throw syncErr;
 
-      // Enqueue job (szybki request) — bez blokowania HTTP przez 60s
-      const { job_id } = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
+        const dateTo = new Date();
+        const dateFrom = new Date();
+        dateFrom.setDate(dateFrom.getDate() - 30);
+        const fmt = (d) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
 
-      // Polling co 3s max 90s
-      const MAX_POLLS = 30;
-      const POLL_INTERVAL_MS = 3000;
-      let pollCount = 0;
-      let done = false;
-      while (!done && pollCount < MAX_POLLS) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        pollCount++;
-        const status = await ksefApi.getSyncPurchaseJobStatus(job_id);
-        if (status.status === 'done') {
-          done = true;
-          const r = status.result || {};
-          const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
-          const received = Number.isFinite(Number(r.received)) ? Number(r.received) : 0;
-          const skippedExisting = Number.isFinite(Number(r.skipped_existing))
-            ? Number(r.skipped_existing)
-            : 0;
-          const skippedParse = Number.isFinite(Number(r.skipped_parse))
-            ? Number(r.skipped_parse)
-            : 0;
-          setSuccessMsg(
-            `Pobrano ${saved} nowych faktur` +
-            ` (od KSeF: ${received}, duplikaty: ${skippedExisting}, błędy parsowania: ${skippedParse})`
-          );
-          await refreshAllInvoicePools();
-          window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
-        } else if (status.status === 'failed') {
-          done = true;
-          throw new Error(status.error || 'Synchronizacja zakończona błędem.');
+        const { job_id } = await ksefApi.syncPurchaseInvoices(session.nip, fmt(dateFrom), fmt(dateTo));
+        const MAX_POLLS = 30;
+        const POLL_INTERVAL_MS = 3000;
+        let pollCount = 0;
+        let done = false;
+        while (!done && pollCount < MAX_POLLS) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          pollCount++;
+          const status = await ksefApi.getSyncPurchaseJobStatus(job_id);
+          if (status.status === 'done') {
+            done = true;
+            const r = status.result || {};
+            const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
+            const received = Number.isFinite(Number(r.received)) ? Number(r.received) : 0;
+            const skippedExisting = Number.isFinite(Number(r.skipped_existing))
+              ? Number(r.skipped_existing)
+              : 0;
+            const skippedParse = Number.isFinite(Number(r.skipped_parse))
+              ? Number(r.skipped_parse)
+              : 0;
+            setSuccessMsg(
+              `Pobrano ${saved} nowych faktur` +
+              ` (od KSeF: ${received}, duplikaty: ${skippedExisting}, błędy parsowania: ${skippedParse})`
+            );
+          } else if (status.status === 'failed') {
+            done = true;
+            throw new Error(status.error || 'Synchronizacja zakończona błędem.');
+          }
+        }
+        if (!done) {
+          setSuccessMsg('Synchronizacja trwa w tle — odśwież listę faktur za chwilę.');
         }
       }
-      if (!done) {
-        setSuccessMsg('Synchronizacja trwa w tle — odśwież listę faktur za chwilę.');
-      }
+      await refreshAllInvoicePools();
+      window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
+      await loadSyncStatus();
     } catch (err) {
       const msg =
         err.response?.data?.error?.message ??
@@ -188,6 +221,11 @@ export default function KSeFSessionBar() {
 
   const isActive = session?.status === 'active';
   const nipValid = nip.length === 10;
+  const syncStatusLabel = syncStatus?.status || 'idle';
+  const syncLastSuccess = syncStatus?.last_success_at
+    ? new Date(syncStatus.last_success_at).toLocaleString('pl-PL')
+    : 'brak';
+  const syncLastError = syncStatus?.last_error || null;
 
   return (
     <div className={styles.bar}>
@@ -195,15 +233,25 @@ export default function KSeFSessionBar() {
         <span className={styles.label}>Sesja KSeF</span>
 
         {isActive ? (
-          <span className={styles.sessionInfo}>
-            <span className={styles.dot} />
-            Aktywna · NIP {session.nip}
-            {session.session_reference && (
-              <span className={styles.ref} title={session.session_reference}>
-                · ref: {session.session_reference.slice(0, 12)}…
+          <div className={styles.statusStack}>
+            <span className={styles.sessionInfo}>
+              <span className={styles.dot} />
+              Aktywna · NIP {session.nip}
+              {session.session_reference && (
+                <span className={styles.ref} title={session.session_reference}>
+                  · ref: {session.session_reference.slice(0, 12)}…
+                </span>
+              )}
+            </span>
+            <span className={styles.syncMeta}>
+              Sync zakupów: {syncStatusLabel} · Ostatni sukces: {syncLastSuccess}
+            </span>
+            {syncLastError && (
+              <span className={styles.syncError} title={syncLastError}>
+                Ostatni błąd: {syncLastError}
               </span>
             )}
-          </span>
+          </div>
         ) : (
           <span className={styles.noSession}>Brak aktywnej sesji</span>
         )}
@@ -243,9 +291,9 @@ export default function KSeFSessionBar() {
               className="btn btn-secondary btn-sm"
               disabled={syncBusy}
               onClick={handleSyncPurchase}
-              title="Pobierz faktury zakupowe z KSeF (ostatnie 30 dni)"
+              title="Odśwież lokalny pool faktur zakupowych z KSeF"
             >
-              {syncBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Pobierz zakupowe'}
+              {syncBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Odśwież KSeF'}
             </button>
             <button
               className="btn btn-danger btn-sm"

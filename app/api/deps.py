@@ -21,6 +21,7 @@ from app.persistence.repositories.contractor_repository import ContractorReposit
 from app.persistence.repositories.idempotency_repository import IdempotencyRepository
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
+from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
 from app.persistence.repositories.payment_allocation_repository import PaymentAllocationRepository
 from app.persistence.repositories.stock_repository import StockRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
@@ -31,6 +32,7 @@ from app.services.contractor_service import ContractorService
 from app.services.idempotency_service import IdempotencyService
 from app.services.invoice_service import InvoiceService
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.ksef_sync_service import KSeFSyncService
 from app.services.payment_service import PaymentService
 from app.services.settings_service import SettingsService
 from app.services.stock_service import StockService
@@ -134,6 +136,18 @@ def get_ksef_session_service(
         ),
         audit_service=audit_service,
         invoice_repository=InvoiceRepository(session),
+    )
+
+
+def get_ksef_sync_service(
+    session: Annotated[Session, Depends(get_db_session)],
+    ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
+) -> KSeFSyncService:
+    return KSeFSyncService(
+        session=session,
+        sync_state_repository=KSeFSyncStateRepository(session),
+        settings_repository=AppSettingsRepository(session),
+        ksef_session_service=ksef_session_service,
     )
 
 

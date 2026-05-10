@@ -5,6 +5,7 @@ from app.persistence.repositories.contractor_override_repository import Contract
 from app.persistence.repositories.contractor_repository import ContractorRepository
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
+from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
 from app.persistence.repositories.user_repository import UserRepository
 
@@ -14,6 +15,7 @@ __all__ = [
 	"ContractorRepository",
 	"InvoiceRepository",
 	"JobRepository",
+	"KSeFSyncStateRepository",
 	"TransmissionRepository",
 	"UserRepository",
 ]

@@ -425,7 +425,7 @@ class KSeFSessionService:
                     created_by=actor_user_id,
                 )
 
-                self.invoice_repository.add(invoice)
+                self.invoice_repository.add(invoice, source_system="ksef_import")
                 saved += 1
                 logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
             except Exception as exc:  # noqa: BLE001

@@ -40,8 +40,12 @@ class InvoiceRepository:
             return None
         return InvoiceMapper.to_domain(orm)
 
-    def add(self, invoice: Invoice) -> Invoice:
+    def add(self, invoice: Invoice, source_system: str | None = None) -> Invoice:
         orm = InvoiceMapper.to_orm(invoice)
+        if source_system:
+            payload = dict(orm.ksef_payload_json or {})
+            payload["source_system"] = source_system
+            orm.ksef_payload_json = payload
         self.session.add(orm)
         self.session.flush()
         return InvoiceMapper.to_domain(orm)
