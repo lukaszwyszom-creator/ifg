@@ -238,3 +238,161 @@ class TestKSeFClientGetUPO:
                 client.get_upo("https://upo.test/404")
 
         assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Testy query_received_invoices — brak invoiceReferenceNumber w zapytaniach
+# ---------------------------------------------------------------------------
+
+class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
+    """Pilnuje, że sync listy zakupów nigdy nie wysyła invoiceReferenceNumber."""
+
+    def _make_client(self) -> KSeFClient:
+        return KSeFClient(
+            environment="test",
+            timeout_seconds=5,
+            retry_config=RetryConfig(max_retries=0, backoff_base=0.0, backoff_max=0.0),
+        )
+
+    def _mock_ctx(self):
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        return ctx
+
+    def test_get_candidates_do_not_include_invoice_reference_number(self):
+        """Żaden GET candidate nie wysyła invoiceReferenceNumber w params."""
+        client = self._make_client()
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"invoices": []}  # pusta lista — brak faktur
+
+        recorded_calls: list[dict] = []
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            recorded_calls.append({"method": method, "url": url, "params": params or {}, "json": json or {}})
+            return ok_resp
+
+        with patch("httpx.Client") as mock_cls:
+            ctx = self._mock_ctx()
+            ctx.request.side_effect = _fake_request
+            mock_cls.return_value = ctx
+
+            client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-05-31",
+            )
+
+        for call in recorded_calls:
+            assert "invoiceReferenceNumber" not in call["params"], (
+                f"invoiceReferenceNumber nie powinno być w params GET {call['url']}"
+            )
+            assert "invoiceReferenceNumber" not in call["json"], (
+                f"invoiceReferenceNumber nie powinno być w body POST {call['url']}"
+            )
+
+    def test_post_fallback_does_not_include_invoice_reference_number(self):
+        """POST fallback query nie wysyła invoiceReferenceNumber w body."""
+        client = self._make_client()
+
+        # Wszystkie GET candidates → 404
+        not_found = MagicMock()
+        not_found.status_code = 404
+        not_found.text = "Not Found"
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"referenceNumber": "qref-1", "processingCode": 200, "invoiceList": []}
+
+        recorded_post_calls: list[dict] = []
+
+        call_count = [0]
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            call_count[0] += 1
+            if method == "GET" and "/invoices" in url and "query" not in url and "received" not in url:
+                # polling call after query_ref set
+                return ok_resp
+            if method == "GET":
+                return not_found
+            # POST
+            recorded_post_calls.append({"method": method, "url": url, "json": json or {}})
+            return ok_resp
+
+        with patch("httpx.Client") as mock_cls:
+            ctx = self._mock_ctx()
+            ctx.request.side_effect = _fake_request
+            mock_cls.return_value = ctx
+
+            client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-05-31",
+            )
+
+        for call in recorded_post_calls:
+            body = call["json"]
+            criteria = body.get("queryCriteria", {})
+            assert "invoiceReferenceNumber" not in criteria, (
+                f"invoiceReferenceNumber nie powinno być w queryCriteria POST {call['url']}"
+            )
+            assert "invoiceReferenceNumber" not in body, (
+                f"invoiceReferenceNumber nie powinno być w body POST {call['url']}"
+            )
+
+    def test_post_fallback_does_not_use_sessions_online_invoices_query_path(self):
+        """Sprawdza, że /sessions/online/{ref}/invoices/query NIE jest w POST fallback.
+
+        Ten path był przyczyną błędu 400 / exceptionCode 21405 — KSeF interpretował
+        'query' jako invoiceReferenceNumber w URL /sessions/online/{ref}/invoices/{ref}.
+        """
+        client = self._make_client()
+
+        # Wszystkie GET → 404
+        not_found = MagicMock()
+        not_found.status_code = 404
+        not_found.text = "Not Found"
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"referenceNumber": "qref-2", "processingCode": 200, "invoiceList": []}
+
+        recorded_urls: list[str] = []
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            recorded_urls.append(url)
+            if method == "GET":
+                return not_found
+            return ok_resp
+
+        with patch("httpx.Client") as mock_cls:
+            ctx = self._mock_ctx()
+            ctx.request.side_effect = _fake_request
+            mock_cls.return_value = ctx
+
+            try:
+                client.query_received_invoices(
+                    access_token="tok",
+                    session_reference="sess-ref",
+                    symmetric_key=b"k" * 32,
+                    iv=b"i" * 16,
+                    invoicing_date_from="2026-05-01",
+                    invoicing_date_to="2026-05-31",
+                )
+            except KSeFClientError:
+                pass  # może nie być żadnego działającego endpointu w teście
+
+        bad_path = "/sessions/online/sess-ref/invoices/query"
+        base_url = "https://api-test.ksef.mf.gov.pl/v2"
+        assert f"{base_url}{bad_path}" not in recorded_urls, (
+            "POST /sessions/online/{ref}/invoices/query NIE powinien być wywoływany "
+            "(powoduje błąd KSeF 400 / exceptionCode 21405)"
+        )
