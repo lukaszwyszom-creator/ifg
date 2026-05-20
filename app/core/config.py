@@ -1,9 +1,18 @@
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_KEY_PATTERNS = ("change-me", "secret", "test", "dev", "local", "example")
+
+DEFAULT_SELLER_NIP = "9670402857"
+DEFAULT_SELLER_NAME = "Ikona Małgorzata Katarzyna Krzyżanowska-Witkowska"
+DEFAULT_SELLER_STREET = "Kossaka"
+DEFAULT_SELLER_BUILDING_NO = "72"
+DEFAULT_SELLER_APARTMENT_NO = ""
+DEFAULT_SELLER_POSTAL_CODE = "85-307"
+DEFAULT_SELLER_CITY = "Bydgoszcz"
+DEFAULT_SELLER_COUNTRY = "PL"
 
 
 class Settings(BaseSettings):
@@ -34,23 +43,23 @@ class Settings(BaseSettings):
     regon_environment: str = Field(default="production", alias="REGON_ENVIRONMENT")
     regon_api_key: str | None = Field(default=None, alias="REGON_API_KEY")
     regon_wsdl_test: str = Field(
-        default="https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc?wsdl",
+        default="https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/wsdl/UslugaBIRzewnPubl-ver11-test.wsdl",
         alias="REGON_WSDL_TEST",
     )
     regon_wsdl_production: str = Field(
-        default="https://wyszukiwarkaregon.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc?wsdl",
+        default="https://wyszukiwarkaregon.stat.gov.pl/wsBIR/wsdl/UslugaBIRzewnPubl-ver11-prod.wsdl",
         alias="REGON_WSDL_PRODUCTION",
     )
     request_timeout_seconds: int = Field(default=15, alias="REQUEST_TIMEOUT_SECONDS")
 
-    seller_nip: str | None = Field(default=None, alias="SELLER_NIP")
-    seller_name: str | None = Field(default=None, alias="SELLER_NAME")
-    seller_street: str | None = Field(default=None, alias="SELLER_STREET")
-    seller_building_no: str | None = Field(default=None, alias="SELLER_BUILDING_NO")
-    seller_apartment_no: str | None = Field(default=None, alias="SELLER_APARTMENT_NO")
-    seller_postal_code: str | None = Field(default=None, alias="SELLER_POSTAL_CODE")
-    seller_city: str | None = Field(default=None, alias="SELLER_CITY")
-    seller_country: str = Field(default="PL", alias="SELLER_COUNTRY")
+    seller_nip: str | None = Field(default=DEFAULT_SELLER_NIP, alias="SELLER_NIP")
+    seller_name: str | None = Field(default=DEFAULT_SELLER_NAME, alias="SELLER_NAME")
+    seller_street: str | None = Field(default=DEFAULT_SELLER_STREET, alias="SELLER_STREET")
+    seller_building_no: str | None = Field(default=DEFAULT_SELLER_BUILDING_NO, alias="SELLER_BUILDING_NO")
+    seller_apartment_no: str | None = Field(default=DEFAULT_SELLER_APARTMENT_NO, alias="SELLER_APARTMENT_NO")
+    seller_postal_code: str | None = Field(default=DEFAULT_SELLER_POSTAL_CODE, alias="SELLER_POSTAL_CODE")
+    seller_city: str | None = Field(default=DEFAULT_SELLER_CITY, alias="SELLER_CITY")
+    seller_country: str = Field(default=DEFAULT_SELLER_COUNTRY, alias="SELLER_COUNTRY")
 
     # Monitoring
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
@@ -60,6 +69,23 @@ class Settings(BaseSettings):
     enable_ksef: bool = Field(default=True, alias="ENABLE_KSEF")
     enable_warehouse: bool = Field(default=True, alias="ENABLE_WAREHOUSE")
     enable_payments: bool = Field(default=True, alias="ENABLE_PAYMENTS")
+
+    @field_validator(
+        "seller_nip",
+        "seller_name",
+        "seller_street",
+        "seller_building_no",
+        "seller_apartment_no",
+        "seller_postal_code",
+        "seller_city",
+        "seller_country",
+        mode="before",
+    )
+    @classmethod
+    def _strip_seller_value(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @model_validator(mode="after")
     def _validate_production_security(self) -> "Settings":
