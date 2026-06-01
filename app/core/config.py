@@ -16,6 +16,8 @@ DEFAULT_SELLER_COUNTRY = "PL"
 
 
 class Settings(BaseSettings):
+    # Produkcja (DS723+): docker-compose.prod.yml montuje .env.production jako /app/.env.
+    # Zmienne środowiskowe kontenera (env_file / environment w compose) mają pierwszeństwo.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = Field(default="KSeF Backend", alias="APP_NAME")
@@ -42,6 +44,13 @@ class Settings(BaseSettings):
     ksef_auth_redeem_timeout_seconds: int = Field(default=120, alias="KSEF_AUTH_REDEEM_TIMEOUT_SECONDS")
     regon_environment: str = Field(default="production", alias="REGON_ENVIRONMENT")
     regon_api_key: str | None = Field(default=None, alias="REGON_API_KEY")
+
+    @field_validator("regon_api_key", mode="before")
+    @classmethod
+    def _empty_regon_api_key_as_none(cls, value: str | None) -> str | None:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
     regon_wsdl_test: str = Field(
         default="https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/wsdl/UslugaBIRzewnPubl-ver11-test.wsdl",
         alias="REGON_WSDL_TEST",

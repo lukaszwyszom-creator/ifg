@@ -1,10 +1,24 @@
 # docker-compose.prod.yml — DS723+ (produkcja)
-# Uruchamianie:
-#   docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d
+#
+# WYMAGANE: plik .env.production w katalogu GŁÓWNYM repozytorium (obok katalogu docker/):
+#   ifg_standalone/.env.production
+#   ifg_standalone/docker/docker-compose.prod.yml
+#
+# Uruchamianie (z katalogu głównego repozytorium):
+#   docker compose -f docker/docker-compose.prod.yml up -d --build
+#
+# UWAGA — nie używaj ${REGON_API_KEY} w sekcji environment:
+#   Gdy compose nie ma zmiennej w swoim kontekście, ${REGON_API_KEY:-} = "" i NADPISUJE
+#   wartość z env_file pustym stringiem (environment > env_file w Docker Compose).
+#   Sekrety ładuj WYŁĄCZNIE przez env_file + mount /app/.env poniżej.
+#
+# Test diagnostyczny po wdrożeniu:
+#   docker compose -f docker/docker-compose.prod.yml exec api \
+#     python -c "import os; print(bool(os.getenv('REGON_API_KEY')))"
+# Oczekiwane: True
 #
 # Różnice względem dev:
-#   - osobny wolumen na klucze KSeF (ksef_keys)
-#   - frontend React build montowany do kontenera API i serwowany pod /ui
+#   - frontend React build montowany do kontenera API
 #   - brak expose portu DB na host
 #   - restart: unless-stopped
 
@@ -15,13 +29,15 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     env_file:
-      - ../.env.production
+      - path: ../.env.production
+        required: true
     environment:
       TZ: Europe/Warsaw
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - ../frontend-react/dist:/app/frontend-react/dist:ro
+      - ../.env.production:/app/.env:ro
     restart: unless-stopped
     depends_on:
       db:
@@ -42,9 +58,12 @@ services:
       dockerfile: docker/Dockerfile
     command: ["sh", "-c", "python -m app.worker"]
     env_file:
-      - ../.env.production
+      - path: ../.env.production
+        required: true
     environment:
       TZ: Europe/Warsaw
+    volumes:
+      - ../.env.production:/app/.env:ro
     restart: unless-stopped
     depends_on:
       db:
@@ -54,10 +73,12 @@ services:
 
   db:
     image: postgres:17
+    env_file:
+      - path: ../.env.production
+        required: true
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ksef_backend}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: Europe/Warsaw
       PGTZ: Europe/Warsaw
     healthcheck:
