@@ -29,6 +29,9 @@ def healthcheck(
         db_timezone = None
         db_timezone_utc = None
 
+    regon_key = (settings.regon_api_key or "").strip()
+    regon_configured = bool(regon_key) and regon_key.lower() != "change-me"
+
     return {
         "status": "ok",
         "app_name": settings.app_name,
@@ -36,5 +39,9 @@ def healthcheck(
         "environment": settings.app_env,
         "db_timezone": db_timezone,
         "db_timezone_utc": db_timezone_utc,
+        "regon": {
+            "environment": settings.regon_environment,
+            "configured": regon_configured,
+        },
     }
 

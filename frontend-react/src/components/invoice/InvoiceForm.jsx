@@ -367,7 +367,10 @@ function useBuyerLookup(initialBuyerNip) {
         // Tylko przy 404 próbujemy REGON; inne błędy od razu jako błąd
         if (err.response?.status && err.response.status !== 404) {
           setBuyerInfo(null);
-          setNipError('Błąd pobierania danych — spróbuj ponownie');
+          const apiMessage = err.response?.data?.error?.message;
+          setNipError(
+            apiMessage || 'Błąd pobierania danych — spróbuj ponownie',
+          );
           return;
         }
       }

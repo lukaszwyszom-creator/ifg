@@ -3,12 +3,19 @@ from __future__ import annotations
 import logging
 import xml.etree.ElementTree as ET
 
+from requests import Session
 from zeep import Client
 from zeep.transports import Transport
 
 from app.core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
+
+# Produkcyjny i testowy endpoint SOAP (WSDL moze wskazywac inny adres).
+ENDPOINT_PRODUCTION = "https://wyszukiwarkaregon.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc"
+ENDPOINT_TEST = "https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc"
+SERVICE_BINDING = "{http://tempuri.org/}e3"
+USER_AGENT = "IFG-KSeF-Backend/1.0"
 
 
 class RegonClient:
@@ -46,25 +53,34 @@ class RegonClient:
             nip,
         )
 
+        endpoint_url = self._resolve_endpoint()
+        http_session = Session()
+        http_session.headers.update({"User-Agent": USER_AGENT})
+        transport = Transport(session=http_session, timeout=self.timeout_seconds)
+
         session_id: str | None = None
+        service = None
         try:
-            client = Client(wsdl=wsdl_url, transport=Transport(timeout=self.timeout_seconds))
+            client = Client(wsdl=wsdl_url, transport=transport)
         except Exception as exc:
             logger.error(
-                "REGON WSDL load failed: environment=%s wsdl=%s error=%s",
+                "REGON WSDL load failed: environment=%s wsdl=%s endpoint=%s error=%s",
                 self.environment,
                 wsdl_url,
-                type(exc).__name__,
+                endpoint_url,
+                exc,
             )
             raise ExternalServiceError(f"Blad ladowania WSDL REGON: {type(exc).__name__}") from exc
 
         try:
-            session_id = client.service.Zaloguj(self.api_key)
+            service = client.create_service(SERVICE_BINDING, endpoint_url)
+            session_id = service.Zaloguj(self.api_key)
             if not session_id or not str(session_id).strip():
                 logger.error(
-                    "REGON login failed: environment=%s wsdl=%s empty_session_id=true",
+                    "REGON login failed: environment=%s wsdl=%s endpoint=%s empty_session_id=true",
                     self.environment,
                     wsdl_url,
+                    endpoint_url,
                 )
                 raise ExternalServiceError(
                     "REGON odmowil logowania (pusty identyfikator sesji). "
@@ -72,29 +88,31 @@ class RegonClient:
                 )
 
             logger.info(
-                "REGON login ok: environment=%s wsdl=%s session_ok=true",
+                "REGON login ok: environment=%s wsdl=%s endpoint=%s session_ok=true",
                 self.environment,
                 wsdl_url,
+                endpoint_url,
             )
 
-            client.transport.session.headers.update({"sid": str(session_id)})
-            result_xml = client.service.DaneSzukajPodmioty({"Nip": nip})
+            http_session.headers.update({"sid": str(session_id)})
+            result_xml = service.DaneSzukajPodmioty({"Nip": nip})
         except ExternalServiceError:
             raise
         except Exception as exc:
             logger.error(
-                "REGON SOAP error: environment=%s wsdl=%s nip=%s error=%s",
+                "REGON SOAP error: environment=%s wsdl=%s endpoint=%s nip=%s error=%s",
                 self.environment,
                 wsdl_url,
+                endpoint_url,
                 nip,
-                type(exc).__name__,
+                exc,
             )
             raise ExternalServiceError(f"Blad komunikacji z REGON: {exc}") from exc
         finally:
             try:
-                if session_id:
-                    client.transport.session.headers.update({"sid": str(session_id)})
-                    client.service.Wyloguj(session_id)
+                if session_id and service is not None:
+                    http_session.headers.update({"sid": str(session_id)})
+                    service.Wyloguj(session_id)
             except Exception:
                 pass
 
@@ -120,6 +138,11 @@ class RegonClient:
         if self.environment == "test":
             return self.wsdl_test
         return self.wsdl_production
+
+    def _resolve_endpoint(self) -> str:
+        if self.environment == "test":
+            return ENDPOINT_TEST
+        return ENDPOINT_PRODUCTION
 
     @staticmethod
     def _local_tag(tag: str) -> str:

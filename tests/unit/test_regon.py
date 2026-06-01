@@ -118,6 +118,7 @@ class TestRegonClientKeyGuard:
             wsdl_production="https://prod.wsdl/",
         )
         assert client._resolve_wsdl() == "https://test.wsdl/"
+        assert client._resolve_endpoint() == "https://wyszukiwarkaregontest.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc"
 
     def test_resolves_production_wsdl_for_production_env(self):
         client = RegonClient(
@@ -131,12 +132,27 @@ class TestRegonClientKeyGuard:
 
 
 class TestRegonClientSOAP:
+    @staticmethod
+    def _mock_regon_client(MockClient, *, zaloguj_return="session-1", zaloguj_side_effect=None, search_return=None):
+        mock_service = MagicMock()
+        if zaloguj_side_effect is not None:
+            mock_service.Zaloguj.side_effect = zaloguj_side_effect
+        else:
+            mock_service.Zaloguj.return_value = zaloguj_return
+        mock_service.DaneSzukajPodmioty.return_value = search_return
+
+        mock_client = MagicMock()
+        mock_client.create_service.return_value = mock_service
+        MockClient.return_value = mock_client
+        return mock_service
+
     def test_soap_exception_raises_external_service_error(self, regon_client_production: RegonClient):
         """Błąd SOAP (sieciowy) musi być opakowany w ExternalServiceError."""
         with patch("app.integrations.regon.client.Client") as MockClient:
-            mock_soap = MagicMock()
-            mock_soap.service.Zaloguj.side_effect = Exception("Connection refused")
-            MockClient.return_value = mock_soap
+            self._mock_regon_client(
+                MockClient,
+                zaloguj_side_effect=Exception("Connection refused"),
+            )
 
             with pytest.raises(ExternalServiceError) as exc_info:
                 regon_client_production.lookup_by_nip("1000000035")
@@ -145,9 +161,10 @@ class TestRegonClientSOAP:
     def test_soap_exception_does_not_leak_api_key(self, regon_client_production: RegonClient):
         """Błąd SOAP nie może ujawniać klucza API w komunikacie."""
         with patch("app.integrations.regon.client.Client") as MockClient:
-            mock_soap = MagicMock()
-            mock_soap.service.Zaloguj.side_effect = Exception("Connection refused")
-            MockClient.return_value = mock_soap
+            self._mock_regon_client(
+                MockClient,
+                zaloguj_side_effect=Exception("Connection refused"),
+            )
 
             try:
                 regon_client_production.lookup_by_nip("1000000035")
@@ -157,19 +174,14 @@ class TestRegonClientSOAP:
     def test_returns_none_for_empty_result(self, regon_client_production: RegonClient):
         """Brak wyników REGON → None (nie wyjątek)."""
         with patch("app.integrations.regon.client.Client") as MockClient:
-            mock_soap = MagicMock()
-            mock_soap.service.Zaloguj.return_value = "session-1"
-            mock_soap.service.DaneSzukajPodmioty.return_value = None
-            MockClient.return_value = mock_soap
+            self._mock_regon_client(MockClient, search_return=None)
 
             result = regon_client_production.lookup_by_nip("9999999999")
             assert result is None
 
     def test_empty_session_id_raises_external_service_error(self, regon_client_production: RegonClient):
         with patch("app.integrations.regon.client.Client") as MockClient:
-            mock_soap = MagicMock()
-            mock_soap.service.Zaloguj.return_value = ""
-            MockClient.return_value = mock_soap
+            self._mock_regon_client(MockClient, zaloguj_return="")
 
             with pytest.raises(ExternalServiceError, match="odmowil logowania"):
                 regon_client_production.lookup_by_nip("9670402857")
@@ -178,15 +190,24 @@ class TestRegonClientSOAP:
         """Poprawna odpowiedź REGON → pierwszy rekord jako słownik."""
         xml_result = "<root><dane><Nip>1000000035</Nip><Nazwa>Firma ABC</Nazwa></dane></root>"
         with patch("app.integrations.regon.client.Client") as MockClient:
-            mock_soap = MagicMock()
-            mock_soap.service.Zaloguj.return_value = "session-1"
-            mock_soap.service.DaneSzukajPodmioty.return_value = xml_result
-            MockClient.return_value = mock_soap
+            self._mock_regon_client(MockClient, search_return=xml_result)
 
             result = regon_client_production.lookup_by_nip("1000000035")
             assert result is not None
             assert result.get("Nip") == "1000000035"
             assert result.get("Nazwa") == "Firma ABC"
+
+    def test_uses_explicit_service_endpoint(self, regon_client_production: RegonClient):
+        with patch("app.integrations.regon.client.Client") as MockClient:
+            mock_service = self._mock_regon_client(MockClient, search_return=None)
+
+            regon_client_production.lookup_by_nip("9670402857")
+
+            MockClient.return_value.create_service.assert_called_once_with(
+                "{http://tempuri.org/}e3",
+                "https://wyszukiwarkaregon.stat.gov.pl/wsBIR/UslugaBIRzewnPubl.svc",
+            )
+            mock_service.Zaloguj.assert_called_once_with("valid-regon-key")
 
 
 class TestRegonXmlParser:

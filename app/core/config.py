@@ -17,8 +17,13 @@ DEFAULT_SELLER_COUNTRY = "PL"
 
 class Settings(BaseSettings):
     # Produkcja (DS723+): docker-compose.prod.yml montuje .env.production jako /app/.env.
-    # Zmienne środowiskowe kontenera (env_file / environment w compose) mają pierwszeństwo.
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # env_ignore_empty: pusty REGON_API_KEY="" z Docker Compose nie blokuje wartości z pliku .env.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
 
     app_name: str = Field(default="KSeF Backend", alias="APP_NAME")
     app_env: str = Field(default="local", alias="APP_ENV")
