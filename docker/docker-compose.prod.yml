@@ -29,8 +29,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     env_file:
-      - path: ../.env.production
-        required: true
+      - ../.env.production
     environment:
       TZ: Europe/Warsaw
     ports:
@@ -58,8 +57,7 @@ services:
       dockerfile: docker/Dockerfile
     command: ["sh", "-c", "python -m app.worker"]
     env_file:
-      - path: ../.env.production
-        required: true
+      - ../.env.production
     environment:
       TZ: Europe/Warsaw
     volumes:
@@ -74,8 +72,7 @@ services:
   db:
     image: postgres:17
     env_file:
-      - path: ../.env.production
-        required: true
+      - ../.env.production
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ksef_backend}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
