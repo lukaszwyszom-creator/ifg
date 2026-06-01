@@ -9,6 +9,7 @@ import pytest
 
 from app.core.exceptions import ExternalServiceError, NotFoundError
 from app.integrations.regon.client import RegonClient
+from app.persistence.models.contractor import ContractorORM
 from app.services.contractor_service import ContractorService
 
 
@@ -93,20 +94,20 @@ def _make_existing_contractor():
 # ---------------------------------------------------------------------------
 
 class TestRegonClientKeyGuard:
-    def test_change_me_returns_none(self, regon_client_change_me: RegonClient):
-        """REGON_API_KEY=change-me → None (brak danych, nie błąd krytyczny)."""
-        result = regon_client_change_me.lookup_by_nip("1000000035")
-        assert result is None
+    def test_change_me_raises_external_service_error(self, regon_client_change_me: RegonClient):
+        """REGON_API_KEY=change-me → ExternalServiceError (502), nie cichy brak danych."""
+        with pytest.raises(ExternalServiceError, match="REGON nie jest skonfigurowany"):
+            regon_client_change_me.lookup_by_nip("1000000035")
 
-    def test_none_key_returns_none(self, regon_client_none_key: RegonClient):
-        """Brak REGON_API_KEY → None (brak danych, nie błąd krytyczny)."""
-        result = regon_client_none_key.lookup_by_nip("1000000035")
-        assert result is None
+    def test_none_key_raises_external_service_error(self, regon_client_none_key: RegonClient):
+        """Brak REGON_API_KEY → ExternalServiceError (502)."""
+        with pytest.raises(ExternalServiceError, match="REGON nie jest skonfigurowany"):
+            regon_client_none_key.lookup_by_nip("1000000035")
 
-    def test_unconfigured_key_does_not_raise(self, regon_client_change_me: RegonClient):
-        """Niezskonfigurowany klucz nie rzuca wyjątku — zwraca None bez wycieku klucza."""
-        result = regon_client_change_me.lookup_by_nip("1000000035")
-        assert result is None
+    def test_unconfigured_key_does_not_leak_value(self, regon_client_change_me: RegonClient):
+        with pytest.raises(ExternalServiceError) as exc_info:
+            regon_client_change_me.lookup_by_nip("1000000035")
+        assert "change-me" not in str(exc_info.value)
 
     def test_resolves_test_wsdl_for_test_env(self):
         client = RegonClient(
@@ -164,6 +165,15 @@ class TestRegonClientSOAP:
             result = regon_client_production.lookup_by_nip("9999999999")
             assert result is None
 
+    def test_empty_session_id_raises_external_service_error(self, regon_client_production: RegonClient):
+        with patch("app.integrations.regon.client.Client") as MockClient:
+            mock_soap = MagicMock()
+            mock_soap.service.Zaloguj.return_value = ""
+            MockClient.return_value = mock_soap
+
+            with pytest.raises(ExternalServiceError, match="odmowil logowania"):
+                regon_client_production.lookup_by_nip("9670402857")
+
     def test_returns_first_record_on_success(self, regon_client_production: RegonClient):
         """Poprawna odpowiedź REGON → pierwszy rekord jako słownik."""
         xml_result = "<root><dane><Nip>1000000035</Nip><Nazwa>Firma ABC</Nazwa></dane></root>"
@@ -205,6 +215,33 @@ class TestRegonXmlParser:
     def test_parse_invalid_xml_raises_external_service_error(self):
         with pytest.raises(ExternalServiceError):
             RegonClient._parse_search_result("<not valid xml>><")
+
+    def test_parse_namespaced_production_xml(self):
+        """Produkcyjny REGON zwraca XML z domyslnym namespace CIS/BIR."""
+        xml = (
+            '<root xmlns="http://CIS/BIR/PUBL/2014/07">'
+            "<dane>"
+            "<Regon>123456785</Regon>"
+            "<Nip>9670402857</Nip>"
+            "<Nazwa>Firma Testowa</Nazwa>"
+            "</dane>"
+            "</root>"
+        )
+        result = RegonClient._parse_search_result(xml)
+        assert len(result) == 1
+        assert result[0]["Nip"] == "9670402857"
+        assert result[0]["Nazwa"] == "Firma Testowa"
+
+    def test_parse_skips_regon_error_record(self):
+        xml = (
+            '<root xmlns="http://CIS/BIR/PUBL/2014/07">'
+            "<dane>"
+            "<ErrorCode>4</ErrorCode>"
+            "<ErrorMessagePl>Nie znaleziono podmiotu</ErrorMessagePl>"
+            "</dane>"
+            "</root>"
+        )
+        assert RegonClient._parse_search_result(xml) == []
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +294,85 @@ class TestContractorServiceRegonFallback:
         service, contractor_repo, override_repo, session = _make_contractor_service(regon_client)
         contractor_repo.get_by_nip.return_value = None
 
-        with pytest.raises(NotFoundError):
+        with pytest.raises(NotFoundError, match="w bazie lokalnej ani w REGON"):
             service.get_by_nip("9999999999", _make_actor())
+
+    def test_refresh_on_empty_db_creates_contractor(self):
+        """POST refresh/{nip} na pustej bazie tworzy kontrahenta z danych REGON."""
+        regon_client = MagicMock()
+        regon_client.lookup_by_nip.return_value = {
+            "Nip": "9670402857",
+            "Nazwa": "Ikona Test",
+            "Miejscowosc": "Bydgoszcz",
+        }
+
+        service, contractor_repo, override_repo, session = _make_contractor_service(regon_client)
+        contractor_repo.get_by_nip.return_value = None
+        override_repo.get_active_by_contractor_id.return_value = None
+
+        service.regon_mapper.to_contractor_fields.return_value = {
+            "nip": "9670402857",
+            "regon": None,
+            "krs": None,
+            "name": "Ikona Test",
+            "legal_form": None,
+            "street": None,
+            "building_no": None,
+            "apartment_no": None,
+            "postal_code": "85-307",
+            "city": "Bydgoszcz",
+            "voivodeship": None,
+            "county": None,
+            "commune": None,
+            "country": "PL",
+            "status": None,
+            "source": "regon",
+            "source_fetched_at": datetime.now(UTC),
+            "cache_valid_until": datetime.now(UTC),
+            "lookup_last_status": "success",
+            "lookup_last_error": None,
+            "raw_payload_json": {},
+        }
+
+        def add_side_effect(contractor: ContractorORM) -> ContractorORM:
+            contractor.id = uuid4()
+            return contractor
+
+        contractor_repo.add.side_effect = add_side_effect
+        session.refresh.side_effect = lambda obj: None
+
+        result = service.get_by_nip("9670402857", _make_actor(), force_refresh=True)
+
+        regon_client.lookup_by_nip.assert_called_once_with("9670402857")
+        contractor_repo.add.assert_called_once()
+        assert result["nip"] == "9670402857"
+        assert result["name"] == "Ikona Test"
+
+    def test_by_nip_returns_existing_without_regon_call_when_cache_fresh(self):
+        regon_client = MagicMock()
+        service, contractor_repo, override_repo, session = _make_contractor_service(regon_client)
+
+        existing = _make_existing_contractor()
+        existing.cache_valid_until = datetime(2099, 1, 1, tzinfo=UTC)
+        contractor_repo.get_by_nip.return_value = existing
+        override_repo.get_active_by_contractor_id.return_value = None
+
+        result = service.get_by_nip("1000000035", _make_actor())
+
+        regon_client.lookup_by_nip.assert_not_called()
+        assert result["nip"] == "1000000035"
+
+    def test_regon_misconfiguration_raises_external_service_error_not_not_found(self):
+        regon_client = MagicMock()
+        regon_client.lookup_by_nip.side_effect = ExternalServiceError(
+            "REGON nie jest skonfigurowany. Ustaw prawidlowy REGON_API_KEY."
+        )
+
+        service, contractor_repo, override_repo, session = _make_contractor_service(regon_client)
+        contractor_repo.get_by_nip.return_value = None
+
+        with pytest.raises(ExternalServiceError, match="REGON nie jest skonfigurowany"):
+            service.get_by_nip("9670402857", _make_actor(), force_refresh=True)
 
     def test_regon_error_status_does_not_propagate_api_key(self):
         """ExternalServiceError z RegonClient nie może zawierać klucza API."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -14,6 +15,8 @@ from app.persistence.models.contractor_override import ContractorOverrideORM
 from app.persistence.repositories.contractor_override_repository import ContractorOverrideRepository
 from app.persistence.repositories.contractor_repository import ContractorRepository
 from app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
 
 
 class ContractorService:
@@ -83,11 +86,30 @@ class ContractorService:
             active_override = self.contractor_override_repository.get_active_by_contractor_id(contractor.id)
 
         if contractor is not None and not force_refresh and self._is_cache_fresh(contractor):
+            logger.info(
+                "contractor.lookup cache_hit: nip=%s force_refresh=%s",
+                normalized_nip,
+                force_refresh,
+            )
             return self._build_response(contractor, active_override)
+
+        logger.info(
+            "contractor.lookup regon_fetch: nip=%s force_refresh=%s local_exists=%s",
+            normalized_nip,
+            force_refresh,
+            contractor is not None,
+        )
 
         try:
             lookup_result = self.regon_client.lookup_by_nip(normalized_nip)
         except ExternalServiceError as exc:
+            logger.warning(
+                "contractor.lookup regon_error: nip=%s force_refresh=%s local_exists=%s error=%s",
+                normalized_nip,
+                force_refresh,
+                contractor is not None,
+                exc.message,
+            )
             if contractor is None:
                 raise
 
@@ -106,7 +128,15 @@ class ContractorService:
                 self.session.commit()
                 self.session.refresh(contractor)
                 return self._build_response(contractor, active_override)
-            raise NotFoundError(f"Nie znaleziono kontrahenta dla NIP {normalized_nip}.")
+
+            logger.info(
+                "contractor.lookup not_found: nip=%s reason=regon_empty local_exists=false",
+                normalized_nip,
+            )
+            raise NotFoundError(
+                f"Nie znaleziono kontrahenta dla NIP {normalized_nip} "
+                "w bazie lokalnej ani w REGON."
+            )
 
         contractor = self._upsert_from_regon(contractor=contractor, lookup_result=lookup_result)
         active_override = self.contractor_override_repository.get_active_by_contractor_id(contractor.id)
