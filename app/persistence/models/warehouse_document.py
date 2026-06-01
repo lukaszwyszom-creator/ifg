@@ -4,15 +4,39 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.persistence.base import Base
 
 
+class WarehouseDocumentNumberSeqORM(Base):
+    """Licznik numerów dokumentów magazynowych per (doc_type, year).
+
+    Inkrementowany atomowo przy księgowaniu (post_document) — odporny na równoległość.
+    """
+    __tablename__ = "warehouse_document_number_seq"
+
+    doc_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
 class WarehouseDocumentORM(Base):
     __tablename__ = "warehouse_documents"
+    __table_args__ = (
+        Index(
+            "uq_warehouse_documents_number",
+            "number",
+            unique=True,
+            postgresql_where=text("number IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "status != 'posted' OR number IS NOT NULL",
+            name="ck_warehouse_documents_posted_has_number",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # number nullable — gotowe pod przyszłą numerację PZ/0001/05/2026 bez migracji

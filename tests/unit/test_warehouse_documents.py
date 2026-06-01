@@ -42,6 +42,7 @@ class FakeDocumentRepository:
     def __init__(self) -> None:
         self._docs: dict[UUID, WarehouseDocumentORM] = {}
         self._balances: dict[UUID, WarehouseBalanceORM] = {}
+        self._seq_counters: dict[tuple[str, int], int] = {}
 
     def get_by_id(self, doc_id: UUID) -> WarehouseDocumentORM | None:
         return self._docs.get(doc_id)
@@ -60,14 +61,24 @@ class FakeDocumentRepository:
         return doc
 
     def save(self, doc: WarehouseDocumentORM) -> WarehouseDocumentORM:
+        if doc.number:
+            owner = next(
+                (
+                    existing
+                    for existing in self._docs.values()
+                    if existing.number == doc.number and existing.id != doc.id
+                ),
+                None,
+            )
+            if owner is not None:
+                raise ValueError(f"duplicate document number: {doc.number}")
         self._docs[doc.id] = doc
         return doc
 
-    def count_posted_by_type_and_year(self, doc_type: str, year: int) -> int:
-        return sum(
-            1 for d in self._docs.values()
-            if d.doc_type == doc_type and d.number and d.number.startswith(f"{doc_type}/{year}/")
-        )
+    def allocate_next_sequence(self, doc_type: str, year: int) -> int:
+        key = (doc_type, year)
+        self._seq_counters[key] = self._seq_counters.get(key, 0) + 1
+        return self._seq_counters[key]
 
     def get_balance(self, item_id: UUID) -> WarehouseBalanceORM | None:
         return self._balances.get(item_id)
@@ -841,3 +852,79 @@ class TestDocumentFifoResponse:
 
         assert resp.status == "draft"
         assert resp.items[0].fifo_movements == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Numeracja dokumentów (atomowy licznik, brak count())
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDocumentNumbering:
+    def test_draft_has_no_number(self):
+        svc, doc_repo, _ = _make_service()
+        doc = svc.create_document(_pz_body())
+
+        stored = doc_repo.get_by_id(doc.id)
+        assert stored.status == "draft"
+        assert stored.number is None
+
+    def test_posted_document_has_number(self):
+        svc, doc_repo, _ = _make_service()
+        doc = svc.create_document(_pz_body())
+        svc.post_document(doc.id)
+
+        stored = doc_repo.get_by_id(doc.id)
+        assert stored.status == "posted"
+        assert stored.number is not None
+        assert stored.number.startswith("PZ/")
+
+    def test_two_documents_same_type_get_different_numbers(self):
+        svc, doc_repo, _ = _make_service()
+        year = date.today().year
+
+        doc1 = svc.create_document(_pz_body())
+        doc2 = svc.create_document(_pz_body())
+        svc.post_document(doc1.id)
+        svc.post_document(doc2.id)
+
+        assert doc_repo.get_by_id(doc1.id).number == f"PZ/{year}/0001"
+        assert doc_repo.get_by_id(doc2.id).number == f"PZ/{year}/0002"
+        assert doc_repo.get_by_id(doc1.id).number != doc_repo.get_by_id(doc2.id).number
+
+    def test_pz_and_wz_have_independent_sequences(self):
+        svc, doc_repo, _ = _make_service()
+        year = date.today().year
+
+        pz = svc.create_document(_pz_body(qty="10"))
+        svc.post_document(pz.id)
+
+        wz = svc.create_document(_wz_body(qty="2"))
+        svc.post_document(wz.id)
+
+        assert doc_repo.get_by_id(pz.id).number == f"PZ/{year}/0001"
+        assert doc_repo.get_by_id(wz.id).number == f"WZ/{year}/0001"
+
+    def test_unique_number_constraint_rejects_duplicate(self):
+        svc, doc_repo, _ = _make_service()
+        year = date.today().year
+        duplicate = f"PZ/{year}/0099"
+
+        doc1 = svc.create_document(_pz_body())
+        svc.post_document(doc1.id)
+
+        doc2 = svc.create_document(_pz_body())
+        svc.post_document(doc2.id)
+        doc_repo.get_by_id(doc2.id).number = duplicate
+        doc_repo.get_by_id(doc1.id).number = duplicate
+
+        with pytest.raises(ValueError, match="duplicate document number"):
+            doc_repo.save(doc_repo.get_by_id(doc2.id))
+
+    def test_posted_without_number_blocked_by_service(self):
+        """POSTED bez numeru nie powstaje przez post_document — numer nadawany przed statusem."""
+        svc, doc_repo, _ = _make_service()
+        doc = svc.create_document(_pz_body())
+        svc.post_document(doc.id)
+
+        stored = doc_repo.get_by_id(doc.id)
+        assert stored.status == "posted"
+        assert stored.number is not None

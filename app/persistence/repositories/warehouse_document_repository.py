@@ -3,11 +3,13 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.persistence.models.warehouse_document import (
     WarehouseBalanceORM,
     WarehouseDocumentItemORM,
+    WarehouseDocumentNumberSeqORM,
     WarehouseDocumentORM,
 )
 
@@ -65,16 +67,20 @@ class WarehouseDocumentRepository:
 
     # ── numeracja ─────────────────────────────────────────────────────────────
 
-    def count_posted_by_type_and_year(self, doc_type: str, year: int) -> int:
-        """Zlicza zaksięgowane dokumenty danego typu w roku — do generacji numeru."""
+    def allocate_next_sequence(self, doc_type: str, year: int) -> int:
+        """Atomowo rezerwuje kolejny numer sekwencji dla (doc_type, year).
+
+        PostgreSQL: INSERT ... ON CONFLICT DO UPDATE ... RETURNING last_number.
+        """
+        table = WarehouseDocumentNumberSeqORM.__table__
         stmt = (
-            select(func.count())
-            .select_from(WarehouseDocumentORM)
-            .where(
-                WarehouseDocumentORM.doc_type == doc_type,
-                WarehouseDocumentORM.number.is_not(None),
-                WarehouseDocumentORM.number.like(f"{doc_type}/{year}/%"),
+            insert(table)
+            .values(doc_type=doc_type, year=year, last_number=1)
+            .on_conflict_do_update(
+                index_elements=["doc_type", "year"],
+                set_={"last_number": table.c.last_number + 1},
             )
+            .returning(table.c.last_number)
         )
         return self.session.execute(stmt).scalar_one()
 

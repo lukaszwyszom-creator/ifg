@@ -89,14 +89,9 @@ def _build_item_orm(raw: dict, document_id: object) -> WarehouseDocumentItemORM:
     )
 
 
-def _generate_number(doc_repo: WarehouseDocumentRepository, doc_type: str, year: int) -> str:
-    """Generuje kolejny numer dokumentu w formacie PZ/2026/0001.
-
-    TODO HIGH PRIORITY: count() jest podatny na race condition — dwa równoczesne
-    post_document() mogą dostać ten sam numer. Docelowo wymienić na DB SEQUENCE
-    lub SELECT ... FOR UPDATE na tabeli sekwencji przed wdrożeniem produkcyjnym.
-    """
-    seq = doc_repo.count_posted_by_type_and_year(doc_type, year) + 1
+def _allocate_document_number(doc_repo: WarehouseDocumentRepository, doc_type: str, year: int) -> str:
+    """Rezerwuje kolejny numer w formacie PZ/2026/0001 (atomowy licznik w DB)."""
+    seq = doc_repo.allocate_next_sequence(doc_type, year)
     return f"{doc_type}/{year}/{seq:04d}"
 
 
@@ -195,9 +190,13 @@ class WarehouseDocumentService:
                 f"Typ dokumentu {doc.doc_type!r} nie jest obsługiwany przez post."
             )
 
+        doc.number = _allocate_document_number(self.doc_repo, doc.doc_type, today.year)
+        if not doc.number:
+            raise InvalidWarehouseDocumentError(
+                "Nie udało się nadać numeru dokumentu — księgowanie przerwane."
+            )
         doc.status = WarehouseDocumentStatus.POSTED.value
         doc.posted_at = now
-        doc.number = _generate_number(self.doc_repo, doc.doc_type, today.year)
         self.doc_repo.save(doc)
         self.session.commit()
 

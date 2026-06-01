@@ -4,6 +4,7 @@ from app.persistence.models.inventory_layer import InventoryLayerMovementORM, In
 from app.persistence.models.warehouse_document import (
     WarehouseBalanceORM,
     WarehouseDocumentItemORM,
+    WarehouseDocumentNumberSeqORM,
     WarehouseDocumentORM,
 )
 from app.persistence.models.warehouse_item import WarehouseItemORM
@@ -31,6 +32,7 @@ __all__ = [
     "InventoryLayerORM",
     "WarehouseBalanceORM",
     "WarehouseDocumentItemORM",
+    "WarehouseDocumentNumberSeqORM",
     "WarehouseDocumentORM",
     "WarehouseItemORM",
     "AuditLog",
