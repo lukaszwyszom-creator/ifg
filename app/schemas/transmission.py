@@ -22,6 +22,7 @@ class TransmissionResponse(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime
+    invoice_number_local: str | None = None
 
 
 class KSeFStatusResponse(BaseModel):

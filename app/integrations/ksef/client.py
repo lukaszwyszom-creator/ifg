@@ -232,10 +232,13 @@ class KSeFClient:
             )
 
         # Sprawdź listę odrzuconych
-        if self._is_invoice_failed(access_token, session_reference, invoice_reference):
+        failed_invoice = self._get_failed_invoice_entry(
+            access_token, session_reference, invoice_reference
+        )
+        if failed_invoice is not None:
             return InvoiceStatusResult(
                 processing_code=400,
-                processing_description="Faktura odrzucona przez KSeF",
+                processing_description=self._format_failed_invoice_message(failed_invoice),
                 ksef_reference_number=None,
             )
 
@@ -245,10 +248,39 @@ class KSeFClient:
             ksef_reference_number=None,
         )
 
-    def _is_invoice_failed(
+    @staticmethod
+    def _format_failed_invoice_message(failed_invoice: dict) -> str:
+        status = failed_invoice.get("status")
+        if not isinstance(status, dict):
+            return "Faktura odrzucona przez KSeF"
+
+        description = str(status.get("description") or "").strip()
+        details = status.get("details") or []
+        detail_parts: list[str] = []
+        if isinstance(details, list):
+            for item in details:
+                text = str(item).strip()
+                if text:
+                    detail_parts.append(text)
+
+        if description and detail_parts:
+            if detail_parts[0] == description:
+                return description
+            return f"{description}: {'; '.join(detail_parts)}"
+        if description:
+            return description
+        if detail_parts:
+            return "; ".join(detail_parts)
+
+        code = status.get("code")
+        if code is not None:
+            return f"Faktura odrzucona przez KSeF (kod {code})"
+        return "Faktura odrzucona przez KSeF"
+
+    def _get_failed_invoice_entry(
         self, access_token: str, session_reference: str, invoice_reference: str
-    ) -> bool:
-        """Sprawdza czy faktura jest na liście odrzuconych w sesji."""
+    ) -> dict | None:
+        """Zwraca wpis faktury z listy odrzuconych w sesji (z opisem błędu KSeF)."""
         try:
             resp = self._request_with_retry(
                 method="GET",
@@ -258,10 +290,18 @@ class KSeFClient:
             data = resp.json()
             for inv in data.get("invoices", []):
                 if inv.get("referenceNumber") == invoice_reference:
-                    return True
+                    return inv
         except KSeFClientError:
             pass
-        return False
+        return None
+
+    def _is_invoice_failed(
+        self, access_token: str, session_reference: str, invoice_reference: str
+    ) -> bool:
+        """Sprawdza czy faktura jest na liście odrzuconych w sesji."""
+        return self._get_failed_invoice_entry(
+            access_token, session_reference, invoice_reference
+        ) is not None
 
     def query_received_invoices(
         self,
@@ -320,6 +360,9 @@ class KSeFClient:
         last_exc: KSeFClientError | None = None
         get_candidate_succeeded: bool = False
 
+        def _is_wrong_invoice_reference_error(exc: KSeFClientError) -> bool:
+            return exc.status_code == 400 and "21405" in str(exc)
+
         for candidate in get_candidates:
             # DIAGNOSTICS: log endpoint and params (no token values)
             logger.info(
@@ -337,7 +380,7 @@ class KSeFClient:
                     params=params,
                 )
             except KSeFClientError as exc:
-                if exc.status_code in (404, 405):
+                if exc.status_code in (404, 405) or _is_wrong_invoice_reference_error(exc):
                     last_exc = exc
                     logger.warning(
                         "KSeF GET endpoint %s unavailable (%s), trying next fallback",
@@ -415,11 +458,10 @@ class KSeFClient:
                 except KSeFClientError as exc:
                     # Pomijamy 400 z exceptionCode 21405 (zły invoiceReferenceNumber
                     # w URL) lub standardowe 404/405 (endpoint niedostępny).
-                    resp_text = str(exc)
-                    is_wrong_ref_format = (
-                        exc.status_code == 400 and "21405" in resp_text
-                    )
-                    if exc.status_code not in _SKIP_STATUS_CODES and not is_wrong_ref_format:
+                    if (
+                        exc.status_code not in _SKIP_STATUS_CODES
+                        and not _is_wrong_invoice_reference_error(exc)
+                    ):
                         raise
                     last_exc = exc
                     logger.warning(

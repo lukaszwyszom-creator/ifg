@@ -601,7 +601,7 @@ class TestMapperZwNpRates:
         )
         xml = KSeFMapper.invoice_to_xml(inv)
         root = etree.fromstring(xml)
-        ns = {"fa": "http://crd.gov.pl/wzor/2023/06/29/9781/"}
+        ns = {"fa": "http://crd.gov.pl/wzor/2025/06/25/13775/"}
         p13_4 = root.find(".//fa:Fa/fa:P_13_4", ns)
         assert p13_4 is not None, "Stawka 0% powinna generować P_13_4"
         p14_4 = root.find(".//fa:Fa/fa:P_14_4", ns)
@@ -613,7 +613,7 @@ class TestMapperZwNpRates:
         inv = _invoice()
         xml = KSeFMapper.invoice_to_xml(inv)
         root = etree.fromstring(xml)
-        ns = {"fa": "http://crd.gov.pl/wzor/2023/06/29/9781/"}
+        ns = {"fa": "http://crd.gov.pl/wzor/2025/06/25/13775/"}
         p13_1 = root.find(".//fa:Fa/fa:P_13_1", ns)
         p14_1 = root.find(".//fa:Fa/fa:P_14_1", ns)
         assert p13_1 is not None

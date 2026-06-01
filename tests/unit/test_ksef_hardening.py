@@ -63,8 +63,9 @@ def _make_invoice(**kwargs) -> Invoice:
         issue_date=date(2026, 4, 6),
         sale_date=date(2026, 4, 6),
         currency="PLN",
+        number_local="FV/1/04/2026",
         seller_snapshot={
-            "nip": "1000000035",
+            "nip": "9670402857",
             "name": "Sprzedawca",
             "street": "ul. Sprzedawcy",
             "building_no": "1",
@@ -72,7 +73,7 @@ def _make_invoice(**kwargs) -> Invoice:
             "city": "Warszawa",
         },
         buyer_snapshot={
-            "nip": "1000000070",
+            "nip": "9670402857",
             "name": "Nabywca",
             "street": "ul. Nabywcy",
             "building_no": "2",

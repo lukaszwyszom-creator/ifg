@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-123")
 
-from app.api.deps import get_current_user, get_idempotency_service, get_invoice_service
+from app.api.deps import get_current_user, get_idempotency_service, get_invoice_service, get_payment_service
 from app.core.security import AuthenticatedUser
 from app.domain.enums import InvoiceStatus
 from app.domain.exceptions import InvalidInvoiceError
@@ -29,6 +29,7 @@ from app.domain.models.invoice import Invoice, InvoiceItem
 from app.main import app
 from app.services.idempotency_service import IdempotencyService
 from app.services.invoice_service import InvoiceService
+from app.services.payment_service import PaymentService
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,7 @@ def mock_invoice_service() -> MagicMock:
         "total_receivables": Decimal("0"),
         "total_payables": Decimal("0"),
     }
+    svc.resolve_buyer_id.return_value = None
     return svc
 
 
@@ -99,14 +101,20 @@ def mock_idempotency_service() -> MagicMock:
 
 
 @pytest.fixture()
+def mock_payment_service() -> MagicMock:
+    return MagicMock(spec=PaymentService)
+
+
+@pytest.fixture()
 def actor() -> AuthenticatedUser:
     return _make_actor()
 
 
 @pytest.fixture()
-def client(mock_invoice_service, mock_idempotency_service, actor) -> TestClient:
+def client(mock_invoice_service, mock_payment_service, mock_idempotency_service, actor) -> TestClient:
     app.dependency_overrides[get_current_user] = lambda: actor
     app.dependency_overrides[get_invoice_service] = lambda: mock_invoice_service
+    app.dependency_overrides[get_payment_service] = lambda: mock_payment_service
     app.dependency_overrides[get_idempotency_service] = lambda: mock_idempotency_service
     _patch = mock.patch("app.services.auth_service.AuthService.bootstrap_initial_admin")
     _patch.start()
@@ -358,9 +366,38 @@ class TestMarkReady:
 # ---------------------------------------------------------------------------
 
 class TestUpdateInvoice:
-    def test_update_returns_invoice(self, client, mock_invoice_service):
+    def test_update_invoice_with_amount_paid(
+        self, client, mock_invoice_service, mock_payment_service, actor
+    ):
+        inv = _make_invoice()
+        mock_invoice_service.update_invoice.return_value = inv
+        mock_invoice_service.get_invoice.return_value = inv
+        mock_payment_service.get_invoice_form_payment_amount.return_value = Decimal("300.00")
+        mock_invoice_service.compute_remaining_amounts.return_value = {inv.id: Decimal("2160.00")}
+
+        payload = {
+            "buyer_id": str(uuid4()),
+            "issue_date": "2026-04-06",
+            "sale_date": "2026-04-06",
+            "due_date": "2026-04-20",
+            "payment_method": "cash",
+            "amount_paid": "300.00",
+            "currency": "PLN",
+            "items": [{"name": "Usługa", "quantity": "1", "unit": "szt.", "unit_price_net": "100", "vat_rate": "23"}],
+        }
+
+        res = client.put(f"/api/v1/invoices/{inv.id}", json=payload)
+
+        assert res.status_code == 200
+        mock_payment_service.set_invoice_form_payment.assert_called_once()
+        assert res.json()["form_paid_amount"] == "300.00"
+
+    def test_update_returns_invoice(self, client, mock_invoice_service, mock_payment_service):
         inv = _make_invoice(InvoiceStatus.REJECTED, "01/04/2026")
         mock_invoice_service.update_invoice.return_value = inv
+        mock_invoice_service.get_invoice.return_value = inv
+        mock_payment_service.get_invoice_form_payment_amount.return_value = Decimal("0.00")
+        mock_invoice_service.compute_remaining_amounts.return_value = {inv.id: Decimal("2460.00")}
 
         payload = {
             "buyer_id": str(uuid4()),
@@ -580,3 +617,27 @@ class TestFA3FieldsInAPI:
         assert res.status_code == 201
         call_data = mock_invoice_service.create_invoice.call_args[0][0]
         assert call_data["delivery_date"] is None
+
+    def test_create_invoice_with_amount_paid(
+        self, client, mock_invoice_service, mock_payment_service, mock_idempotency_service
+    ):
+        inv = _make_invoice()
+        mock_invoice_service.create_invoice.return_value = inv
+        mock_invoice_service.compute_remaining_amounts.return_value = {inv.id: Decimal("1460.00")}
+
+        payload = {
+            "buyer_id": str(uuid4()),
+            "issue_date": "2026-04-06",
+            "sale_date": "2026-04-06",
+            "due_date": "2026-04-20",
+            "payment_method": "cash",
+            "amount_paid": "1000.00",
+            "currency": "PLN",
+            "items": [{"name": "Usługa", "quantity": "1", "unit": "szt.", "unit_price_net": "100", "vat_rate": "23"}],
+        }
+
+        res = client.post("/api/v1/invoices/", json=payload)
+
+        assert res.status_code == 201
+        mock_payment_service.record_invoice_initial_payment.assert_called_once()
+        assert res.json()["remaining_amount"] == "1460.00"

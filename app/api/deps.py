@@ -37,6 +37,11 @@ from app.services.payment_service import PaymentService
 from app.services.settings_service import SettingsService
 from app.services.stock_service import StockService
 from app.services.transmission_service import TransmissionService
+from app.persistence.repositories.inventory_layer_repository import InventoryLayerRepository
+from app.persistence.repositories.warehouse_document_repository import WarehouseDocumentRepository
+from app.persistence.repositories.warehouse_item_repository import WarehouseItemRepository
+from app.services.warehouse_document_service import WarehouseDocumentService
+from app.services.warehouse_item_service import WarehouseItemService
 
 
 http_bearer = HTTPBearer(auto_error=False)
@@ -86,6 +91,7 @@ def get_contractor_service(
 def get_invoice_service(
     session: Annotated[Session, Depends(get_db_session)],
     audit_service: Annotated[AuditService, Depends(get_audit_service)],
+    settings_service: Annotated[SettingsService, Depends(get_settings_service)],
 ) -> InvoiceService:
     return InvoiceService(
         session=session,
@@ -98,6 +104,7 @@ def get_invoice_service(
             stock_repository=StockRepository(session),
         ),
         payment_allocation_repository=PaymentAllocationRepository(session),
+        settings_service=settings_service,
     )
 
 
@@ -155,6 +162,8 @@ def get_transmission_service(
     session: Annotated[Session, Depends(get_db_session)],
     audit_service: Annotated[AuditService, Depends(get_audit_service)],
     ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
+    settings_service: Annotated[SettingsService, Depends(get_settings_service)],
+    invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)],
 ) -> TransmissionService:
     return TransmissionService(
         session=session,
@@ -163,6 +172,8 @@ def get_transmission_service(
         job_repository=JobRepository(session),
         audit_service=audit_service,
         ksef_session_service=ksef_session_service,
+        settings_service=settings_service,
+        invoice_service=invoice_service,
     )
 
 
@@ -195,5 +206,24 @@ def get_stock_service(
     return StockService(
         session=session,
         stock_repository=StockRepository(session),
+    )
+
+
+def get_warehouse_item_service(
+    session: Annotated[Session, Depends(get_db_session)],
+) -> WarehouseItemService:
+    return WarehouseItemService(
+        session=session,
+        repository=WarehouseItemRepository(session),
+    )
+
+
+def get_warehouse_document_service(
+    session: Annotated[Session, Depends(get_db_session)],
+) -> WarehouseDocumentService:
+    return WarehouseDocumentService(
+        session=session,
+        doc_repo=WarehouseDocumentRepository(session),
+        layer_repo=InventoryLayerRepository(session),
     )
 

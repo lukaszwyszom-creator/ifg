@@ -284,11 +284,18 @@ class TestKSeFReferenceNumberCommit08:
         """Idempotentnosc: ponowne wywolanie dla FAILED_PERMANENT nie wywoluje klienta."""
         transmission = MagicMock()
         transmission.status = TransmissionStatus.FAILED_PERMANENT
+        transmission.invoice_id = uuid4()
         handler._transmission_repo.lock_for_update.return_value = transmission
+
+        invoice = _make_sending_invoice()
+        handler._invoice_repo.lock_for_update.return_value = invoice
+        handler._invoice_repo.update.return_value = invoice
 
         handler.handle(_make_payload())
 
         handler._ksef_client.get_invoice_status.assert_not_called()
+        assert invoice.status == InvoiceStatus.REJECTED
+        handler._invoice_repo.update.assert_called_once()
 
 
 class TestUPOCommit09:

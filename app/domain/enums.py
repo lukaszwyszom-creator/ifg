@@ -48,6 +48,12 @@ class InvoicePaymentStatus(StrEnum):
     PAID = "paid"
 
 
+class PaymentMethod(StrEnum):
+    """Sposób płatności na fakturze sprzedaży (mapowanie FA(3) FormaPlatnosci)."""
+    CASH = "cash"           # 1 — gotówka
+    TRANSFER = "transfer"   # 6 — przelew
+
+
 class PaymentMatchStatus(StrEnum):
     UNMATCHED = "unmatched"
     MATCHED = "matched"
@@ -58,6 +64,7 @@ class PaymentMatchStatus(StrEnum):
 class PaymentMatchMethod(StrEnum):
     AUTO = "auto"
     MANUAL = "manual"
+    CASH = "cash"
 
 
 class TransmissionStatus(StrEnum):
@@ -76,3 +83,28 @@ class JobStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# ── Magazyn v1 ────────────────────────────────────────────────────────────────
+
+class WarehouseItemType(StrEnum):
+    GOODS = "goods"       # towar — wpływa na stan magazynowy
+    SERVICE = "service"   # usługa — nie wpływa na stan
+
+
+class WarehouseDocumentType(StrEnum):
+    PZ = "PZ"           # Przyjęcie Zewnętrzne
+    WZ = "WZ"           # Wydanie Zewnętrzne
+    KK = "KK"           # Korekta
+    TRANSFER = "TRANSFER"  # ukryty w UI, dostępny w backendzie
+
+
+class WarehouseDocumentStatus(StrEnum):
+    DRAFT = "draft"
+    POSTED = "posted"        # zaksięgowany — zmienił stany magazynowe
+    CANCELLED = "cancelled"  # anulowany — historia zachowana, stan niezmieniany
+
+
+class FiscalReportStatus(StrEnum):
+    ENTERED_FOR_DISTRIBUTION = "entered_for_distribution"
+    DISTRIBUTED = "distributed"

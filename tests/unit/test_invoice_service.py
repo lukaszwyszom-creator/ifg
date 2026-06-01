@@ -1,7 +1,7 @@
 """Testy InvoiceService — unit (mocki repozytoriów)."""
 from __future__ import annotations
 
-from datetime import date, datetime, UTC
+from datetime import date, datetime, timedelta, UTC
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -10,10 +10,11 @@ import pytest
 
 from app.core.exceptions import NotFoundError
 from app.core.security import AuthenticatedUser
-from app.domain.enums import InvoiceStatus
+from app.domain.enums import InvoiceStatus, PaymentMethod
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.services.invoice_service import InvoiceService
+from app.services.invoice_totals import InvoiceTotalsCalculator
 
 
 @pytest.fixture()
@@ -32,6 +33,8 @@ def _valid_create_data(buyer_id=None) -> dict:
         "buyer_id": buyer_id or uuid4(),
         "issue_date": date(2026, 4, 5),
         "sale_date": date(2026, 4, 5),
+        "due_date": date(2026, 4, 19),
+        "payment_method": "transfer",
         "currency": "PLN",
         "items": [
             {
@@ -57,6 +60,18 @@ class TestCreateInvoice:
         data["items"] = []
         with pytest.raises(InvalidInvoiceError, match="co najmniej jedną pozycję"):
             service.create_invoice(data, actor)
+
+    def test_fractional_quantity_raises(self):
+        with pytest.raises(InvalidInvoiceError, match="liczbą całkowitą"):
+            InvoiceTotalsCalculator.build_items([
+                {
+                    "name": "Książka",
+                    "quantity": "2.5",
+                    "unit": "szt.",
+                    "unit_price_net": "100",
+                    "vat_rate": "23",
+                }
+            ])
 
     def test_sale_date_after_issue_date_raises(self, service: InvoiceService, actor: AuthenticatedUser):
         data = _valid_create_data()
@@ -223,7 +238,7 @@ class TestCreateInvoice:
         service.contractor_repository.get_by_id.return_value = MagicMock()
         service.contractor_override_repository.get_active_by_contractor_id.return_value = None
 
-        with pytest.raises(InvalidInvoiceError, match="seller_name i seller_nip"):
+        with pytest.raises(InvalidInvoiceError, match="Uzupełnij dane sprzedawcy"):
             service.create_invoice(data, actor)
 
     def test_item_negative_quantity_raises(self, service: InvoiceService, actor: AuthenticatedUser):
@@ -378,6 +393,86 @@ class TestCreateInvoiceFA3Fields:
         result = service.create_invoice(data, actor)
 
         assert result.delivery_date is None
+
+
+class TestPaymentFields:
+    def test_validate_due_date_rejects_more_than_59_days(self):
+        issue = date(2026, 4, 5)
+        with pytest.raises(InvalidInvoiceError, match="59"):
+            InvoiceService._validate_due_date(issue, issue + timedelta(days=60))
+
+    def test_validate_due_date_rejects_before_issue(self):
+        issue = date(2026, 4, 5)
+        with pytest.raises(InvalidInvoiceError, match="wcześniejszy"):
+            InvoiceService._validate_due_date(issue, date(2026, 4, 4))
+
+    def test_normalize_payment_method_rejects_unknown(self):
+        with pytest.raises(InvalidInvoiceError, match="Sposób płatności"):
+            InvoiceService._normalize_payment_method("card")
+
+    def test_normalize_payment_method_requires_value_when_required(self):
+        with pytest.raises(InvalidInvoiceError, match="wymagany"):
+            InvoiceService._normalize_payment_method(None, required=True)
+
+    def test_create_invoice_requires_due_date_for_sale(
+        self, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        data = _valid_create_data()
+        data.pop("due_date")
+        with pytest.raises(InvalidInvoiceError, match="Termin płatności"):
+            service.create_invoice(data, actor)
+
+    def test_create_invoice_requires_payment_method_for_sale(
+        self, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        data = _valid_create_data()
+        data.pop("payment_method")
+        with pytest.raises(InvalidInvoiceError, match="Sposób płatności"):
+            service.create_invoice(data, actor)
+
+    @patch("app.services.invoice_service.settings")
+    def test_create_invoice_passes_payment_fields(
+        self, mock_settings, service: InvoiceService, actor: AuthenticatedUser
+    ):
+        mock_settings.seller_nip = "1234567890"
+        mock_settings.seller_name = "Firma"
+        mock_settings.seller_street = "ul. Testowa"
+        mock_settings.seller_building_no = "1"
+        mock_settings.seller_apartment_no = None
+        mock_settings.seller_postal_code = "00-001"
+        mock_settings.seller_city = "Warszawa"
+        mock_settings.seller_country = "PL"
+
+        data = _valid_create_data()
+        data["due_date"] = date(2026, 4, 19)
+        data["payment_method"] = "cash"
+
+        service.contractor_repository.get_by_id.return_value = MagicMock()
+        service.contractor_override_repository.get_active_by_contractor_id.return_value = None
+
+        now = datetime.now(UTC)
+        captured = Invoice(
+            id=uuid4(),
+            status=InvoiceStatus.READY_FOR_SUBMISSION,
+            issue_date=data["issue_date"],
+            sale_date=data["sale_date"],
+            due_date=date(2026, 4, 19),
+            currency="PLN",
+            seller_snapshot={},
+            buyer_snapshot={},
+            items=[],
+            total_net=Decimal("0"),
+            total_vat=Decimal("0"),
+            total_gross=Decimal("0"),
+            created_at=now,
+            updated_at=now,
+        )
+        service.invoice_repository.add.side_effect = lambda inv: inv
+
+        result = service.create_invoice(data, actor)
+
+        assert result.due_date == date(2026, 4, 19)
+        assert result.payment_method == PaymentMethod.CASH
 
 
 class TestListInvoices:

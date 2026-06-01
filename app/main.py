@@ -20,6 +20,8 @@ from app.api.routers.metrics import router as metrics_router
 from app.api.routers.payments import router as payments_router
 from app.api.routers.settings import router as settings_router
 from app.api.routers.stock import router as stock_router
+from app.api.routers.warehouse_documents import router as warehouse_documents_router
+from app.api.routers.warehouse_items import router as warehouse_items_router
 from app.api.routers.transmissions import router as transmissions_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
@@ -93,6 +95,8 @@ def create_application() -> FastAPI:
 
     if settings.enable_warehouse:
         application.include_router(stock_router, prefix=settings.api_v1_prefix)
+        application.include_router(warehouse_items_router, prefix=settings.api_v1_prefix)
+        application.include_router(warehouse_documents_router, prefix=settings.api_v1_prefix)
 
     # Serve frontend SPA under /ui with SPA fallback to index.html.
     if FRONTEND_DIST_DIR.exists():

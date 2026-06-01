@@ -123,3 +123,74 @@ def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:
     assert result["status"]["status"] == "success"
     sync_state_repo.mark_running.assert_called_once_with("purchase_invoices")
     sync_state_repo.mark_success.assert_called_once()
+
+
+def test_ksef_sync_service_uses_requested_nip_when_settings_are_empty() -> None:
+    sync_state_repo = MagicMock()
+    settings_repo = MagicMock()
+    ksef_session_service = MagicMock()
+
+    sync_state_repo.mark_running.return_value = SimpleNamespace(state_json=None)
+    sync_state_repo.mark_success.return_value = SimpleNamespace(
+        scope="purchase_invoices",
+        status="success",
+        last_success_at=None,
+        last_attempt_at=None,
+        last_error=None,
+        state_json={},
+    )
+    settings_repo.get.return_value = None
+    ksef_session_service.sync_received_invoices.return_value = {
+        "received": 0,
+        "saved": 0,
+        "skipped_existing": 0,
+        "skipped_parse": 0,
+    }
+
+    service = KSeFSyncService(
+        session=MagicMock(),
+        sync_state_repository=sync_state_repo,
+        settings_repository=settings_repo,
+        ksef_session_service=ksef_session_service,
+    )
+
+    service.sync_purchase_invoices(force=False, nip="9670402857")
+
+    ksef_session_service.sync_received_invoices.assert_called_once()
+    assert ksef_session_service.sync_received_invoices.call_args.kwargs["nip"] == "9670402857"
+    settings_repo.get.assert_not_called()
+
+
+def test_ksef_sync_service_uses_configured_owner_nip_when_settings_are_empty() -> None:
+    sync_state_repo = MagicMock()
+    settings_repo = MagicMock()
+    ksef_session_service = MagicMock()
+
+    sync_state_repo.mark_running.return_value = SimpleNamespace(state_json=None)
+    sync_state_repo.mark_success.return_value = SimpleNamespace(
+        scope="purchase_invoices",
+        status="success",
+        last_success_at=None,
+        last_attempt_at=None,
+        last_error=None,
+        state_json={},
+    )
+    settings_repo.get.return_value = None
+    ksef_session_service.sync_received_invoices.return_value = {
+        "received": 0,
+        "saved": 0,
+        "skipped_existing": 0,
+        "skipped_parse": 0,
+    }
+
+    service = KSeFSyncService(
+        session=MagicMock(),
+        sync_state_repository=sync_state_repo,
+        settings_repository=settings_repo,
+        ksef_session_service=ksef_session_service,
+    )
+
+    service.sync_purchase_invoices(force=False)
+
+    ksef_session_service.sync_received_invoices.assert_called_once()
+    assert ksef_session_service.sync_received_invoices.call_args.kwargs["nip"] == "9670402857"

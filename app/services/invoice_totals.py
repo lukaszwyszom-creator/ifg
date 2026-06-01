@@ -35,6 +35,10 @@ class InvoiceTotalsCalculator:
                 raise InvalidInvoiceError(
                     f"Pozycja {idx + 1}: ilość musi być większa od zera."
                 )
+            if quantity != quantity.to_integral_value():
+                raise InvalidInvoiceError(
+                    f"Pozycja {idx + 1}: ilość musi być liczbą całkowitą."
+                )
             if unit_price_net < 0:
                 raise InvalidInvoiceError(
                     f"Pozycja {idx + 1}: cena jednostkowa nie może być ujemna."
@@ -63,6 +67,7 @@ class InvoiceTotalsCalculator:
                     vat_total=vat_total,
                     gross_total=gross_total,
                     sort_order=idx + 1,
+                    isbn=raw.get("isbn") or None,
                 )
             )
 

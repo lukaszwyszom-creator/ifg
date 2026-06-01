@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import UUID
 
-from app.domain.enums import CorrectionType, InvoiceStatus, InvoiceType
+from app.domain.enums import CorrectionType, InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.exceptions import InvalidInvoiceError
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.persistence.models.contractor import ContractorORM
@@ -38,6 +38,15 @@ _ALLOWED_WRITE_STATUSES = frozenset(
 
 
 class InvoiceMapper:
+
+    @staticmethod
+    def _payment_method_from_db(raw: str | None) -> PaymentMethod:
+        if isinstance(raw, str):
+            try:
+                return PaymentMethod(raw)
+            except ValueError:
+                pass
+        return PaymentMethod.TRANSFER
 
     @staticmethod
     def _normalize_direction(raw_direction: str | None) -> str:
@@ -82,6 +91,7 @@ class InvoiceMapper:
             sale_date=orm.sale_date,
             delivery_date=orm.delivery_date,
             due_date=orm.due_date,
+            payment_method=InvoiceMapper._payment_method_from_db(orm.payment_method),
             ksef_reference_number=orm.ksef_reference_number,
             currency=orm.currency,
             seller_snapshot=orm.seller_snapshot_json,
@@ -127,6 +137,7 @@ class InvoiceMapper:
             sale_date=invoice.sale_date,
             delivery_date=invoice.delivery_date,
             due_date=invoice.due_date,
+            payment_method=invoice.payment_method.value,
             ksef_reference_number=invoice.ksef_reference_number,
             currency=invoice.currency,
             invoice_type=invoice.invoice_type.value,
@@ -167,6 +178,7 @@ class InvoiceMapper:
         orm.sale_date = invoice.sale_date
         orm.delivery_date = invoice.delivery_date
         orm.due_date = invoice.due_date
+        orm.payment_method = invoice.payment_method.value
         orm.ksef_reference_number = invoice.ksef_reference_number
         orm.currency = invoice.currency
         orm.invoice_type = invoice.invoice_type.value
@@ -235,6 +247,7 @@ class InvoiceMapper:
             gross_total=orm.gross_amount,
             sort_order=orm.sort_order,
             vat_amount_pln=orm.vat_amount_pln,
+            isbn=orm.isbn,
         )
 
     @staticmethod
@@ -252,6 +265,7 @@ class InvoiceMapper:
             gross_amount=item.gross_total,
             sort_order=item.sort_order,
             vat_amount_pln=item.vat_amount_pln,
+            isbn=item.isbn,
         )
 
     @staticmethod

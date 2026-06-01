@@ -19,3 +19,15 @@ class KSeFNotConnectedError(InvalidInvoiceError):
 class InvalidStatusTransitionError(AppError):
     status_code = 409
     code = "invalid_status_transition"
+
+
+class InsufficientStockError(AppError):
+    """Próba rozchodu przekraczającego dostępny stan magazynowy."""
+    status_code = 422
+    code = "insufficient_stock"
+
+
+class InvalidWarehouseDocumentError(AppError):
+    """Błąd domenowy dokumentu magazynowego (nieprawidłowe dane, brakujące ceny)."""
+    status_code = 422
+    code = "invalid_warehouse_document"

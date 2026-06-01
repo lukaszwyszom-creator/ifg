@@ -236,12 +236,15 @@ class TestE2EMvp:
 
     def test_03a_create_invoice(self, client, seeded):
         today = date.today().isoformat()
+        due_date = (date.today() + timedelta(days=14)).isoformat()
         r = client.post(
             "/api/v1/invoices/",
             json={
                 "buyer_id": _STATE["buyer_id"],
                 "issue_date": today,
                 "sale_date": today,
+                "due_date": due_date,
+                "payment_method": "transfer",
                 "currency": "PLN",
                 "items": [
                     {

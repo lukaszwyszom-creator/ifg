@@ -6,13 +6,14 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from app.domain.enums import InvoiceStatus, TransmissionStatus
+from app.domain.enums import TransmissionStatus
 from app.integrations.ksef.client import KSeFClient, KSeFClientError
 from app.persistence.models.background_job import BackgroundJob
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.transmission_service import TransmissionService
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +50,23 @@ class PollKSeFStatusJobHandler:
             )
             return
 
-        # Idempotentnosc: jesli transmisja juz zakonczona, pomijamy
+        # Idempotentnosc: jesli transmisja juz zakonczona, zsynchronizuj fakture i pomijamy
         if transmission.status in (
             TransmissionStatus.SUCCESS,
             TransmissionStatus.FAILED_PERMANENT,
         ):
+            TransmissionService.sync_invoice_from_terminal_transmission(
+                self._invoice_repo,
+                invoice_id=transmission.invoice_id,
+                transmission_status=transmission.status,
+                ksef_reference_number=transmission.ksef_reference_number,
+            )
             logger.info(
                 "poll_ksef_status: transmisja %s juz zakonczona (%s) — pomijam.",
                 transmission_id,
                 transmission.status,
             )
+            self.session.flush()
             return
 
         try:
@@ -101,11 +109,12 @@ class PollKSeFStatusJobHandler:
             transmission.ksef_reference_number = status_result.ksef_reference_number
             transmission.finished_at = datetime.now(UTC)
 
-            invoice = self._invoice_repo.lock_for_update(transmission.invoice_id)
-            if invoice is not None:
-                invoice.transition_to(InvoiceStatus.ACCEPTED)
-                invoice.ksef_reference_number = status_result.ksef_reference_number
-                self._invoice_repo.update(invoice.id, invoice)
+            TransmissionService.sync_invoice_from_terminal_transmission(
+                self._invoice_repo,
+                invoice_id=transmission.invoice_id,
+                transmission_status=TransmissionStatus.SUCCESS,
+                ksef_reference_number=status_result.ksef_reference_number,
+            )
 
             # Pobierz UPO — awaria nie cofa sukcesu faktury ani numeru KSeF
             self._fetch_and_save_upo(
@@ -119,10 +128,11 @@ class PollKSeFStatusJobHandler:
             transmission.error_message = status_result.processing_description
             transmission.finished_at = datetime.now(UTC)
 
-            invoice = self._invoice_repo.lock_for_update(transmission.invoice_id)
-            if invoice is not None:
-                invoice.transition_to(InvoiceStatus.REJECTED)
-                self._invoice_repo.update(invoice.id, invoice)
+            TransmissionService.sync_invoice_from_terminal_transmission(
+                self._invoice_repo,
+                invoice_id=transmission.invoice_id,
+                transmission_status=TransmissionStatus.FAILED_PERMANENT,
+            )
 
         else:
             # Faktura jest jeszcze w kolejce KSeF — czekamy

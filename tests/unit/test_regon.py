@@ -93,23 +93,20 @@ def _make_existing_contractor():
 # ---------------------------------------------------------------------------
 
 class TestRegonClientKeyGuard:
-    def test_change_me_raises_external_service_error(self, regon_client_change_me: RegonClient):
-        """REGON_API_KEY=change-me musi wywołać ExternalServiceError, nie 500."""
-        with pytest.raises(ExternalServiceError) as exc_info:
-            regon_client_change_me.lookup_by_nip("1000000035")
-        assert "REGON" in str(exc_info.value)
+    def test_change_me_returns_none(self, regon_client_change_me: RegonClient):
+        """REGON_API_KEY=change-me → None (brak danych, nie błąd krytyczny)."""
+        result = regon_client_change_me.lookup_by_nip("1000000035")
+        assert result is None
 
-    def test_none_key_raises_external_service_error(self, regon_client_none_key: RegonClient):
-        """Brak REGON_API_KEY musi wywołać ExternalServiceError."""
-        with pytest.raises(ExternalServiceError):
-            regon_client_none_key.lookup_by_nip("1000000035")
+    def test_none_key_returns_none(self, regon_client_none_key: RegonClient):
+        """Brak REGON_API_KEY → None (brak danych, nie błąd krytyczny)."""
+        result = regon_client_none_key.lookup_by_nip("1000000035")
+        assert result is None
 
-    def test_error_message_does_not_contain_api_key(self, regon_client_change_me: RegonClient):
-        """Komunikat błędu nie może ujawniać wartości klucza API."""
-        try:
-            regon_client_change_me.lookup_by_nip("1000000035")
-        except ExternalServiceError as exc:
-            assert "change-me" not in str(exc)
+    def test_unconfigured_key_does_not_raise(self, regon_client_change_me: RegonClient):
+        """Niezskonfigurowany klucz nie rzuca wyjątku — zwraca None bez wycieku klucza."""
+        result = regon_client_change_me.lookup_by_nip("1000000035")
+        assert result is None
 
     def test_resolves_test_wsdl_for_test_env(self):
         client = RegonClient(

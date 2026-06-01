@@ -166,6 +166,34 @@ class TestKSeFClientGetInvoiceStatus:
         assert result.ksef_reference_number == "KSeF/001/2026"
         assert result.upo_url == "https://upo.test/ok"
 
+    def test_failed_invoice_returns_detailed_rejection_message(self):
+        client = self._make_client()
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {"ksefNumber": None}
+        failed_list = MagicMock(status_code=200)
+        failed_list.json.return_value = {
+            "invoices": [
+                {
+                    "referenceNumber": "REF-FAIL",
+                    "status": {
+                        "code": 440,
+                        "description": "Duplikat faktury",
+                        "details": [
+                            "Duplikat faktury. Faktura o numerze KSeF: 5265877635-20250626-010080DD2B5E-26"
+                        ],
+                    },
+                }
+            ]
+        }
+
+        with patch("httpx.Client") as mock_cls:
+            self._ctx(mock_cls, [ok, failed_list])
+            result = client.get_invoice_status("tok", "sess-ref", "REF-FAIL")
+
+        assert result.processing_code == 400
+        assert "Duplikat faktury" in result.processing_description
+        assert "5265877635" in result.processing_description
+
     def test_transient_error_retries(self):
         client = self._make_client()
         fail = MagicMock(status_code=503, text="overload")
@@ -396,3 +424,45 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
             "POST /sessions/online/{ref}/invoices/query NIE powinien być wywoływany "
             "(powoduje błąd KSeF 400 / exceptionCode 21405)"
         )
+
+    def test_get_candidate_400_21405_falls_back_without_invoice_reference_number(self):
+        """GET endpoint interpretowany jako invoiceReferenceNumber nie kończy synca."""
+        client = self._make_client()
+
+        wrong_ref = MagicMock()
+        wrong_ref.status_code = 400
+        wrong_ref.text = (
+            '{"exception":{"exceptionDetailList":[{"exceptionCode":21405,'
+            '"details":["\'invoiceReferenceNumber\' is not in the correct format"]}]}}'
+        )
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"invoices": []}
+
+        recorded_calls: list[dict] = []
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            recorded_calls.append({"method": method, "url": url, "params": params or {}, "json": json or {}})
+            if method == "GET" and len(recorded_calls) == 1:
+                return wrong_ref
+            return ok_resp
+
+        with patch("httpx.Client") as mock_cls:
+            ctx = self._mock_ctx()
+            ctx.request.side_effect = _fake_request
+            mock_cls.return_value = ctx
+
+            client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-05-31",
+            )
+
+        assert len(recorded_calls) >= 2
+        for call in recorded_calls:
+            assert "invoiceReferenceNumber" not in call["params"]
+            assert "invoiceReferenceNumber" not in call["json"]

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.api.deps import (
@@ -41,9 +41,12 @@ def get_ksef_connection_status(
     ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
     settings_service: Annotated[SettingsService, Depends(get_settings_service)],
     _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    nip: str | None = Query(default=None),
 ) -> KSeFConnectionStatusResponse:
     settings_data = settings_service.get_settings()
-    payload = ksef_session_service.get_connection_status(settings_data.get("seller_nip"))
+    raw_nip = (nip or settings_data.get("seller_nip") or "").strip()
+    seller_nip = raw_nip or None
+    payload = ksef_session_service.get_connection_status(seller_nip)
     return KSeFConnectionStatusResponse.model_validate(payload)
 
 
@@ -188,6 +191,7 @@ class KSeFSyncStatusResponse(BaseModel):
 
 class KSeFPurchaseSyncRequest(BaseModel):
     force: bool = False
+    nip: str | None = None
 
 
 class KSeFPurchaseSyncResponse(BaseModel):
@@ -241,6 +245,7 @@ def sync_ksef_purchases_now(
     payload = ksef_sync_service.sync_purchase_invoices(
         force=body.force,
         actor_user_id=current_user.user_id,
+        nip=body.nip,
     )
     counts = payload["counts"]
     status = payload["status"]

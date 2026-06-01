@@ -21,6 +21,9 @@ class InvoiceRepository:
             return None
         return InvoiceMapper.to_domain(orm)
 
+    def get_orm_by_id(self, invoice_id: UUID) -> InvoiceORM | None:
+        return self.session.get(InvoiceORM, invoice_id)
+
     def lock_for_update(self, invoice_id: UUID) -> Invoice | None:
         """Pobiera fakturę z blokadą FOR UPDATE (tylko PostgreSQL).
         W SQLite działa bez blokady.

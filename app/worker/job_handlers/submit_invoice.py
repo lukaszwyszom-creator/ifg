@@ -17,6 +17,7 @@ from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.transmission_service import TransmissionService
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,11 @@ class SubmitInvoiceJobHandler:
         transmission.error_code = error_code
         transmission.error_message = error_message[:512]
         transmission.finished_at = now
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            self._invoice_repo,
+            invoice_id=transmission.invoice_id,
+            transmission_status=TransmissionStatus.FAILED_PERMANENT,
+        )
         self.session.flush()
 
     def _enqueue_submit_retry_job(self, transmission, retry_at: datetime, now: datetime) -> None:
@@ -298,6 +304,11 @@ class SubmitInvoiceJobHandler:
         transmission.error_code = error_code
         transmission.error_message = str(exc)
         transmission.finished_at = now
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            self._invoice_repo,
+            invoice_id=transmission.invoice_id,
+            transmission_status=TransmissionStatus.FAILED_PERMANENT,
+        )
         self.session.flush()
 
     def _handle_unexpected_error(self, transmission_id: UUID, transmission, exc: Exception) -> None:
@@ -314,6 +325,11 @@ class SubmitInvoiceJobHandler:
         transmission.error_code = "INTERNAL_ERROR"
         transmission.error_message = str(exc)[:512]
         transmission.finished_at = now
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            self._invoice_repo,
+            invoice_id=transmission.invoice_id,
+            transmission_status=TransmissionStatus.FAILED_PERMANENT,
+        )
         self.session.flush()
 
     def handle(self, payload: dict) -> None:

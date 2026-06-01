@@ -26,6 +26,7 @@ class InvoiceORM(Base):
     sale_date: Mapped[date] = mapped_column(Date)
     delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    payment_method: Mapped[str] = mapped_column(String(16), nullable=False, server_default="transfer")
     ksef_reference_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     currency: Mapped[str] = mapped_column(String(8), default="PLN")
     invoice_type: Mapped[str] = mapped_column(String(32), default="VAT", nullable=False)

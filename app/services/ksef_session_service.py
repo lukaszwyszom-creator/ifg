@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, ExternalServiceError, NotFoundError
-from app.domain.enums import InvoiceStatus, InvoiceType
+from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
 from app.integrations.ksef.client import KSeFClient, KSeFClientError
@@ -401,6 +401,10 @@ class KSeFSessionService:
                     status=InvoiceStatus.ACCEPTED,
                     issue_date=date.fromisoformat(parsed["issue_date"]),
                     sale_date=date.fromisoformat(parsed["sale_date"]),
+                    due_date=date.fromisoformat(parsed["due_date"]) if parsed.get("due_date") else None,
+                    payment_method=PaymentMethod(parsed["payment_method"])
+                    if parsed.get("payment_method") in {"cash", "transfer"}
+                    else PaymentMethod.TRANSFER,
                     currency=parsed.get("currency", "PLN"),
                     seller_snapshot=parsed["seller_snapshot"],
                     buyer_snapshot=parsed["buyer_snapshot"],

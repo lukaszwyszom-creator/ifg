@@ -1,0 +1,13 @@
+node_modules
+frontend-react/node_modules
+frontend-react/dist
+.git
+.pytest_cache
+.mypy_cache
+coverage
+htmlcov
+__pycache__
+docker/postgres
+logs
+tmp
+backups

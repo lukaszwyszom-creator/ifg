@@ -63,7 +63,7 @@ def _make_invoice(
         currency=currency,
         number_local=number_local,
         seller_snapshot=seller_snapshot or {
-            "nip": "1000000035",
+            "nip": "9670402857",
             "name": "Sprzedawca Sp. z o.o.",
             "street": "ul. Testowa",
             "building_no": "1",
@@ -72,7 +72,7 @@ def _make_invoice(
             "country": "PL",
         },
         buyer_snapshot=buyer_snapshot or {
-            "nip": "1000000070",
+            "nip": "9670402857",
             "name": "Nabywca S.A.",
             "street": "ul. Kupiecka",
             "building_no": "5",
@@ -160,20 +160,39 @@ class TestInvoiceToXml:
         assert _text(root, "Fa", "P_2") == "FV/7/01/2026"
 
     def test_fa_number_local_absent(self):
-        xml = KSeFMapper.invoice_to_xml(_make_invoice(number_local=None))
-        root = _parse_xml(xml)
-        # Element P_2 nie powinien istnieć
-        assert _find(root, "Fa", "P_2") is None
+        with pytest.raises(KSeFMappingError, match="P_2"):
+            KSeFMapper.invoice_to_xml(_make_invoice(number_local=None))
 
     def test_fa_issue_date(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice(issue_date=date(2026, 3, 15)))
         root = _parse_xml(xml)
         assert _text(root, "Fa", "P_1") == "2026-03-15"
 
-    def test_fa_sale_date(self):
-        xml = KSeFMapper.invoice_to_xml(_make_invoice(sale_date=date(2026, 3, 10)))
+    def test_fa_platnosc_transfer_and_due_date(self):
+        inv = _make_invoice(issue_date=date(2026, 4, 5))
+        inv.due_date = date(2026, 4, 19)
+        from app.domain.enums import PaymentMethod
+        inv.payment_method = PaymentMethod.TRANSFER
+        xml = KSeFMapper.invoice_to_xml(inv)
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "P_1M") == "2026-03-10"
+        assert _text(root, "Fa", "Platnosc", "TerminPlatnosci", "Termin") == "2026-04-19"
+        assert _text(root, "Fa", "Platnosc", "FormaPlatnosci") == "6"
+
+    def test_fa_platnosc_cash(self):
+        inv = _make_invoice()
+        from app.domain.enums import PaymentMethod
+        inv.payment_method = PaymentMethod.CASH
+        xml = KSeFMapper.invoice_to_xml(inv)
+        root = _parse_xml(xml)
+        assert _text(root, "Fa", "Platnosc", "FormaPlatnosci") == "1"
+
+    def test_fa_sale_date(self):
+        xml = KSeFMapper.invoice_to_xml(_make_invoice(
+            issue_date=date(2026, 3, 15),
+            sale_date=date(2026, 3, 10),
+        ))
+        root = _parse_xml(xml)
+        assert _text(root, "Fa", "P_6") == "2026-03-10"
 
     def test_fa_total_net(self):
         # FA(3): P_13_x pochodzi z sum pozycji, nie z pola total_net faktury
@@ -208,32 +227,32 @@ class TestSellerSnapshot:
     def test_seller_nip(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        nip = _text(root, "Podmiot1", "Sprzedawca", "NIP")
-        assert nip == "1000000035"
+        nip = _text(root, "Podmiot1", "DaneIdentyfikacyjne", "NIP")
+        assert nip == "9670402857"
 
     def test_seller_name(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        name = _text(root, "Podmiot1", "Sprzedawca", "Nazwa")
+        name = _text(root, "Podmiot1", "DaneIdentyfikacyjne", "Nazwa")
         assert name == "Sprzedawca Sp. z o.o."
 
     def test_seller_city(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        city = _text(root, "Podmiot1", "Sprzedawca", "Adres", "Miejscowosc")
-        assert city == "Warszawa"
+        adres_l1 = _text(root, "Podmiot1", "Adres", "AdresL1")
+        assert "Warszawa" in adres_l1
 
     def test_seller_postal_code(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        postal = _text(root, "Podmiot1", "Sprzedawca", "Adres", "KodPocztowy")
-        assert postal == "00-001"
+        adres_l1 = _text(root, "Podmiot1", "Adres", "AdresL1")
+        assert "00-001" in adres_l1
 
     def test_seller_country_default_pl(self):
-        seller = {"nip": "1111111111", "name": "Firma"}
+        seller = {"nip": "9670402857", "name": "Firma", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"}
         xml = KSeFMapper.invoice_to_xml(_make_invoice(seller_snapshot=seller))
         root = _parse_xml(xml)
-        country = _text(root, "Podmiot1", "Sprzedawca", "Adres", "KodKraju")
+        country = _text(root, "Podmiot1", "Adres", "KodKraju")
         assert country == "PL"
 
     def test_seller_no_nip_raises_mapping_error(self):
@@ -247,19 +266,19 @@ class TestBuyerSnapshot:
     def test_buyer_nip(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        nip = _text(root, "Podmiot2", "Nabywca", "NIP")
-        assert nip == "1000000070"
+        nip = _text(root, "Podmiot2", "DaneIdentyfikacyjne", "NIP")
+        assert nip == "9670402857"
 
     def test_buyer_apartment_no(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        apt = _text(root, "Podmiot2", "Nabywca", "Adres", "AdresL2")
-        assert apt == "m. 10"
+        adres_l1 = _text(root, "Podmiot2", "Adres", "AdresL1")
+        assert "m. 10" in adres_l1
 
     def test_buyer_street_building_in_adres_l1(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        adres_l1 = _text(root, "Podmiot2", "Nabywca", "Adres", "AdresL1")
+        adres_l1 = _text(root, "Podmiot2", "Adres", "AdresL1")
         assert "ul. Kupiecka" in adres_l1
         assert "5" in adres_l1
 
@@ -323,7 +342,7 @@ class TestInvoiceItems:
         root = _parse_xml(xml)
         fa = _find(root, "Fa")
         row = fa.find(f"{{{_NS_FA}}}FaWiersz")
-        assert row.find(f"{{{_NS_FA}}}P_12").text == "8.00"
+        assert row.find(f"{{{_NS_FA}}}P_12").text == "8"
 
     def test_item_sort_order(self):
         item = _make_item(sort_order=42)
@@ -383,12 +402,12 @@ class TestFA3VatTotals:
         assert _text(root, "Fa", "P_13_3") == "200.00"
         assert _text(root, "Fa", "P_14_3") == "10.00"
 
-    def test_single_rate_0_emits_p13_4_p14_4(self):
+    def test_single_rate_0_emits_p13_6_1(self):
         item = self._make_item_with_rate("0", "500.00", "0.00", "500.00")
         xml = KSeFMapper.invoice_to_xml(_make_invoice(items=[item], total_net="500.00", total_vat="0.00", total_gross="500.00"))
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "P_13_4") == "500.00"
-        assert _text(root, "Fa", "P_14_4") == "0.00"
+        assert _text(root, "Fa", "P_13_6_1") == "500.00"
+        assert _find(root, "Fa", "P_14_4") is None
 
     def test_two_rates_emits_both_groups(self):
         item23 = self._make_item_with_rate("23", "100.00", "23.00", "123.00", sort_order=1)
@@ -443,8 +462,8 @@ class TestFA3P6DeliveryDate:
             delivery_date=date(2026, 4, 7),
             currency="PLN",
             number_local="FV/1/04/2026",
-            seller_snapshot={"nip": "1000000035", "name": "S"},
-            buyer_snapshot={"nip": "1000000070", "name": "B"},
+            seller_snapshot={"nip": "9670402857", "name": "S", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"},
+            buyer_snapshot={"nip": "9670402857", "name": "B", "street": "ul. Y", "building_no": "2", "postal_code": "00-002", "city": "Kraków"},
             items=[_make_item()],
             total_net=Decimal("100.00"),
             total_vat=Decimal("23.00"),
@@ -465,9 +484,9 @@ class TestFA3P6DeliveryDate:
             sale_date=date(2026, 4, 8),
             delivery_date=date(2026, 4, 10),  # równa issue_date
             currency="PLN",
-            number_local=None,
-            seller_snapshot={"nip": "1000000035", "name": "S"},
-            buyer_snapshot={"nip": "1000000070", "name": "B"},
+            number_local="FV/1/04/2026",
+            seller_snapshot={"nip": "9670402857", "name": "S", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"},
+            buyer_snapshot={"nip": "9670402857", "name": "B", "street": "ul. Y", "building_no": "2", "postal_code": "00-002", "city": "Kraków"},
             items=[_make_item()],
             total_net=Decimal("100.00"),
             total_vat=Decimal("23.00"),
@@ -534,9 +553,9 @@ class TestMappingValidation:
             issue_date=date(2026, 4, 5),
             sale_date=date(2026, 4, 5),
             currency="PLN",
-            number_local=None,
-            seller_snapshot={"nip": "1000000035", "name": "S"},
-            buyer_snapshot={"nip": "1000000070", "name": "B"},
+            number_local="FV/1/04/2026",
+            seller_snapshot={"nip": "9670402857", "name": "S", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"},
+            buyer_snapshot={"nip": "9670402857", "name": "B", "street": "ul. Y", "building_no": "2", "postal_code": "00-002", "city": "Kraków"},
             items=[],  # pusta lista — powinno rzucić KSeFMappingError
             total_net=Decimal("0"),
             total_vat=Decimal("0"),
@@ -578,7 +597,7 @@ def _make_invoice_with_type(
         currency="PLN",
         number_local="FV/1/04/2026",
         seller_snapshot={
-            "nip": "1000000035",
+            "nip": "9670402857",
             "name": "Sprzedawca Sp. z o.o.",
             "street": "ul. Testowa",
             "building_no": "1",
@@ -587,7 +606,7 @@ def _make_invoice_with_type(
             "country": "PL",
         },
         buyer_snapshot={
-            "nip": "1000000070",
+            "nip": "9670402857",
             "name": "Nabywca Sp. z o.o.",
             "street": "ul. Kupiecka",
             "building_no": "2",
@@ -613,7 +632,7 @@ class TestNIPValidation:
 
     def test_valid_10_digit_nip_passes(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice(seller_snapshot={
-            "nip": "1000000035", "name": "Firma"
+            "nip": "9670402857", "name": "Firma", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"
         }))
         assert xml is not None
 
@@ -632,21 +651,20 @@ class TestNIPValidation:
     def test_nip_with_dashes_is_normalized(self):
         """NIP ze spacjami/kreskami jest normalizowany do 10 cyfr — nie rzuca błędu."""
         xml = KSeFMapper.invoice_to_xml(_make_invoice(seller_snapshot={
-            "nip": "100-000-00-35", "name": "Firma"  # kreski → normalizacja → 10 cyfr
+            "nip": "100-000-00-35", "name": "Firma", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"
         }))
         root = _parse_xml(xml)
-        nip_el = _text(root, "Podmiot1", "Sprzedawca", "NIP")
+        nip_el = _text(root, "Podmiot1", "DaneIdentyfikacyjne", "NIP")
         assert nip_el == "1000000035"
 
     def test_nip_with_pl_prefix_passes(self):
         """NIP z prefiksem PL powinien przejść po strippingu prefiksu."""
         xml = KSeFMapper.invoice_to_xml(_make_invoice(seller_snapshot={
-            "nip": "PL1000000035", "name": "Firma"  # prefix PL
+            "nip": "PL9670402857", "name": "Firma", "street": "ul. X", "building_no": "1", "postal_code": "00-001", "city": "Warszawa"
         }))
         root = _parse_xml(xml)
-        # NIP w XML powinien być sama liczba bez PL
-        nip_el = _text(root, "Podmiot1", "Sprzedawca", "NIP")
-        assert nip_el == "1000000035"
+        nip_el = _text(root, "Podmiot1", "DaneIdentyfikacyjne", "NIP")
+        assert nip_el == "9670402857"
 
     def test_missing_seller_nip_raises(self):
         with pytest.raises(KSeFMappingError, match="NIP sprzedawcy"):
@@ -664,25 +682,25 @@ class TestAdnotacje:
         adnotacje = _find(root, "Fa", "Adnotacje")
         assert adnotacje is not None, "Sekcja Adnotacje powinna być obecna w FA(3)"
 
-    def test_p16_default_0(self):
+    def test_p16_default_2(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "Adnotacje", "P_16") == "0"
+        assert _text(root, "Fa", "Adnotacje", "P_16") == "2"
 
-    def test_p17_default_0(self):
+    def test_p17_default_2(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "Adnotacje", "P_17") == "0"
+        assert _text(root, "Fa", "Adnotacje", "P_17") == "2"
 
-    def test_p18_default_0(self):
+    def test_p18_default_2(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "Adnotacje", "P_18") == "0"
+        assert _text(root, "Fa", "Adnotacje", "P_18") == "2"
 
-    def test_p18a_default_0(self):
+    def test_p18a_default_2(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "Adnotacje", "P_18A") == "0"
+        assert _text(root, "Fa", "Adnotacje", "P_18A") == "2"
 
 
 class TestRodzajFakturyEnum:
@@ -741,21 +759,21 @@ class TestRodzajFakturyEnum:
 
 
 class TestKorekty:
-    """Faktury korygujące — element FaKorygowana w XML."""
+    """Faktury korygujące — element DaneFaKorygowanej w XML."""
 
-    def test_regular_invoice_has_no_fa_korygowana(self):
+    def test_regular_invoice_has_no_dane_fa_korygowanej(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice())
         root = _parse_xml(xml)
-        assert _find(root, "Fa", "FaKorygowana") is None
+        assert _find(root, "Fa", "DaneFaKorygowanej") is None
 
-    def test_kor_emits_fa_korygowana(self):
+    def test_kor_emits_dane_fa_korygowanej(self):
         inv = _make_invoice_with_type(
             InvoiceType.KOR,
             correction_of_ksef_number="KSeF/2026/0001",
         )
         xml = KSeFMapper.invoice_to_xml(inv)
         root = _parse_xml(xml)
-        assert _find(root, "Fa", "FaKorygowana") is not None
+        assert _find(root, "Fa", "DaneFaKorygowanej") is not None
 
     def test_kor_ksef_number_in_xml(self):
         inv = _make_invoice_with_type(
@@ -764,7 +782,7 @@ class TestKorekty:
         )
         xml = KSeFMapper.invoice_to_xml(inv)
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "FaKorygowana", "NrKSeFFaKorygowanej") == "KSeF/2026/0001"
+        assert _text(root, "Fa", "DaneFaKorygowanej", "NrKSeFFaKorygowanej") == "KSeF/2026/0001"
 
     def test_kor_reason_in_xml(self):
         inv = _make_invoice_with_type(
@@ -774,7 +792,7 @@ class TestKorekty:
         )
         xml = KSeFMapper.invoice_to_xml(inv)
         root = _parse_xml(xml)
-        assert _text(root, "Fa", "FaKorygowana", "PrzyczynaKorekty") == "Błędna wartość pozycji 1"
+        assert _text(root, "Fa", "PrzyczynaKorekty") == "Błędna wartość pozycji 1"
 
     def test_kor_without_ksef_number_raises(self):
         """Korekta bez numeru KSeF lub ID loklanego faktury powinna zgłosić błąd."""

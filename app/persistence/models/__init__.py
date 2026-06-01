@@ -1,4 +1,12 @@
 from app.persistence.models.app_settings import AppSettingsORM
+from app.persistence.models.fiscal_report import FiscalReportItemORM, FiscalReportORM
+from app.persistence.models.inventory_layer import InventoryLayerMovementORM, InventoryLayerORM
+from app.persistence.models.warehouse_document import (
+    WarehouseBalanceORM,
+    WarehouseDocumentItemORM,
+    WarehouseDocumentORM,
+)
+from app.persistence.models.warehouse_item import WarehouseItemORM
 from app.persistence.models.audit_log import AuditLog
 from app.persistence.models.background_job import BackgroundJob
 from app.persistence.models.bank_transaction import BankTransactionORM
@@ -17,6 +25,14 @@ from app.persistence.models.user import UserORM
 
 __all__ = [
     "AppSettingsORM",
+    "FiscalReportItemORM",
+    "FiscalReportORM",
+    "InventoryLayerMovementORM",
+    "InventoryLayerORM",
+    "WarehouseBalanceORM",
+    "WarehouseDocumentItemORM",
+    "WarehouseDocumentORM",
+    "WarehouseItemORM",
     "AuditLog",
     "BackgroundJob",
     "BankTransactionORM",

@@ -57,6 +57,7 @@ def _make_transmission_orm(
     t.started_at = datetime.now(UTC)
     t.finished_at = datetime.now(UTC)
     t.created_at = datetime.now(UTC)
+    t.invoice = None
     return t
 
 

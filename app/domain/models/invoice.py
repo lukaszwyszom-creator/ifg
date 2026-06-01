@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from app.domain.enums import CorrectionType, InvoiceStatus, InvoiceType
+from app.domain.enums import CorrectionType, InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ def calculate_overdue_days(due_date: date | None) -> int | None:
 
     Funkcja czysta — nic nie zapisuje do DB. Wynik zależy od `date.today()`.
     """
-    if due_date is None:
+    if due_date is None or not isinstance(due_date, date):
         return None
     today = date.today()
     if today <= due_date:
@@ -51,6 +51,7 @@ class InvoiceItem:
     id: UUID | None = None
     # kwota VAT przeliczona na PLN (wymagana przez FA(3) gdy currency != PLN)
     vat_amount_pln: Decimal | None = None
+    isbn: str | None = None
 
 
 @dataclass(slots=True)
@@ -71,6 +72,7 @@ class Invoice:
     number_local: str | None = None
     delivery_date: date | None = None
     due_date: date | None = None
+    payment_method: PaymentMethod = PaymentMethod.TRANSFER
     ksef_reference_number: str | None = None
     payment_status: str = "unpaid"
     invoice_type: InvoiceType = InvoiceType.VAT

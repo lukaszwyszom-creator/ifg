@@ -9,10 +9,10 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import AuthenticatedUser
 from app.core.utils import to_uuid
-from app.domain.enums import InvoiceStatus
+from app.domain.enums import InvoiceStatus, PaymentMethod
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
 from app.domain.models.invoice import Invoice, calculate_overdue_days
 from app.persistence.mappers.invoice_mapper import InvoiceMapper
@@ -26,6 +26,7 @@ from app.persistence.repositories.payment_allocation_repository import (
 )
 from app.integrations.nbp.client import NbpRateClient, NbpRateError
 from app.services.audit_service import AuditService
+from app.services.settings_service import SettingsService
 from app.services.invoice_number_policy import InvoiceNumberPolicy
 from app.services.invoice_totals import InvoiceTotalsCalculator
 from app.services.stock_service import StockService
@@ -33,6 +34,7 @@ from app.services.stock_service import StockService
 logger = logging.getLogger(__name__)
 
 _TWO_PLACES = Decimal("0.01")
+_MAX_PAYMENT_DUE_DAYS = 59
 
 
 class InvoiceService:
@@ -47,6 +49,7 @@ class InvoiceService:
         audit_service: AuditService,
         stock_service: StockService | None = None,
         payment_allocation_repository: PaymentAllocationRepository | None = None,
+        settings_service: SettingsService | None = None,
     ) -> None:
         self.session = session
         self.invoice_repository = invoice_repository
@@ -55,6 +58,7 @@ class InvoiceService:
         self.audit_service = audit_service
         self.stock_service = stock_service
         self.payment_allocation_repository = payment_allocation_repository
+        self.settings_service = settings_service
 
     # -------------------------------------------------------------------------
     # PUBLIC API
@@ -103,8 +107,15 @@ class InvoiceService:
             )
 
         due_date: date | None = data.get("due_date")
-        if due_date is None:
-            due_date = issue_date + timedelta(days=14)
+        if direction == "sale":
+            payment_method = self._normalize_payment_method(
+                data.get("payment_method"), required=True
+            )
+            self._validate_due_date(issue_date, due_date, required=True)
+        else:
+            if due_date is None:
+                due_date = issue_date + timedelta(days=14)
+            payment_method = self._normalize_payment_method(data.get("payment_method"))
 
         counterparty_snapshot = self._resolve_buyer_snapshot(buyer_id)
         company_snapshot = self._build_company_snapshot()
@@ -143,6 +154,7 @@ class InvoiceService:
             sale_date=sale_date,
             delivery_date=delivery_date,
             due_date=due_date,
+            payment_method=payment_method,
             currency=currency,
             exchange_rate=exchange_rate,
             exchange_rate_date=exchange_rate_date,
@@ -191,6 +203,13 @@ class InvoiceService:
             raise NotFoundError(f"Nie znaleziono faktury {invoice_id}.")
         return invoice
 
+    def resolve_buyer_id(self, invoice: Invoice) -> UUID | None:
+        nip = (invoice.buyer_snapshot or {}).get("nip")
+        if not nip:
+            return None
+        contractor = self.contractor_repository.get_by_nip(str(nip).strip())
+        return contractor.id if contractor is not None else None
+
     def update_invoice(
         self, invoice_id: UUID, data: dict, actor: AuthenticatedUser
     ) -> Invoice:
@@ -209,6 +228,12 @@ class InvoiceService:
             )
 
         buyer_id: UUID | None = data.get("buyer_id")
+        if buyer_id is None:
+            nip = (invoice.buyer_snapshot or {}).get("nip")
+            if nip:
+                contractor = self.contractor_repository.get_by_nip(str(nip).strip())
+                if contractor is not None:
+                    buyer_id = contractor.id
         if buyer_id is None:
             raise InvalidInvoiceError("Nabywca (buyer_id) jest wymagany.")
 
@@ -250,6 +275,16 @@ class InvoiceService:
         invoice.delivery_date = delivery_date
         if "due_date" in data:
             invoice.due_date = data.get("due_date")
+        if "payment_method" in data:
+            invoice.payment_method = self._normalize_payment_method(
+                data.get("payment_method"), required=direction == "sale"
+            )
+
+        if direction == "sale":
+            self._validate_due_date(issue_date, invoice.due_date, required=True)
+            if invoice.payment_method is None:
+                raise InvalidInvoiceError("Sposób płatności jest wymagany.")
+
         invoice.currency = data.get("currency", invoice.currency)
         invoice.items = items
         invoice.total_net = total_net
@@ -436,45 +471,7 @@ class InvoiceService:
                     )
                     return invoice
 
-                year = invoice.issue_date.year
-                month = invoice.issue_date.month
-
-                seq = self.invoice_repository.get_next_sequence_number(year, month)
-                number = InvoiceNumberPolicy.generate(year, month, seq)
-
-                if self.invoice_repository.exists_by_number(number):
-                    raise IntegrityError(
-                        statement=None,
-                        params=None,
-                        orig=Exception(f"Duplikat numeru faktury: {number}"),
-                    )
-
-                invoice.number_local = number
-                invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
-                invoice.updated_at = datetime.now(UTC)
-
-                updated = self.invoice_repository.update(invoice_id, invoice)
-                self.session.flush()
-
-                self.audit_service.record(
-                    actor_user_id=actor.user_id,
-                    actor_role=actor.role,
-                    event_type="invoice.marked_ready",
-                    entity_type="invoice",
-                    entity_id=str(invoice_id),
-                    after={
-                        "status": updated.status.value,
-                        "number_local": updated.number_local,
-                    },
-                )
-
-                logger.info(
-                    "Faktura oznaczona jako gotowa: invoice_id=%s number=%s",
-                    invoice_id,
-                    updated.number_local,
-                )
-
-                return updated
+                return self._assign_number_local(invoice_id, invoice, actor)
 
             except (InvalidStatusTransitionError, NotFoundError, ValueError):
                 raise
@@ -500,9 +497,104 @@ class InvoiceService:
             f"Nie udało się oznaczyć faktury jako gotowej: {invoice_id}"
         )
 
+    def ensure_number_local(
+        self, invoice_id: UUID, invoice: Invoice, actor: AuthenticatedUser
+    ) -> Invoice:
+        """Nadaje number_local fakturze sale gotowej do wysyłki (idempotentne)."""
+        if (invoice.number_local or "").strip():
+            return invoice
+        if (invoice.direction or "").strip().lower() != "sale":
+            return invoice
+        if invoice.status != InvoiceStatus.READY_FOR_SUBMISSION:
+            raise InvalidStatusTransitionError(
+                "Nie można nadać numeru fakturze w statusie "
+                f"'{invoice.status.value}'."
+            )
+
+        invoice.validate_sale_formal_requirements(require_number_local=False)
+        return self._assign_number_local(invoice_id, invoice, actor)
+
+    def _assign_number_local(
+        self, invoice_id: UUID, invoice: Invoice, actor: AuthenticatedUser
+    ) -> Invoice:
+        year = invoice.issue_date.year
+        month = invoice.issue_date.month
+
+        seq = self.invoice_repository.get_next_sequence_number(year, month)
+        number = InvoiceNumberPolicy.generate(year, month, seq)
+
+        if self.invoice_repository.exists_by_number(number):
+            raise IntegrityError(
+                statement=None,
+                params=None,
+                orig=Exception(f"Duplikat numeru faktury: {number}"),
+            )
+
+        invoice.number_local = number
+        invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+        invoice.updated_at = datetime.now(UTC)
+
+        updated = self.invoice_repository.update(invoice_id, invoice)
+        self.session.flush()
+
+        self.audit_service.record(
+            actor_user_id=actor.user_id,
+            actor_role=actor.role,
+            event_type="invoice.marked_ready",
+            entity_type="invoice",
+            entity_id=str(invoice_id),
+            after={
+                "status": updated.status.value,
+                "number_local": updated.number_local,
+            },
+        )
+
+        logger.info(
+            "Faktura oznaczona jako gotowa: invoice_id=%s number=%s",
+            invoice_id,
+            updated.number_local,
+        )
+
+        return updated
+
     # -------------------------------------------------------------------------
     # PRIVATE HELPERS
     # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_payment_method(
+        raw: str | None, *, required: bool = False
+    ) -> PaymentMethod:
+        if not raw or not str(raw).strip():
+            if required:
+                raise InvalidInvoiceError("Sposób płatności jest wymagany.")
+            return PaymentMethod.TRANSFER
+        method = str(raw).strip().lower()
+        try:
+            return PaymentMethod(method)
+        except ValueError as exc:
+            raise InvalidInvoiceError(
+                "Sposób płatności musi być 'cash' (gotówka) lub 'transfer' (przelew)."
+            ) from exc
+
+    @staticmethod
+    def _validate_due_date(
+        issue_date: date, due_date: date | None, *, required: bool = False
+    ) -> None:
+        if due_date is None:
+            if required:
+                raise InvalidInvoiceError("Termin płatności jest wymagany.")
+            return
+        if due_date < issue_date:
+            raise InvalidInvoiceError(
+                "Termin płatności nie może być wcześniejszy niż data wystawienia."
+            )
+        max_due = issue_date + timedelta(days=_MAX_PAYMENT_DUE_DAYS)
+        if due_date > max_due:
+            raise InvalidInvoiceError(
+                f"Termin płatności nie może być późniejszy niż {_MAX_PAYMENT_DUE_DAYS} dni "
+                "od daty wystawienia."
+            )
 
     def _resolve_buyer_snapshot(self, buyer_id: UUID) -> dict:
         contractor = self.contractor_repository.get_by_id(buyer_id)
@@ -514,8 +606,13 @@ class InvoiceService:
         )
         return InvoiceMapper.build_contractor_snapshot(contractor, override)
 
+    def _build_company_snapshot(self) -> dict:
+        if self.settings_service is not None:
+            return self.settings_service.build_company_snapshot()
+        return self._build_company_snapshot_from_env()
+
     @staticmethod
-    def _build_company_snapshot() -> dict:
+    def _build_company_snapshot_from_env() -> dict:
         return {
             "nip": settings.seller_nip,
             "name": settings.seller_name,
@@ -527,12 +624,18 @@ class InvoiceService:
             "country": settings.seller_country,
         }
 
-    @staticmethod
-    def _validate_company_snapshot(company_snapshot: dict) -> None:
+    def _validate_company_snapshot(self, company_snapshot: dict) -> None:
+        if self.settings_service is not None:
+            try:
+                self.settings_service.validate_company_snapshot(company_snapshot)
+            except ValidationError as exc:
+                raise InvalidInvoiceError(str(exc)) from exc
+            return
+
         name = str(company_snapshot.get("name") or "").strip()
         nip = str(company_snapshot.get("nip") or "").strip()
         if not name or not nip:
             raise InvalidInvoiceError(
-                "Brak kompletnych danych firmy w ustawieniach: wymagane seller_name i seller_nip."
+                SettingsService.COMPANY_SETTINGS_MSG
             )
 

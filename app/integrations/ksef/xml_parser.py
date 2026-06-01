@@ -1,7 +1,7 @@
 """Parser FA(3) XML → słownik domenowy faktury zakupowej.
 
 Używany przy imporcie faktur odebranych z KSeF.
-Namespace: http://crd.gov.pl/wzor/2023/06/29/9781/
+Namespace: http://crd.gov.pl/wzor/2025/06/25/13775/
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-_NS = "http://crd.gov.pl/wzor/2023/06/29/9781/"
+_NS = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 _NS_MAP = {"fa": _NS}
 
 
@@ -44,26 +44,63 @@ def _findall(el: etree._Element, xpath: str) -> list[etree._Element]:
     return el.findall(xpath, _NS_MAP)
 
 
+def _local_name(el: etree._Element) -> str:
+    return etree.QName(el).localname
+
+
+def _first_child_by_local_name(el: etree._Element, *names: str) -> etree._Element | None:
+    wanted = set(names)
+    for child in el:
+        if _local_name(child) in wanted:
+            return child
+    return None
+
+
+def _first_text_by_local_name(el: etree._Element, *names: str) -> str:
+    child = _first_child_by_local_name(el, *names)
+    return _txt(child)
+
+
 def _parse_address(subject_el: etree._Element) -> dict[str, str]:
     addr = _find(subject_el, "fa:Adres")
     if addr is None:
+        addr = _first_child_by_local_name(subject_el, "Adres")
+    if addr is None:
         return {}
     return {
-        "street": _txt(_find(addr, "fa:AdresL1")),
+        "street": _txt(_find(addr, "fa:AdresL1")) or _first_text_by_local_name(addr, "AdresL1", "Ulica"),
         "building_no": "",
-        "apartment_no": _txt(_find(addr, "fa:AdresL2")),
-        "postal_code": _txt(_find(addr, "fa:KodPocztowy")),
-        "city": _txt(_find(addr, "fa:Miejscowosc")),
-        "country": _txt(_find(addr, "fa:KodKraju")) or "PL",
+        "apartment_no": _txt(_find(addr, "fa:AdresL2")) or _first_text_by_local_name(addr, "AdresL2", "NrLokalu"),
+        "postal_code": _txt(_find(addr, "fa:KodPocztowy")) or _first_text_by_local_name(addr, "KodPocztowy"),
+        "city": _txt(_find(addr, "fa:Miejscowosc")) or _first_text_by_local_name(addr, "Miejscowosc"),
+        "country": _txt(_find(addr, "fa:KodKraju")) or _first_text_by_local_name(addr, "KodKraju") or "PL",
     }
 
 
 def _parse_subject(subject_el: etree._Element) -> dict[str, Any]:
-    """Parsuje Podmiot1/Sprzedawca lub Podmiot2/Nabywca → snapshot."""
+    """Parsuje Podmiot1/Podmiot2 (DaneIdentyfikacyjne lub legacy wrapper) → snapshot."""
+    identity_el = _find(subject_el, "fa:DaneIdentyfikacyjne")
+    if identity_el is None:
+        identity_el = _first_child_by_local_name(subject_el, "DaneIdentyfikacyjne")
+    if identity_el is None:
+        identity_el = subject_el
+
+    address_el = subject_el
+    if _find(subject_el, "fa:Adres") is None and _first_child_by_local_name(subject_el, "Adres") is None:
+        parent = subject_el.getparent()
+        if parent is not None:
+            address_el = parent
+
     return {
-        "nip": _txt(_find(subject_el, "fa:NIP")),
-        "name": _txt(_find(subject_el, "fa:Nazwa")),
-        **_parse_address(subject_el),
+        "nip": (
+            _txt(_find(identity_el, "fa:NIP"))
+            or _first_text_by_local_name(identity_el, "NIP", "NrVatUE", "IdentyfikatorPodatkowy")
+        ),
+        "name": (
+            _txt(_find(identity_el, "fa:Nazwa"))
+            or _first_text_by_local_name(identity_el, "Nazwa", "NazwaPodmiotu", "PelnaNazwa")
+        ),
+        **_parse_address(address_el),
     }
 
 
@@ -108,6 +145,18 @@ def _parse_xml_root(xml_bytes: bytes) -> etree._Element:
         raise ValueError(f"Błędny XML FA(3): {exc}") from exc
 
 
+def _resolve_party_element(podmiot_el: etree._Element) -> etree._Element:
+    """Zwraca element z danymi identyfikacyjnymi (FA(3) prod. lub legacy wrapper)."""
+    dane = podmiot_el.find(f".//{{{_NS}}}DaneIdentyfikacyjne")
+    if dane is not None:
+        return dane
+    for wrapper_tag in ("Sprzedawca", "Nabywca"):
+        wrapper = _first_child_by_local_name(podmiot_el, wrapper_tag)
+        if wrapper is not None:
+            return wrapper
+    return podmiot_el
+
+
 def _extract_required_structure(
     root: etree._Element,
 ) -> tuple[etree._Element, etree._Element, etree._Element]:
@@ -120,11 +169,8 @@ def _extract_required_structure(
     if podmiot1 is None or podmiot2 is None:
         raise ValueError("Brak elementów Podmiot1/Podmiot2 w dokumencie FA(3)")
 
-    sprzedawca_el = _find(podmiot1, "fa:Sprzedawca")
-    nabywca_el = _find(podmiot2, "fa:Nabywca")
-    if sprzedawca_el is None or nabywca_el is None:
-        raise ValueError("Brak danych sprzedawcy/nabywcy w dokumencie FA(3)")
-
+    sprzedawca_el = _resolve_party_element(podmiot1)
+    nabywca_el = _resolve_party_element(podmiot2)
     return fa_el, sprzedawca_el, nabywca_el
 
 
@@ -164,6 +210,38 @@ def _extract_exchange_rate(fa_el: etree._Element) -> tuple[Decimal | None, str |
     exchange_rate = _dec(_find(kurs_el, "fa:KursWalutyZ")) or None
     exchange_rate_date = _txt(_find(kurs_el, "fa:DataKursuWaluty")) or None
     return exchange_rate, exchange_rate_date
+
+
+def _extract_payment_method(fa_el: etree._Element) -> str | None:
+    for element in fa_el.iter():
+        if _local_name(element) != "FormaPlatnosci":
+            continue
+        code = (_txt(element) or "").strip()
+        if code == "1":
+            return "cash"
+        if code == "6":
+            return "transfer"
+    return None
+
+
+def _extract_due_date(fa_el: etree._Element) -> str | None:
+    direct = (
+        _txt(_find(fa_el, "fa:TerminPlatnosci"))
+        or _txt(_find(fa_el, "fa:DataPlatnosci"))
+    )
+    if direct:
+        return direct
+
+    for element in fa_el.iter():
+        if _local_name(element) not in {"Platnosc", "WarunkiPlatnosci", "TerminyPlatnosci"}:
+            continue
+        for candidate in element.iter():
+            if _local_name(candidate) in {"Termin", "TerminPlatnosci", "DataPlatnosci"}:
+                value = _txt(candidate)
+                if value:
+                    return value
+
+    return None
 
 
 def _extract_invoice_type(fa_el: etree._Element) -> str:
@@ -208,6 +286,8 @@ def _build_parsed_invoice_payload(
         **_extract_annotations(fa_el),
         "exchange_rate": exchange_rate,
         "exchange_rate_date": exchange_rate_date,
+        "due_date": _extract_due_date(fa_el),
+        "payment_method": _extract_payment_method(fa_el),
     }
 
 

@@ -47,6 +47,8 @@ from app.services.payment_matcher import (
 
 logger = logging.getLogger(__name__)
 
+_INVOICE_CASH_EXTERNAL_PREFIX = "invoice-cash:"
+
 
 # Re-eksport stałej i helperów CSV dla zachowania kompatybilności wstecznej.
 # Logika znajduje się w ``app.services.payment_csv_parser``.
@@ -211,6 +213,166 @@ class PaymentService:
             return "manual_review"
 
         return None
+
+    # -------------------------------------------------------------------------
+    # Wpłata z formularza faktury (gotówka / wpłata ręczna)
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _invoice_cash_external_id(invoice_id: UUID) -> str:
+        return f"{_INVOICE_CASH_EXTERNAL_PREFIX}{invoice_id}"
+
+    def get_invoice_form_payment_amount(self, invoice_id: UUID) -> Decimal:
+        """Kwota wpłaty zapisana z formularza faktury (alokacja invoice-cash)."""
+        _tx, alloc = self._find_invoice_form_allocation(invoice_id)
+        if alloc is None:
+            return Decimal("0")
+        return Decimal(str(alloc.allocated_amount)).quantize(Decimal("0.01"))
+
+    def _find_invoice_form_allocation(
+        self, invoice_id: UUID
+    ) -> tuple[BankTransactionORM | None, PaymentAllocationORM | None]:
+        external_id = self._invoice_cash_external_id(invoice_id)
+        tx = self._tx_repo.get_by_external_id(external_id)
+        if tx is None:
+            return None, None
+        for alloc in self._alloc_repo.list_for_invoice(invoice_id):
+            if alloc.transaction_id == tx.id:
+                return tx, alloc
+        return tx, None
+
+    def set_invoice_form_payment(
+        self,
+        invoice_id: UUID,
+        amount: Decimal,
+        actor: AuthenticatedUser,
+        *,
+        payment_date: date | None = None,
+    ) -> PaymentAllocationORM | None:
+        """Ustawia / aktualizuje / usuwa wpłatę z formularza faktury sprzedaży."""
+        amount = Decimal(str(amount)).quantize(Decimal("0.01"))
+
+        inv_orm = self._inv_repo.get_orm_by_id(invoice_id)
+        if inv_orm is None:
+            raise NotFoundError("Faktura nie została znaleziona.")
+
+        if (inv_orm.direction or "sale").strip().lower() != "sale":
+            raise ValueError("Wpłata z formularza jest dostępna tylko dla faktur sprzedaży.")
+
+        gross = Decimal(str(inv_orm.totals_json.get("total_gross", 0)))
+        tx, form_alloc = self._find_invoice_form_allocation(invoice_id)
+        form_current = (
+            Decimal(str(form_alloc.allocated_amount))
+            if form_alloc is not None
+            else Decimal("0")
+        )
+        total_allocated = self._alloc_repo.sum_allocated_for_invoice(invoice_id)
+        other_allocated = total_allocated - form_current
+
+        if amount > gross - other_allocated:
+            raise ValueError(
+                f"Kwota wpłaty ({amount}) przekracza pozostałą do zapłaty "
+                f"({gross - other_allocated})."
+            )
+
+        if amount <= 0:
+            if form_alloc is not None:
+                self.reverse_allocation(form_alloc.id, actor)
+            return None
+
+        if form_alloc is not None and form_current == amount:
+            return form_alloc
+
+        if form_alloc is not None:
+            self.reverse_allocation(form_alloc.id, actor)
+            self._session.flush()
+            tx, form_alloc = self._find_invoice_form_allocation(invoice_id)
+
+        if tx is None:
+            return self._create_invoice_form_payment(
+                invoice_id=invoice_id,
+                inv_orm=inv_orm,
+                amount=amount,
+                actor=actor,
+                payment_date=payment_date,
+            )
+
+        tx_orm = self._tx_repo.get_by_id(tx.id)
+        if tx_orm is None:
+            raise NotFoundError("Transakcja wpłaty nie została znaleziona.")
+        tx_orm.amount = amount
+        tx_orm.remaining_amount = amount
+        tx_orm.match_status = PaymentMatchStatus.UNMATCHED.value
+        self._session.flush()
+
+        alloc = self._do_allocate(
+            tx_orm=tx_orm,
+            invoice_id=invoice_id,
+            amount=amount,
+            method=PaymentMatchMethod.CASH,
+            score=None,
+            reasons=["invoice_form_payment"],
+            actor=actor,
+        )
+        self._session.flush()
+        return alloc
+
+    def record_invoice_initial_payment(
+        self,
+        invoice_id: UUID,
+        amount: Decimal,
+        actor: AuthenticatedUser,
+        *,
+        payment_date: date | None = None,
+    ) -> PaymentAllocationORM | None:
+        """Rejestruje wpłatę podaną przy tworzeniu faktury sprzedaży."""
+        if amount <= 0:
+            return None
+        return self.set_invoice_form_payment(
+            invoice_id, amount, actor, payment_date=payment_date
+        )
+
+    def _create_invoice_form_payment(
+        self,
+        *,
+        invoice_id: UUID,
+        inv_orm: InvoiceORM,
+        amount: Decimal,
+        actor: AuthenticatedUser,
+        payment_date: date | None,
+    ) -> PaymentAllocationORM:
+        tx_date = payment_date or inv_orm.issue_date
+        buyer_name = (inv_orm.buyer_snapshot_json or {}).get("name")
+        invoice_number = inv_orm.number_local or str(invoice_id)
+
+        tx_orm = BankTransactionORM(
+            id=uuid.uuid4(),
+            external_id=self._invoice_cash_external_id(invoice_id),
+            transaction_date=tx_date,
+            value_date=tx_date,
+            amount=amount,
+            currency=inv_orm.currency or "PLN",
+            counterparty_name=buyer_name,
+            title=f"Wpłata przy wystawieniu faktury {invoice_number}",
+            match_status=PaymentMatchStatus.UNMATCHED.value,
+            remaining_amount=amount,
+            source_file="invoice_initial_payment",
+            imported_by=to_uuid(actor.user_id),
+            imported_at=datetime.now(UTC),
+        )
+        self._tx_repo.add(tx_orm)
+
+        alloc = self._do_allocate(
+            tx_orm=tx_orm,
+            invoice_id=invoice_id,
+            amount=amount,
+            method=PaymentMatchMethod.CASH,
+            score=None,
+            reasons=["invoice_initial_payment"],
+            actor=actor,
+        )
+        self._session.flush()
+        return alloc
 
     # -------------------------------------------------------------------------
     # Ręczna alokacja

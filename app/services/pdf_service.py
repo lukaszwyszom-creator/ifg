@@ -8,6 +8,7 @@ Dwa publiczne wywołania:
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation
 from html import escape
 
 from app.schemas.invoice import InvoiceResponse
@@ -20,6 +21,17 @@ _STATUS_LABELS: dict[str, str] = {
     "sending": "Wysyłanie",
     "accepted": "Zatwierdzona",
     "rejected": "Odrzucona",
+}
+
+_PAYMENT_STATUS_LABELS: dict[str, str] = {
+    "unpaid": "Nieopłacona",
+    "partially_paid": "Częściowo opłacona",
+    "paid": "Opłacona",
+}
+
+_PAYMENT_METHOD_LABELS: dict[str, str] = {
+    "cash": "Gotówka",
+    "transfer": "Przelew",
 }
 
 
@@ -35,6 +47,63 @@ def _ksef_section(invoice: InvoiceResponse) -> str:
 </div>"""
 
 
+def _as_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _money(value: Decimal | None, currency: str) -> str:
+    if value is None:
+        return "—"
+    return f"{value.quantize(Decimal('0.01'))} {currency}"
+
+
+def _payment_section(invoice: InvoiceResponse) -> str:
+    total_gross = _as_decimal(invoice.total_gross)
+    remaining = _as_decimal(invoice.remaining_amount)
+    paid = None
+    if total_gross is not None and remaining is not None:
+        paid = total_gross - remaining
+        if paid < Decimal("0"):
+            paid = Decimal("0")
+
+    status_label = _PAYMENT_STATUS_LABELS.get(invoice.payment_status, invoice.payment_status)
+    method_label = _PAYMENT_METHOD_LABELS.get(invoice.payment_method, invoice.payment_method)
+    remaining_class = "payment-paid" if remaining == Decimal("0") else "payment-due"
+    due_date = _esc(invoice.due_date) if invoice.due_date else "—"
+
+    return f"""
+<div class="payment-box">
+  <h3>Płatność</h3>
+  <div class="payment-grid">
+    <div>
+      <span class="payment-label">Status</span>
+      <strong>{_esc(status_label)}</strong>
+    </div>
+    <div>
+      <span class="payment-label">Sposób płatności</span>
+      <strong>{_esc(method_label)}</strong>
+    </div>
+    <div>
+      <span class="payment-label">Termin</span>
+      <strong>{due_date}</strong>
+    </div>
+    <div>
+      <span class="payment-label">Zapłacono</span>
+      <strong>{_esc(_money(paid, invoice.currency))}</strong>
+    </div>
+    <div>
+      <span class="payment-label">Pozostało</span>
+      <strong class="{remaining_class}">{_esc(_money(remaining, invoice.currency))}</strong>
+    </div>
+  </div>
+</div>"""
+
+
 def render_invoice_html(invoice: InvoiceResponse) -> str:
     seller = invoice.seller_snapshot
     buyer = invoice.buyer_snapshot
@@ -43,9 +112,14 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
 
     rows = ""
     for item in invoice.items:
+        isbn_line = (
+            f'<div style="color:#666666;font-size:11px;margin-top:2px;">ISBN: {_esc(item.isbn)}</div>'
+            if item.isbn
+            else ""
+        )
         rows += f"""
         <tr>
-          <td>{_esc(item.name)}</td>
+          <td>{_esc(item.name)}{isbn_line}</td>
           <td class="num">{_esc(item.quantity)}</td>
           <td>{_esc(item.unit)}</td>
           <td class="num">{_esc(item.unit_price_net)}</td>
@@ -84,6 +158,18 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
   .totals {{ text-align: right; }}
   .totals p {{ margin-bottom: 4px; }}
   .totals .total-gross {{ font-size: 18px; font-weight: 700; margin-top: 8px; }}
+  .payment-box {{
+    margin: 18px 0 20px;
+    padding: 12px 14px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fafafa;
+  }}
+  .payment-box h3 {{ font-size: 12px; text-transform: uppercase; color: #555; margin-bottom: 10px; }}
+  .payment-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
+  .payment-label {{ display: block; color: #777; font-size: 11px; margin-bottom: 3px; }}
+  .payment-paid {{ color: #155724; }}
+  .payment-due {{ color: #721c24; }}
   .badge {{
     display: inline-block;
     padding: 2px 10px;
@@ -165,6 +251,8 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
   <p>Razem VAT: <strong>{_esc(invoice.total_vat)} {_esc(invoice.currency)}</strong></p>
   <p class="total-gross">Do zapłaty: {_esc(invoice.total_gross)} {_esc(invoice.currency)}</p>
 </div>
+
+{_payment_section(invoice)}
 
 {_ksef_section(invoice)}
 

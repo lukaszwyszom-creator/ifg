@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 
 from zeep import Client
 from zeep.transports import Transport
 
 from app.core.exceptions import ExternalServiceError
+
+logger = logging.getLogger(__name__)
 
 
 class RegonClient:
@@ -25,9 +28,15 @@ class RegonClient:
 
     def lookup_by_nip(self, nip: str) -> dict | None:
         if not self.api_key or self.api_key == "change-me":
-            raise ExternalServiceError("REGON nie jest skonfigurowany. Ustaw prawidlowy REGON_API_KEY.")
+            return None
 
-        client = Client(wsdl=self._resolve_wsdl(), transport=Transport(timeout=self.timeout_seconds))
+        wsdl_url = self._resolve_wsdl()
+        try:
+            client = Client(wsdl=wsdl_url, transport=Transport(timeout=self.timeout_seconds))
+        except Exception as exc:
+            logger.error("REGON: blad ladowania WSDL [%s]: %s", wsdl_url, type(exc).__name__)
+            raise ExternalServiceError(f"Blad ladowania WSDL REGON: {type(exc).__name__}") from exc
+
         try:
             session_id = client.service.Zaloguj(self.api_key)
             client.transport.session.headers.update({"sid": session_id})

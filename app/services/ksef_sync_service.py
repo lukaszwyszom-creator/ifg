@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings as app_settings
 from app.core.exceptions import AppError
 from app.persistence.repositories.app_settings_repository import AppSettingsRepository
 from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
@@ -35,10 +36,11 @@ class KSeFSyncService:
         self,
         force: bool = False,
         actor_user_id: UUID | None = None,
+        nip: str | None = None,
     ) -> dict:
         state = self.sync_state_repository.mark_running(_SCOPE_PURCHASE_INVOICES)
         try:
-            nip = self._resolve_seller_nip()
+            nip = self._resolve_seller_nip(nip)
             date_from, date_to = self._resolve_sync_window(state.state_json, force=force)
             counts = self.ksef_session_service.sync_received_invoices(
                 nip=nip,
@@ -64,12 +66,16 @@ class KSeFSyncService:
             self.session.flush()
             raise
 
-    def _resolve_seller_nip(self) -> str:
+    def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
+        requested_nip = (requested_nip or "").strip()
+        if requested_nip:
+            return requested_nip
+
         settings = self.settings_repository.get()
-        seller_nip = (settings.seller_nip if settings is not None else "") or ""
+        seller_nip = (settings.seller_nip if settings is not None else None) or app_settings.seller_nip or ""
         seller_nip = seller_nip.strip()
         if not seller_nip:
-            raise AppError("Brak seller_nip w ustawieniach aplikacji. Ustaw NIP sprzedawcy przed synchronizacją KSeF.")
+            raise AppError("Brak NIP właściciela aplikacji w konfiguracji.")
         return seller_nip
 
     @staticmethod

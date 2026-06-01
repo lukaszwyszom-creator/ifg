@@ -25,6 +25,56 @@ router = APIRouter(prefix="/transmissions", tags=["transmissions"])
 _TERMINAL_STATUSES = {TransmissionStatus.SUCCESS, TransmissionStatus.FAILED_PERMANENT}
 
 
+_TRANSMISSION_RESPONSE_FIELDS = (
+    "id",
+    "invoice_id",
+    "channel",
+    "operation_type",
+    "status",
+    "attempt_no",
+    "idempotency_key",
+    "external_reference",
+    "ksef_reference_number",
+    "upo_status",
+    "error_code",
+    "error_message",
+    "started_at",
+    "finished_at",
+    "created_at",
+)
+
+
+def _transmission_to_response(transmission) -> TransmissionResponse:
+    invoice = getattr(transmission, "invoice", None)
+    raw_number = getattr(invoice, "number_local", None) if invoice is not None else None
+    if not isinstance(raw_number, str) or not raw_number.strip():
+        raw_number = _extract_invoice_number_from_xml(getattr(transmission, "xml_content", None))
+    invoice_number_local = raw_number.strip() if isinstance(raw_number, str) and raw_number.strip() else None
+    return TransmissionResponse(
+        **{field: getattr(transmission, field) for field in _TRANSMISSION_RESPONSE_FIELDS},
+        invoice_number_local=invoice_number_local,
+    )
+
+
+def _extract_invoice_number_from_xml(xml_content: bytes | None) -> str | None:
+    """Fallback: numer faktury (P_2) z zapisanego XML transmisji."""
+    if not xml_content:
+        return None
+    try:
+        from lxml import etree
+
+        root = etree.fromstring(xml_content)
+    except Exception:
+        return None
+
+    for element in root.iter():
+        if etree.QName(element).localname == "P_2":
+            text = (element.text or "").strip()
+            if text:
+                return text
+    return None
+
+
 @router.get("/", response_model=TransmissionPageResponse)
 def list_transmissions(
     page: int = 1,
@@ -34,7 +84,7 @@ def list_transmissions(
 ) -> TransmissionPageResponse:
     items, total = transmission_service.list_all(page=page, size=size)
     return TransmissionPageResponse(
-        items=[TransmissionResponse.model_validate(t) for t in items],
+        items=[_transmission_to_response(t) for t in items],
         total=total,
         page=page,
         size=size,
@@ -135,7 +185,7 @@ def get_transmission(
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> TransmissionResponse:
     transmission = transmission_service.get_transmission(transmission_id)
-    return TransmissionResponse.model_validate(transmission)
+    return _transmission_to_response(transmission)
 
 
 @router.get("/invoice/{invoice_id}", response_model=TransmissionListResponse)
@@ -146,7 +196,7 @@ def list_transmissions_for_invoice(
 ) -> TransmissionListResponse:
     transmissions = transmission_service.list_for_invoice(invoice_id)
     return TransmissionListResponse(
-        items=[TransmissionResponse.model_validate(t) for t in transmissions],
+        items=[_transmission_to_response(t) for t in transmissions],
         invoice_id=invoice_id,
     )
 

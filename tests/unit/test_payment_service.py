@@ -146,6 +146,75 @@ class TestCsvParsing:
 
 
 # ---------------------------------------------------------------------------
+# record_invoice_initial_payment
+# ---------------------------------------------------------------------------
+
+class TestRecordInvoiceInitialPayment:
+    def test_records_cash_payment_for_sale_invoice(self, actor, mock_session):
+        inv_id = uuid4()
+        inv = MagicMock(spec=InvoiceORM)
+        inv.id = inv_id
+        inv.direction = "sale"
+        inv.issue_date = date(2026, 4, 5)
+        inv.currency = "PLN"
+        inv.number_local = "FV/1/04/2026"
+        inv.totals_json = {"total_gross": "2460.00"}
+        inv.buyer_snapshot_json = {"name": "Nabywca"}
+        inv.payment_status = InvoicePaymentStatus.UNPAID.value
+
+        tx_repo = MagicMock()
+        tx_repo.get_by_external_id.return_value = None
+        tx_repo.add.side_effect = lambda x: x
+
+        alloc_repo = MagicMock()
+        alloc_repo.add.side_effect = lambda x: x
+        alloc_repo.sum_allocated_for_invoice.return_value = Decimal("1000.00")
+        alloc_repo.sum_allocated_for_transaction.return_value = Decimal("1000.00")
+
+        inv_repo = MagicMock()
+        inv_repo.get_orm_by_id.return_value = inv
+
+        svc = _make_service(
+            session=mock_session,
+            tx_repo=tx_repo,
+            alloc_repo=alloc_repo,
+            inv_repo=inv_repo,
+        )
+
+        alloc = svc.record_invoice_initial_payment(inv_id, Decimal("1000.00"), actor)
+        assert alloc is not None
+        assert alloc.allocated_amount == Decimal("1000.00")
+        assert alloc.match_method == PaymentMatchMethod.CASH.value
+        assert inv.payment_status == InvoicePaymentStatus.PARTIALLY_PAID.value
+
+    def test_rejects_amount_above_gross(self, actor, mock_session):
+        inv_id = uuid4()
+        inv = MagicMock(spec=InvoiceORM)
+        inv.id = inv_id
+        inv.direction = "sale"
+        inv.totals_json = {"total_gross": "100.00"}
+
+        inv_repo = MagicMock()
+        inv_repo.get_orm_by_id.return_value = inv
+
+        alloc_repo = MagicMock()
+        alloc_repo.sum_allocated_for_invoice.return_value = Decimal("0.00")
+
+        svc = _make_service(
+            session=mock_session,
+            alloc_repo=alloc_repo,
+            inv_repo=inv_repo,
+        )
+
+        with pytest.raises(ValueError, match="przekracza"):
+            svc.record_invoice_initial_payment(inv_id, Decimal("150.00"), actor)
+
+    def test_skips_zero_amount(self, actor):
+        svc = _make_service()
+        assert svc.record_invoice_initial_payment(uuid4(), Decimal("0.00"), actor) is None
+
+
+# ---------------------------------------------------------------------------
 # allocate_manual
 # ---------------------------------------------------------------------------
 
