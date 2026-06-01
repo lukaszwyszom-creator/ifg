@@ -1,0 +1,793 @@
+import { useState, useEffect, Fragment } from 'react';
+import { warehouseDocumentsApi } from '../../../api/warehouseDocuments';
+import { warehouseItemsApi } from '../../../api/warehouseItems';
+import styles from '../WarehousePage.module.css';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const STATUS_LABELS = { draft: 'Draft', posted: 'Zaksięgowany', cancelled: 'Anulowany' };
+
+function StatusBadge({ status }) {
+  const cls =
+    status === 'posted'
+      ? styles.badgePosted
+      : status === 'cancelled'
+        ? styles.badgeCancelled
+        : styles.badgeDraft;
+  return <span className={cls}>{STATUS_LABELS[status] ?? status}</span>;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('pl-PL');
+}
+
+function apiErr(err) {
+  return (
+    err?.response?.data?.error?.message ??
+    err?.response?.data?.detail ??
+    'Błąd operacji'
+  );
+}
+
+// ── DocList ───────────────────────────────────────────────────────────────────
+
+function DocList({ onNew, onOpen, refreshKey }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    warehouseDocumentsApi
+      .list({ limit: 200 })
+      .then((r) => setDocs(r.items ?? []))
+      .catch(() => setError('Błąd ładowania dokumentów'))
+      .finally(() => setLoading(false));
+  }, [refreshKey]);
+
+  if (loading) return <p className={styles.emptyMsg}>Ładowanie…</p>;
+  if (error) return <p style={{ color: 'var(--color-error)' }}>{error}</p>;
+
+  return (
+    <div>
+      <div className={styles.catalogToolbar}>
+        <span className={styles.sectionTitle}>Dokumenty magazynowe</span>
+        <button className="btn btn-primary" onClick={onNew}>
+          + Nowy dokument
+        </button>
+      </div>
+
+      {docs.length === 0 ? (
+        <div className={styles.emptyState}>
+          <p className={styles.emptyMsg}>Brak dokumentów magazynowych</p>
+          <button className="btn btn-primary" onClick={onNew}>
+            + Nowy dokument
+          </button>
+        </div>
+      ) : (
+        <table className={styles.catalogTable}>
+          <thead>
+            <tr>
+              <th>Numer</th>
+              <th>Typ</th>
+              <th>Data</th>
+              <th>Opis / Powód</th>
+              <th className={styles.right}>Pozycji</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {docs.map((d) => (
+              <tr
+                key={d.id}
+                style={{ cursor: 'pointer' }}
+                onClick={() => onOpen(d.id)}
+              >
+                <td>
+                  {d.number ?? (
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      — draft —
+                    </span>
+                  )}
+                </td>
+                <td>
+                  <strong>{d.doc_type}</strong>
+                </td>
+                <td>{fmtDate(d.created_at)}</td>
+                <td style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
+                  {d.correction_reason || d.issue_reason || d.notes || '—'}
+                </td>
+                <td className={styles.right}>{d.items?.length ?? '?'}</td>
+                <td>
+                  <StatusBadge status={d.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ── DocForm ───────────────────────────────────────────────────────────────────
+
+let _keySeq = 1;
+const nextKey = () => ++_keySeq;
+const VAT_OPTIONS = ['0', '5', '8', '23'];
+
+const emptyRow = () => ({
+  _key: nextKey(),
+  item_id: '',
+  quantity: '',
+  purchase_unit_price: '',
+  unit_price_net: '',
+  vat_rate: '23',
+  suggested_sale_price: '',
+});
+
+function DocForm({ onSaved, onCancel, initial }) {
+  const isEdit = !!initial;
+  const [docType] = useState(initial?.doc_type ?? 'PZ');
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [correctionReason, setCorrectionReason] = useState(initial?.correction_reason ?? '');
+  const [issueReason, setIssueReason] = useState(initial?.issue_reason ?? '');
+  // WZ z fakturą — currently always false (TODO: spięcie z FV)
+  const [hasInvoice] = useState(!!initial?.source_invoice_id);
+  const [items, setItems] = useState(
+    initial?.items?.length
+      ? initial.items.map((it) => ({
+          _key: nextKey(),
+          item_id: it.item_id,
+          quantity: String(it.quantity),
+          purchase_unit_price: it.purchase_unit_price != null ? String(it.purchase_unit_price) : '',
+          unit_price_net: it.unit_price_net != null ? String(it.unit_price_net) : '',
+          vat_rate: it.vat_rate != null ? String(it.vat_rate) : '23',
+          suggested_sale_price: it.suggested_sale_price != null ? String(it.suggested_sale_price) : '',
+        }))
+      : [emptyRow()]
+  );
+  const [catalog, setCatalog] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    warehouseItemsApi
+      .list()
+      .then((r) => setCatalog((r.items ?? r).filter((ci) => ci.is_active)))
+      .catch(() => {});
+  }, []);
+
+  const catalogMap = Object.fromEntries(catalog.map((ci) => [ci.id, ci]));
+  const warehouseItems = catalog.filter((ci) => ci.is_warehouse_active);
+
+  const addRow = () => setItems((p) => [...p, emptyRow()]);
+  const removeRow = (key) => setItems((p) => p.filter((i) => i._key !== key));
+  const setField = (key, field, val) =>
+    setItems((p) => p.map((i) => (i._key === key ? { ...i, [field]: val } : i)));
+
+  const needsPurchasePrice = (row) => {
+    if (docType === 'PZ') return true;
+    if (docType === 'KK') return row.quantity === '' || Number(row.quantity) >= 0;
+    return false;
+  };
+
+  const validateForm = () => {
+    if (items.length === 0) return 'Dodaj co najmniej jedną pozycję.';
+    for (let i = 0; i < items.length; i++) {
+      const row = items[i];
+      const nr = i + 1;
+      if (!row.item_id) return `Pozycja ${nr}: wybierz towar.`;
+      const qty = Number(row.quantity);
+      if (row.quantity === '' || isNaN(qty) || qty === 0 || !Number.isInteger(qty))
+        return `Pozycja ${nr}: ilość musi być liczbą całkowitą różną od zera.`;
+      if (docType === 'PZ') {
+        const price = Number(row.purchase_unit_price);
+        if (row.purchase_unit_price === '' || isNaN(price) || price < 0)
+          return `Pozycja ${nr}: cena zakupu jest wymagana i musi być >= 0.`;
+        if (row.vat_rate === '' || row.vat_rate == null)
+          return `Pozycja ${nr}: stawka VAT jest wymagana.`;
+        if (row.suggested_sale_price !== '') {
+          const sp = Number(row.suggested_sale_price);
+          if (isNaN(sp) || sp < 0)
+            return `Pozycja ${nr}: cena sugerowana musi być >= 0.`;
+        }
+      }
+      if (docType === 'KK' && qty > 0) {
+        const price = Number(row.purchase_unit_price);
+        if (row.purchase_unit_price === '' || isNaN(price) || price < 0)
+          return `Pozycja ${nr}: cena zakupu wymagana dla dodatniej korekty.`;
+      }
+    }
+    if (docType === 'WZ' && !hasInvoice && !issueReason.trim())
+      return 'WZ bez faktury wymaga podania powodu wydania.';
+    if (docType === 'KK' && !correctionReason.trim())
+      return 'Korekta (KK) wymaga podania powodu korekty.';
+    return null;
+  };
+
+  const handleSave = async () => {
+    const validationError = validateForm();
+    if (validationError) { setError(validationError); return; }
+    setError('');
+    const body = {
+      doc_type: docType,
+      notes: notes.trim() || undefined,
+      correction_reason: docType === 'KK' ? correctionReason.trim() || undefined : undefined,
+      issue_reason: docType === 'WZ' && !hasInvoice ? issueReason.trim() || undefined : undefined,
+      items: items.map((it) => ({
+        item_id: it.item_id,
+        quantity: it.quantity,
+        purchase_unit_price: it.purchase_unit_price || undefined,
+        unit_price_net: it.unit_price_net || undefined,
+        vat_rate:
+          docType === 'PZ'
+            ? it.vat_rate !== '' && it.vat_rate != null
+              ? it.vat_rate
+              : undefined
+            : it.item_id && catalogMap[it.item_id]?.vat_rate != null
+              ? catalogMap[it.item_id].vat_rate
+              : undefined,
+        suggested_sale_price:
+          docType === 'PZ' && it.suggested_sale_price !== ''
+            ? it.suggested_sale_price
+            : undefined,
+      })),
+    };
+    setBusy(true);
+    try {
+      const doc = isEdit
+        ? await warehouseDocumentsApi.update(initial.id, body)
+        : await warehouseDocumentsApi.create(body);
+      onSaved(doc.id);
+    } catch (err) {
+      setError(apiErr(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className={styles.catalogToolbar}>
+        <span className={styles.sectionTitle}>
+          {isEdit ? `Edycja dokumentu (${docType})` : 'Nowy dokument magazynowy'}
+        </span>
+        <button className="btn btn-secondary" onClick={onCancel}>
+          Anuluj
+        </button>
+      </div>
+
+      {/* Nagłówek */}
+      <div className={styles.card}>
+        <div className={styles.formRowMain} style={{ gap: 12 }}>
+          <div style={{ flex: '0 0 160px' }}>
+            <label className={styles.fieldLabel}>Typ dokumentu</label>
+            <select className="input" value={docType} disabled={isEdit}>
+              <option value="PZ">PZ — Przyjęcie</option>
+              <option value="WZ">WZ — Wydanie</option>
+              <option value="KK">KK — Korekta</option>
+            </select>
+          </div>
+
+          <div style={{ flex: '2 1 180px' }}>
+            <label className={styles.fieldLabel}>Opis / Notatki</label>
+            <input
+              className="input"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Opcjonalnie"
+            />
+          </div>
+
+          {docType === 'KK' && (
+            <div style={{ flex: '2 1 200px' }}>
+              <label className={styles.fieldLabel}>Powód korekty *</label>
+              <input
+                className="input"
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.target.value)}
+                placeholder="Wymagane"
+              />
+            </div>
+          )}
+
+          {docType === 'WZ' && (
+            <>
+              <div
+                style={{
+                  flex: '0 0 auto',
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  paddingBottom: 8,
+                }}
+              >
+                <label className={styles.checkboxLabel}>
+                  <input type="checkbox" checked={hasInvoice} disabled readOnly />
+                  WZ z fakturą{' '}
+                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)' }}>
+                    (TODO)
+                  </span>
+                </label>
+              </div>
+
+              {!hasInvoice && (
+                <div style={{ flex: '2 1 200px' }}>
+                  <label className={styles.fieldLabel}>Powód wydania *</label>
+                  <input
+                    className="input"
+                    value={issueReason}
+                    onChange={(e) => setIssueReason(e.target.value)}
+                    placeholder="Podarunek, gratis, próbka…"
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Pozycje */}
+      <div className={styles.card}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+          }}
+        >
+          <span className={styles.sectionTitle}>Pozycje</span>
+          <button className="btn btn-secondary" type="button" onClick={addRow}>
+            + Dodaj pozycję
+          </button>
+        </div>
+
+        <table className={styles.catalogTable}>
+          <thead>
+            <tr>
+              <th>Towar</th>
+              <th>ISBN</th>
+              <th className={styles.right}>Ilość</th>
+              {(docType === 'PZ' || docType === 'KK') && (
+                <th className={styles.right}>Cena zakupu</th>
+              )}
+              {docType === 'PZ' && <th className={styles.right}>VAT %</th>}
+              <th className={styles.right}>Cena suger.</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row) => {
+              const ci = catalogMap[row.item_id];
+              return (
+                <tr key={row._key}>
+                  <td>
+                    <select
+                      className="input"
+                      style={{ minWidth: 160 }}
+                      value={row.item_id}
+                      onChange={(e) => setField(row._key, 'item_id', e.target.value)}
+                    >
+                      <option value="">— wybierz —</option>
+                      {warehouseItems.map((ci) => (
+                        <option key={ci.id} value={ci.id}>
+                          {ci.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td
+                    style={{
+                      color: 'var(--color-text-secondary)',
+                      fontSize: '0.8rem',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {ci?.isbn ?? '—'}
+                  </td>
+                  <td className={styles.right}>
+                    <input
+                      className="input"
+                      style={{ width: 80, textAlign: 'right' }}
+                      type="number"
+                      step="1"
+                      min={docType === 'KK' ? undefined : '1'}
+                      value={row.quantity}
+                      onChange={(e) => setField(row._key, 'quantity', e.target.value)}
+                      placeholder="Ilość"
+                    />
+                  </td>
+                  {(docType === 'PZ' || docType === 'KK') && (
+                    <td className={styles.right}>
+                      {needsPurchasePrice(row) ? (
+                        <input
+                          className="input"
+                          style={{ width: 90, textAlign: 'right' }}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.purchase_unit_price}
+                          onChange={(e) =>
+                            setField(row._key, 'purchase_unit_price', e.target.value)
+                          }
+                          placeholder="0.00"
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            color: 'var(--color-text-secondary)',
+                            fontSize: '0.8rem',
+                          }}
+                        >
+                          n/d
+                        </span>
+                      )}
+                    </td>
+                  )}
+                  {docType === 'PZ' && (
+                    <td className={styles.right}>
+                      <select
+                        className="input"
+                        style={{ width: 72 }}
+                        value={row.vat_rate}
+                        onChange={(e) => setField(row._key, 'vat_rate', e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {VAT_OPTIONS.map((v) => (
+                          <option key={v} value={v}>
+                            {v}%
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  <td className={styles.right}>
+                    {docType === 'PZ' ? (
+                      <input
+                        className="input"
+                        style={{ width: 90, textAlign: 'right' }}
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={row.suggested_sale_price}
+                        onChange={(e) =>
+                          setField(row._key, 'suggested_sale_price', e.target.value)
+                        }
+                        placeholder="opcjonalna"
+                      />
+                    ) : (
+                      <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
+                        {ci?.suggested_sale_price != null
+                          ? `${ci.suggested_sale_price} zł`
+                          : '—'}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={() => removeRow(row._key)}
+                      title="Usuń pozycję"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {error && (
+        <p style={{ color: 'var(--color-error)', marginTop: 8, fontSize: '0.9rem' }}>{error}</p>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={busy}>
+          {busy ? 'Zapisywanie…' : isEdit ? 'Zapisz zmiany' : 'Zapisz draft'}
+        </button>
+        <button className="btn btn-secondary" onClick={onCancel}>
+          Anuluj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── DocDetail ─────────────────────────────────────────────────────────────────
+
+function DocDetail({ docId, onBack, onChanged, onEdit }) {
+  const [doc, setDoc] = useState(null);
+  const [itemById, setItemById] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    Promise.all([
+      warehouseDocumentsApi.getById(docId),
+      warehouseItemsApi.list().catch(() => ({ items: [] })),
+    ])
+      .then(([d, catalog]) => {
+        setDoc(d);
+        const allItems = catalog.items ?? catalog ?? [];
+        setItemById(Object.fromEntries(allItems.map((ci) => [ci.id, ci])));
+      })
+      .catch(() => setError('Błąd ładowania dokumentu'))
+      .finally(() => setLoading(false));
+  }, [docId]);
+
+  const handlePost = async () => {
+    setPosting(true);
+    setError('');
+    try {
+      const updated = await warehouseDocumentsApi.post(docId);
+      setDoc(updated);
+      onChanged?.();
+    } catch (err) {
+      setError(apiErr(err));
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  if (loading) return <p className={styles.emptyMsg}>Ładowanie…</p>;
+  if (error && !doc)
+    return <p style={{ color: 'var(--color-error)', padding: 16 }}>{error}</p>;
+  if (!doc) return null;
+
+  const isDraft = doc.status === 'draft';
+  const isPosted = doc.status === 'posted';
+  const reason = doc.correction_reason || doc.issue_reason || doc.notes;
+
+  const fifoSectionTitle = (docType) =>
+    docType === 'WZ' ? 'Zdjęcie z warstw FIFO' : 'Korekta — zdjęcie z warstw FIFO';
+
+  const handleCancel = async () => {
+    if (!window.confirm('Usunąć (anulować) ten draft? Operacji nie można cofnąć.')) return;
+    setCancelling(true);
+    setError('');
+    try {
+      await warehouseDocumentsApi.cancel(docId);
+      onChanged?.();
+      onBack();
+    } catch (err) {
+      setError(apiErr(err));
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className={styles.catalogToolbar}>
+        <span className={styles.sectionTitle}>
+          {doc.number ? doc.number : '(draft)'} — {doc.doc_type}
+        </span>
+        <button className="btn btn-secondary" onClick={onBack}>
+          ← Lista
+        </button>
+      </div>
+
+      {/* Nagłówek */}
+      <div className={styles.card}>
+        <div className={styles.formRowMain} style={{ gap: 24 }}>
+          <div>
+            <div className={styles.fieldLabel}>Typ</div>
+            <strong>{doc.doc_type}</strong>
+          </div>
+          <div>
+            <div className={styles.fieldLabel}>Status</div>
+            <StatusBadge status={doc.status} />
+          </div>
+          <div>
+            <div className={styles.fieldLabel}>Data utworzenia</div>
+            <span>{fmtDate(doc.created_at)}</span>
+          </div>
+          {doc.posted_at && (
+            <div>
+              <div className={styles.fieldLabel}>Zaksięgowano</div>
+              <span>{fmtDate(doc.posted_at)}</span>
+            </div>
+          )}
+          {reason && (
+            <div style={{ flex: '1 1 200px' }}>
+              <div className={styles.fieldLabel}>Opis / Powód</div>
+              <span>{reason}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pozycje */}
+      <div className={styles.card}>
+        <div className={styles.sectionTitle} style={{ marginBottom: 10 }}>
+          Pozycje ({doc.items?.length ?? 0})
+        </div>
+        <table className={styles.catalogTable}>
+          <thead>
+            <tr>
+              <th>Towar</th>
+              <th className={styles.right}>Ilość</th>
+              <th className={styles.right}>Cena zakupu</th>
+              <th className={styles.right}>Cena sprzedaży</th>
+            </tr>
+          </thead>
+          <tbody>
+            {doc.items?.map((it) => {
+              const ci = itemById[it.item_id];
+              const shortId = String(it.item_id).slice(0, 8) + '…';
+              const qty = Number(it.quantity);
+              const isPositiveKkPosted = isPosted && doc.doc_type === 'KK' && qty > 0;
+              const showFifoMovements =
+                isPosted &&
+                (doc.doc_type === 'WZ' || (doc.doc_type === 'KK' && qty < 0)) &&
+                it.fifo_movements?.length > 0;
+              return (
+                <Fragment key={it.id}>
+                  <tr>
+                    <td>
+                      {ci ? (
+                        <>
+                          <span>{ci.name}</span>
+                          {ci.isbn && (
+                            <div
+                              style={{
+                                fontSize: '0.75rem',
+                                color: 'var(--color-text-secondary)',
+                                marginTop: 2,
+                              }}
+                            >
+                              ISBN: {ci.isbn}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span
+                          style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}
+                          title={it.item_id}
+                        >
+                          {shortId}
+                        </span>
+                      )}
+                    </td>
+                    <td className={styles.right}>{it.quantity}</td>
+                    <td className={styles.right}>{it.purchase_unit_price ?? '—'}</td>
+                    <td className={styles.right}>{it.unit_price_net ?? '—'}</td>
+                  </tr>
+                  {showFifoMovements && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}>
+                        <div
+                          style={{
+                            fontSize: '0.78rem',
+                            color: 'var(--color-text-secondary)',
+                            fontWeight: 600,
+                            marginBottom: 4,
+                          }}
+                        >
+                          {fifoSectionTitle(doc.doc_type)}
+                        </div>
+                        {it.fifo_movements.map((mv, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              fontSize: '0.78rem',
+                              color: 'var(--color-text-secondary)',
+                              marginBottom: idx < it.fifo_movements.length - 1 ? 4 : 0,
+                            }}
+                          >
+                            Dokument źródłowy:{' '}
+                            <span style={{ color: 'var(--color-text-primary)' }}>
+                              {mv.source_document_number ?? '—'}
+                            </span>
+                            {' · '}
+                            Data dokumentu:{' '}
+                            <span style={{ color: 'var(--color-text-primary)' }}>
+                              {mv.source_document_date ? fmtDate(mv.source_document_date) : '—'}
+                            </span>
+                            {' · '}
+                            Ilość zdjęta:{' '}
+                            <span style={{ color: 'var(--color-text-primary)' }}>{mv.quantity_consumed}</span>
+                            {' · '}
+                            Cena netto warstwy:{' '}
+                            <span style={{ color: 'var(--color-text-primary)' }}>
+                              {mv.unit_price_net} zł
+                            </span>
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+                  {isPositiveKkPosted && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                          Korekta dodatnia tworzy nową warstwę magazynową.
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {error && (
+        <p style={{ color: 'var(--color-error)', marginTop: 8, fontSize: '0.9rem' }}>{error}</p>
+      )}
+
+      {isDraft && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button className="btn btn-primary" onClick={handlePost} disabled={posting || cancelling}>
+            {posting ? 'Księgowanie…' : '✓ Zaksięguj'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => onEdit?.(doc)}
+            disabled={posting || cancelling}
+          >
+            Edytuj
+          </button>
+          <button
+            className="btn btn-ghost"
+            style={{ color: 'var(--color-error)' }}
+            onClick={handleCancel}
+            disabled={posting || cancelling}
+          >
+            {cancelling ? 'Usuwanie…' : 'Usuń draft'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DocumentsTab — zarządza widokiem list/form/detail ─────────────────────────
+
+export default function DocumentsTab() {
+  const [view, setView] = useState({ type: 'list' });
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  return (
+    <>
+      {view.type === 'list' && (
+        <DocList
+          onNew={() => setView({ type: 'form' })}
+          onOpen={(id) => setView({ type: 'detail', id })}
+          refreshKey={refreshKey}
+        />
+      )}
+      {view.type === 'form' && (
+        <DocForm
+          onSaved={(id) => setView({ type: 'detail', id })}
+          onCancel={() => setView({ type: 'list' })}
+        />
+      )}
+      {view.type === 'edit' && (
+        <DocForm
+          initial={view.doc}
+          onSaved={(id) => { setRefreshKey((k) => k + 1); setView({ type: 'detail', id }); }}
+          onCancel={() => setView({ type: 'detail', id: view.doc.id })}
+        />
+      )}
+      {view.type === 'detail' && (
+        <DocDetail
+          docId={view.id}
+          onBack={() => setView({ type: 'list' })}
+          onChanged={() => setRefreshKey((k) => k + 1)}
+          onEdit={(doc) => setView({ type: 'edit', doc })}
+        />
+      )}
+    </>
+  );
+}

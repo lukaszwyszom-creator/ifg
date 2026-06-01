@@ -4,38 +4,46 @@ let statusInFlightPromise = null;
 let statusDebouncedPromise = null;
 let statusRequestId = 0;
 let statusMutationVersion = 0;
+let statusInFlightNip = null;
+let statusDebouncedNip = null;
 
-function fetchStatusNow() {
-  if (statusInFlightPromise) {
+function fetchStatusNow(nip = null) {
+  const normalizedNip = nip || null;
+  if (statusInFlightPromise && statusInFlightNip === normalizedNip) {
     return statusInFlightPromise;
   }
 
+  statusInFlightNip = normalizedNip;
   statusInFlightPromise = client
-    .get('/ksef/status')
+    .get('/ksef/status', { params: normalizedNip ? { nip: normalizedNip } : {} })
     .then((r) => r.data)
     .finally(() => {
       statusInFlightPromise = null;
+      statusInFlightNip = null;
     });
 
   return statusInFlightPromise;
 }
 
-function getStatusDebounced() {
-  if (statusInFlightPromise) {
+function getStatusDebounced(nip = null) {
+  const normalizedNip = nip || null;
+  if (statusInFlightPromise && statusInFlightNip === normalizedNip) {
     return statusInFlightPromise;
   }
 
-  if (statusDebouncedPromise) {
+  if (statusDebouncedPromise && statusDebouncedNip === normalizedNip) {
     return statusDebouncedPromise;
   }
 
+  statusDebouncedNip = normalizedNip;
   statusDebouncedPromise = new Promise((resolve, reject) => {
     window.setTimeout(() => {
-      fetchStatusNow()
+      fetchStatusNow(normalizedNip)
         .then(resolve)
         .catch(reject)
         .finally(() => {
           statusDebouncedPromise = null;
+          statusDebouncedNip = null;
         });
     }, 400);
   });
@@ -47,11 +55,11 @@ function markStatusMutation() {
   statusMutationVersion += 1;
 }
 
-function getStatus() {
+function getStatus(nip = null) {
   const currentRequestId = ++statusRequestId;
   const currentMutationVersion = statusMutationVersion;
 
-  return getStatusDebounced().then((result) => {
+  return getStatusDebounced(nip).then((result) => {
     if (currentRequestId !== statusRequestId) {
       return null;
     }
@@ -86,6 +94,6 @@ export const ksefApi = {
   getPurchaseSyncStatus: () =>
     client.get('/ksef/sync/status').then((r) => r.data),
 
-  syncPurchasesNow: (force = false) =>
-    client.post('/ksef/sync/purchases', { force }).then((r) => r.data),
+  syncPurchasesNow: (force = false, nip = null) =>
+    client.post('/ksef/sync/purchases', { force, nip }).then((r) => r.data),
 };

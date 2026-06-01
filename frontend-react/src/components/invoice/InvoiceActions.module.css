@@ -7,6 +7,12 @@
   min-width: 0;
 }
 
+.wrapStack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
 /* ── Unified KSeF tile ─────────────────────────────────────────────────────── */
 
 .tile {
@@ -84,24 +90,25 @@
   50%       { opacity: 1;   }
 }
 
-/* ── Rejected error popover (overlay, no layout impact) ───────────────────── */
+/* ── Inline error (w obrębie wiersza) ─────────────────────────────────────── */
 
-.errorPopover {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  right: 0;
-  max-width: 360px;
-  padding: 10px 12px;
-  border-radius: 8px;
+.inlineError {
+  max-width: 100%;
+  padding: 4px 6px;
+  border-radius: 6px;
   border: 1px solid rgba(194, 0, 0, 0.45);
-  background: rgba(28, 10, 10, 0.96);
+  background: rgba(28, 10, 10, 0.92);
   color: #ffdada;
-  font-size: 0.74rem;
-  line-height: 1.35;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.68rem;
+  line-height: 1.25;
   white-space: normal;
   word-break: break-word;
+}
+
+.inlineHint {
+  border-color: rgba(214, 170, 85, 0.45);
+  background: rgba(28, 22, 10, 0.92);
+  color: #ffe8b8;
 }
 
 /* ── Mobile ────────────────────────────────────────────────────────────────── */
@@ -117,10 +124,8 @@
     justify-content: center;
   }
 
-  .errorPopover {
-    left: 0;
-    right: auto;
-    max-width: min(360px, calc(100vw - 48px));
+  .inlineError {
+    font-size: 0.66rem;
   }
 }
 

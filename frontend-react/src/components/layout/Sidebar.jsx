@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { to: '/invoices', label: 'Faktury sprzedaży', icon: '📄' },
   { to: '/dashboard', label: 'Sprzedaż / Zakup', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
-  { to: '/stock', label: 'Magazyn', icon: '📦' },
+  { to: '/warehouse', label: 'Magazyn', icon: '📦' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {
@@ -39,6 +39,16 @@ export default function Sidebar({ open = false, onClose }) {
       <div className={styles.logo}>
         <img src={logo} alt="IFG" className={styles.logoImg} />
         <span className={styles.logoText}>Imperium Faktur G</span>
+      </div>
+
+      <div className={styles.sellerInfo}>
+        <span className={styles.sellerBrand}>IKONA</span>
+        <span className={styles.sellerLine}>Małgorzata Katarzyna</span>
+        <span className={styles.sellerLine}>Krzyżanowska-Witkowska</span>
+        <span className={styles.sellerLine}>ul. Kossaka 72</span>
+        <span className={styles.sellerLine}>85-307 Bydgoszcz</span>
+        <span className={styles.sellerMeta}>NIP 9670402857</span>
+        <span className={styles.sellerMeta}>REGON 366321403</span>
       </div>
 
       <nav className={styles.nav}>

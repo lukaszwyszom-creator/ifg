@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import JSZip from 'jszip';
 import { invoicesApi } from '../../api/invoices';
 import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceActions from './InvoiceActions';
@@ -161,6 +162,9 @@ export default function InvoiceCardList({
   emptyMsg = 'Brak faktur',
 }) {
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const contractorHeader = direction === 'purchase' ? 'Sprzedawca' : 'Nabywca';
 
   const preparedItems = React.useMemo(() => {
@@ -234,6 +238,109 @@ export default function InvoiceCardList({
     return result;
   }, [items]);
 
+  // Intersection: zachowaj tylko zaznaczenia faktur nadal widocznych w items.
+  useEffect(() => {
+    const visibleIds = new Set(items.map((inv) => inv.id));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
+
+  const allVisibleIds = preparedItems.map((e) => e.invoice.id);
+  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(allVisibleIds));
+    }
+  };
+
+  const toggleSelected = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkSave = async () => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const invoices = [...selected]
+      .map((id) => preparedItems.find((e) => e.invoice.id === id)?.invoice)
+      .filter(Boolean);
+    const zip = new JSZip();
+    for (const invoice of invoices) {
+      try {
+        const arrayBuffer = await invoicesApi.getPdf(invoice.id);
+        const rawName = invoice.number_local || invoice.id;
+        const safeName = String(rawName).replace(/[/\\:*?"<>|]/g, '_');
+        zip.file(`${safeName}.pdf`, arrayBuffer);
+      } catch (err) {
+        console.error('Błąd pobierania PDF:', err);
+      }
+    }
+    try {
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const today = new Date().toISOString().slice(0, 10);
+      a.download = `faktury-zakupowe-${today}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) {
+      console.error('Błąd tworzenia ZIP:', err);
+    }
+    setBulkBusy(false);
+  };
+
+  const handleBulkPrint = async () => {
+    setBulkBusy(true);
+    const invoices = [...selected]
+      .map((id) => preparedItems.find((e) => e.invoice.id === id)?.invoice)
+      .filter(Boolean);
+    // Otwieramy okna synchronicznie (w kontekście user-gesture) zanim pojawi się pierwszy await,
+    // co pozwala uniknąć blokowania popupów przez przeglądarkę.
+    const windows = invoices.map(() => {
+      const w = window.open('about:blank', '_blank');
+      if (w) {
+        w.opener = null;
+        w.document.write('<p>Ładowanie podglądu do druku\u2026</p>');
+        w.document.close();
+      }
+      return w;
+    });
+    await Promise.allSettled(
+      invoices.map(async (invoice, i) => {
+        const win = windows[i];
+        try {
+          const html = await invoicesApi.getPreview(invoice.id);
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          if (win) {
+            win.addEventListener('load', () => {
+              try { win.print(); } catch { /* ignoruj błąd print */ }
+              setTimeout(() => URL.revokeObjectURL(url), 60000);
+            }, { once: true });
+            win.location.href = url;
+          } else {
+            URL.revokeObjectURL(url);
+          }
+        } catch (err) {
+          console.error('Błąd drukowania faktury:', err);
+          if (win) win.close();
+        }
+      }),
+    );
+    setBulkBusy(false);
+  };
+
   const getPaymentTermLabel = (invoice) => {
     const raw =
       invoice.payment_terms_days ??
@@ -277,6 +384,40 @@ export default function InvoiceCardList({
     }
   };
 
+  const handleOpenPreview = async (e, invoice) => {
+    e.stopPropagation();
+    setPreviewLoadingId(invoice.id);
+    const previewWindow = window.open('about:blank', '_blank');
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.document.write('<p>Ładowanie podglądu...</p>');
+      previewWindow.document.close();
+    }
+
+    try {
+      const html = await invoicesApi.getPreview(invoice.id);
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+
+      if (previewWindow) {
+        previewWindow.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Błąd podglądu faktury:', err);
+      if (previewWindow) {
+        previewWindow.document.open();
+        previewWindow.document.write('<p>Nie udało się otworzyć podglądu faktury.</p>');
+        previewWindow.document.close();
+      }
+    } finally {
+      setPreviewLoadingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className={styles.container}>
@@ -296,8 +437,41 @@ export default function InvoiceCardList({
   }
 
   return (
-    <div className={`${styles.container} ${showKsefStatus ? '' : styles.noKsef}`}>
+    <div className={`${styles.container} ${showKsefStatus ? '' : styles.noKsef} ${direction === 'purchase' ? styles.withCheckbox : ''}`}>
+      {direction === 'purchase' && selected.size > 0 && (
+        <div className={styles.bulkBar}>
+          <span className={styles.bulkCount}>Zaznaczono: {selected.size}</span>
+          <button
+            className="btn btn-sm"
+            onClick={handleBulkPrint}
+            disabled={bulkBusy}
+            title="Otwórz podgląd zaznaczonych faktur do druku"
+          >
+            {bulkBusy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Drukuj zaznaczone'}
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={handleBulkSave}
+            disabled={bulkBusy}
+            title="Pobierz PDF zaznaczonych faktur"
+          >
+            Zapisz zaznaczone
+          </button>
+        </div>
+      )}
       <div className={`${styles.headerRow} ${styles.invoiceGrid}`}>
+        {direction === 'purchase' && (
+          <div className={styles.invoiceCellCheck}>
+            <input
+              type="checkbox"
+              disabled={preparedItems.length === 0}
+              checked={allSelected}
+              ref={(el) => { if (el) el.indeterminate = someSelected; }}
+              onChange={handleSelectAll}
+              aria-label="Zaznacz wszystkie faktury zakupowe"
+            />
+          </div>
+        )}
         <div className={`${styles.headerCell} ${styles.invoiceCellNumber}`}>Numer</div>
         <div className={`${styles.headerCell} ${styles.invoiceCellDate}`}>Data</div>
         <div className={`${styles.headerCell} ${styles.invoiceCellBuyer}`}>{contractorHeader}</div>
@@ -337,6 +511,16 @@ export default function InvoiceCardList({
                   }
                 }}
               >
+                {direction === 'purchase' && (
+                  <div className={styles.invoiceCellCheck} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(invoice.id)}
+                      onChange={() => toggleSelected(invoice.id)}
+                      aria-label={`Zaznacz fakturę ${item.displayNumber}`}
+                    />
+                  </div>
+                )}
                 <div className={`${styles.cell} ${styles.invoiceCellNumber}`}>
                   <span className={styles.label}>Numer</span>
                   <span className={styles.value} title={`Źródło numeru: ${item.numberSource}`}>
@@ -401,7 +585,10 @@ export default function InvoiceCardList({
                 </div>
 
                 {showKsefStatus && (
-                  <div className={`${styles.cell} ${styles.invoiceCellKsef} ${styles.ksefCell}`}>
+                  <div
+                    className={`${styles.cell} ${styles.invoiceCellKsef} ${styles.ksefCell}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <span className={styles.label}>Status KSeF</span>
                     <InvoiceActions invoice={invoice} onRefresh={onRefresh} />
                   </div>
@@ -409,18 +596,32 @@ export default function InvoiceCardList({
 
                 <div className={`${styles.cell} ${styles.invoiceCellPdf} ${styles.pdfCell}`}>
                   <span className={styles.label}>PDF</span>
-                  <button
-                    className={`btn btn-sm ${styles.pdfButton}`}
-                    disabled={pdfLoadingId === invoice.id}
-                    onClick={(e) => handleDownloadPdf(e, invoice)}
-                    title="Pobierz PDF"
-                  >
-                    {pdfLoadingId === invoice.id ? (
-                      <span className="spinner" style={{ width: 12, height: 12 }} />
-                    ) : (
-                      'PDF ↓'
-                    )}
-                  </button>
+                  <div className={styles.pdfActions}>
+                    <button
+                      className={`btn btn-sm ${styles.pdfButton}`}
+                      onClick={(e) => handleOpenPreview(e, invoice)}
+                      disabled={previewLoadingId === invoice.id}
+                      title="Podgląd faktury"
+                    >
+                      {previewLoadingId === invoice.id ? (
+                        <span className="spinner" style={{ width: 12, height: 12 }} />
+                      ) : (
+                        'Podgląd'
+                      )}
+                    </button>
+                    <button
+                      className={`btn btn-sm ${styles.pdfButton}`}
+                      disabled={pdfLoadingId === invoice.id}
+                      onClick={(e) => handleDownloadPdf(e, invoice)}
+                      title="Pobierz PDF"
+                    >
+                      {pdfLoadingId === invoice.id ? (
+                        <span className="spinner" style={{ width: 12, height: 12 }} />
+                      ) : (
+                        'PDF ↓'
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

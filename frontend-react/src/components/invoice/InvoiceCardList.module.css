@@ -1,8 +1,8 @@
 /* InvoiceCardList.module.css */
 
 .container {
-  --invoice-grid-columns: 62px 86px minmax(168px, 1fr) 112px 110px 90px 86px 92px 64px;
-  --invoice-grid-gap: 6px;
+  --invoice-grid-columns: 62px 86px minmax(188px, 1fr) 100px 88px 80px 86px 92px 136px;
+  --invoice-grid-gap: 4px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -13,7 +13,16 @@
 }
 
 .noKsef {
-  --invoice-grid-columns: 62px 86px minmax(212px, 1fr) 112px 110px 90px 86px 64px;
+  --invoice-grid-columns: 62px 86px minmax(232px, 1fr) 100px 88px 80px 86px 136px;
+}
+
+/* Tryb zakupowy: dodaje kolumnę checkboxa (28px) na początku gridu */
+.withCheckbox {
+  --invoice-grid-columns: 28px 62px 86px minmax(188px, 1fr) 100px 88px 80px 86px 92px 136px;
+}
+
+.withCheckbox.noKsef {
+  --invoice-grid-columns: 28px 62px 86px minmax(207px, 1fr) 100px 88px 80px 86px 136px;
 }
 
 .loadingState,
@@ -26,11 +35,36 @@
   border-radius: var(--radius-lg);
 }
 
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+
+.bulkCount {
+  color: var(--color-text-2);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.invoiceCellCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
 .headerRow {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding: 8px 10px;
+  /* padding-inline musi odpowiadać scrollArea(6px) + card(10px) = 16px,
+     żeby grid w nagłówku i grid w wierszach zaczynały się na tej samej osi X */
+  padding: 8px 16px;
   background: var(--color-surface-2);
   border-bottom: 1px solid var(--color-border);
 }
@@ -57,6 +91,19 @@
   justify-self: stretch;
   text-align: center;
 }
+
+.headerRow .invoiceCellGross,
+.headerRow .invoiceCellRemaining,
+.invoiceCellGross,
+.invoiceCellRemaining {
+  text-align: right;
+  justify-self: stretch;
+}
+
+/* Wyrównanie nagłówków do osi treści kolumny */
+.headerRow .invoiceCellBuyer    { text-align: left; }
+.headerRow .invoiceCellGross    { text-align: right; }
+.headerRow .invoiceCellRemaining { text-align: right; }
 
 .scrollArea {
   max-height: min(62vh, 680px);
@@ -198,18 +245,23 @@
 
 /* Column 7: Status KSeF — centered */
 .invoiceCellKsef {
+  display: flex;
   align-items: center;
+  justify-content: center;
   text-align: center;
-  justify-self: center;
+  justify-self: stretch;
   white-space: nowrap;
 }
 
-/* Column 8: PDF — centered */
+/* Column 8: PDF — right-justified, min-width gwarantuje miejsce na dwa przyciski */
 .invoiceCellPdf {
   align-items: center;
   text-align: center;
-  justify-self: center;
+  justify-self: end;
   white-space: nowrap;
+  min-width: 110px;
+  padding-right: 8px;
+  box-sizing: border-box;
 }
 
 .label {
@@ -249,14 +301,26 @@
 
 .ksefCell {
   align-items: center;
+  align-self: stretch;
 }
 
 .ksefCell :global(.wrap) {
-  flex-wrap: nowrap;
+  width: 100%;
 }
 
 .pdfCell {
   align-items: center;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.pdfActions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .pdfButton {
@@ -347,11 +411,19 @@
 /* ---- Tablet: 641px - 1023px ---- */
 @media (max-width: 1023px) and (min-width: 641px) {
   .container {
-    --invoice-grid-columns: 78px 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 60px;
+    --invoice-grid-columns: 78px 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 120px;
   }
 
   .noKsef {
-    --invoice-grid-columns: 78px 88px minmax(160px, 1fr) 96px 90px 56px 90px 60px;
+    --invoice-grid-columns: 78px 88px minmax(160px, 1fr) 96px 90px 56px 90px 120px;
+  }
+
+  .withCheckbox {
+    --invoice-grid-columns: 28px 78px 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 120px;
+  }
+
+  .withCheckbox.noKsef {
+    --invoice-grid-columns: 28px 78px 88px minmax(160px, 1fr) 96px 90px 56px 90px 120px;
   }
 
   .cardContent {

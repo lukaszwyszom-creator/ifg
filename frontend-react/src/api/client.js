@@ -15,12 +15,14 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+const LOGIN_PATH = '/ui/login';
+
 client.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401 && window.location.pathname !== '/login') {
+    if (err.response?.status === 401 && !window.location.pathname.endsWith('/login')) {
       useAuthStore.getState().logout();
-      window.location.replace('/login');
+      window.location.replace(LOGIN_PATH);
     }
     return Promise.reject(err);
   }

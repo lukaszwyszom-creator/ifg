@@ -91,7 +91,8 @@ export default function KSeFConnectionTile() {
 
     const refreshKsefStatus = async () => {
       try {
-        const nextStatus = await ksefApi.getStatus();
+        const nipToUse = await ensureSellerNip();
+        const nextStatus = await ksefApi.getStatus(nipToUse || null);
         if (!nextStatus || cancelled) {
           return;
         }
@@ -129,7 +130,7 @@ export default function KSeFConnectionTile() {
       void refreshKsefStatus();
     };
 
-    ensureSellerNip().finally(refreshKsefStatus);
+    refreshKsefStatus();
     const pollId = window.setInterval(refreshKsefStatus, 30000);
     window.addEventListener('online', handleOnline);
     window.addEventListener(REFRESH_EVENT, handleRefreshEvent);

@@ -4,6 +4,8 @@ import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFSessionBar.module.css';
 
+const REFRESH_EVENT = 'ksef:status-refresh';
+
 /**
  * Pasek statusu sesji KSeF wyświetlany w AdvancedDashboard.
  * Pozwala otworzyć, sprawdzić i zamknąć sesję KSeF dla podanego NIP.
@@ -24,21 +26,25 @@ export default function KSeFSessionBar() {
 
   const clearMsgs = () => { setError(''); setSuccessMsg(''); };
 
-  const checkSession = useCallback(async (nipToCheck) => {
+  const checkSession = useCallback(async (nipToCheck, { silent = false } = {}) => {
     if (!nipToCheck || nipToCheck.length !== 10) return;
-    setCheckLoading(true);
-    clearMsgs();
+    if (!silent) {
+      setCheckLoading(true);
+      clearMsgs();
+    }
     try {
       const s = await ksefApi.getActiveSession(nipToCheck);
       setSession(s);
     } catch (err) {
       if (err.response?.status === 404) {
         setSession(null); // brak aktywnej — to normalny stan
-      } else {
+      } else if (!silent) {
         setError('Błąd sprawdzania sesji KSeF');
       }
     } finally {
-      setCheckLoading(false);
+      if (!silent) {
+        setCheckLoading(false);
+      }
     }
   }, []);
 
@@ -63,6 +69,30 @@ export default function KSeFSessionBar() {
   useEffect(() => {
     loadSyncStatus();
   }, [loadSyncStatus]);
+
+  useEffect(() => {
+    if (!nip || nip.length !== 10) return undefined;
+
+    const refreshSessionState = () => {
+      checkSession(nip, { silent: true });
+      loadSyncStatus();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshSessionState();
+      }
+    };
+
+    const pollId = window.setInterval(refreshSessionState, 30000);
+    window.addEventListener(REFRESH_EVENT, refreshSessionState);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(pollId);
+      window.removeEventListener(REFRESH_EVENT, refreshSessionState);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [nip, checkSession, loadSyncStatus]);
 
   // Pobierz NIP z backendu jeśli store jest pusty
   useEffect(() => {
@@ -96,6 +126,8 @@ export default function KSeFSessionBar() {
       setSession(s);
       setSellerNip(nip);
       setSuccessMsg('Sesja KSeF otwarta pomyślnie');
+      ksefApi.markStatusMutation();
+      window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
     } catch (err) {
       if (err.response?.status === 409) {
         // Sesja już istnieje — załaduj ją i daj użytkownikowi możliwość zamknięcia
@@ -125,6 +157,8 @@ export default function KSeFSessionBar() {
       await ksefApi.closeSession(session.nip);
       setSession(null);
       setSuccessMsg('Sesja KSeF zamknięta');
+      ksefApi.markStatusMutation();
+      window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
     } catch (err) {
       const msg =
         err.response?.data?.error?.message ??
@@ -143,7 +177,7 @@ export default function KSeFSessionBar() {
     try {
       // Preferuj nowy endpoint synchroniczny etapu 1.
       try {
-        const payload = await ksefApi.syncPurchasesNow(false);
+        const payload = await ksefApi.syncPurchasesNow(false, session.nip);
         const r = payload?.counts || {};
         const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
         const received = Number.isFinite(Number(r.received)) ? Number(r.received) : 0;
@@ -159,7 +193,20 @@ export default function KSeFSessionBar() {
         );
       } catch (syncErr) {
         // Fallback dla starszego backendu — istniejący async job endpoint.
-        if (syncErr.response?.status !== 404) throw syncErr;
+        if (syncErr.response?.status === 404) {
+          const message =
+            syncErr.response?.data?.error?.message ??
+            syncErr.response?.data?.detail ??
+            '';
+          if (String(message).includes('Brak aktywnej sesji')) {
+            setSession(null);
+            ksefApi.markStatusMutation();
+            window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
+            throw syncErr;
+          }
+        } else {
+          throw syncErr;
+        }
 
         const dateTo = new Date();
         const dateFrom = new Date();

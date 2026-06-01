@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import KSeFConnectionTile from './KSeFConnectionTile';
+import KSeFTopbarInfo from './KSeFTopbarInfo';
 import styles from './Topbar.module.css';
 
 function getCurrentMonthYear() {
@@ -34,6 +35,7 @@ export default function Topbar({ onMenuToggle }) {
       </div>
 
       <div className={styles.right}>
+        <KSeFTopbarInfo />
         <KSeFConnectionTile />
       </div>
     </header>

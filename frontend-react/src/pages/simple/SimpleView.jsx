@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { invoicesApi } from '../../api/invoices';
 import { useAppStore } from '../../store/useAppStore';
@@ -79,6 +79,8 @@ export default function SimpleView() {
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const openInvoiceRequestRef = useRef(0);
   const loadInvoicePool = useAppStore((s) => s.loadInvoicePool);
   const refreshAllInvoicePools = useAppStore((s) => s.refreshAllInvoicePools);
 
@@ -97,6 +99,14 @@ export default function SimpleView() {
     () => (Array.isArray(yearPoolEntry?.items) ? yearPoolEntry.items : []),
     [yearPoolEntry]
   );
+
+  useEffect(() => {
+    const handleKsefRefresh = () => {
+      refreshAllInvoicePools({ force: true }).catch(() => null);
+    };
+    window.addEventListener('ksef:status-refresh', handleKsefRefresh);
+    return () => window.removeEventListener('ksef:status-refresh', handleKsefRefresh);
+  }, [refreshAllInvoicePools]);
 
   useEffect(() => {
     loadInvoicePool({ direction: 'sale', filters: yearFilters, options: { defaultToCurrentMonth: false } }).catch(() => null);
@@ -202,11 +212,31 @@ export default function SimpleView() {
   };
 
   const handleOpenInvoice = useCallback(async (invoice, mode) => {
+    const requestId = ++openInvoiceRequestRef.current;
     setSaved(null);
     setShowForm(false);
-    setActiveInvoice(invoice);
-    setActiveMode(mode);
     setPreviewHtml('');
+    setActiveMode(mode);
+
+    if (mode === 'edit') {
+      setActiveInvoice(null);
+      setEditLoading(true);
+      try {
+        const full = await invoicesApi.getById(invoice.id);
+        if (requestId !== openInvoiceRequestRef.current) return;
+        setActiveInvoice(full);
+      } catch {
+        if (requestId !== openInvoiceRequestRef.current) return;
+        setActiveInvoice(invoice);
+      } finally {
+        if (requestId === openInvoiceRequestRef.current) {
+          setEditLoading(false);
+        }
+      }
+      return;
+    }
+
+    setActiveInvoice(invoice);
 
     if (mode === 'preview') {
       setPreviewLoading(true);
@@ -220,6 +250,8 @@ export default function SimpleView() {
   }, []);
 
   const handleCloseActive = useCallback(() => {
+    openInvoiceRequestRef.current += 1;
+    setEditLoading(false);
     setActiveInvoice(null);
     setPreviewHtml('');
     setActiveMode('preview');
@@ -350,14 +382,19 @@ export default function SimpleView() {
           <InvoiceList
             key={`${refreshKey}-${selectedMonth}`}
             filters={saleMonthFilters}
-            sourceItems={monthInvoices}
             emptyMsg={`Brak faktur sprzedaży w ${selectedMonthLocative}`}
             onOpenInvoice={handleOpenInvoice}
           />
         </div>
       )}
 
-      {!!activeInvoice && (
+      {editLoading && (
+        <div className={styles.formWrap}>
+          <div className={styles.sub}>Ładowanie faktury...</div>
+        </div>
+      )}
+
+      {!!activeInvoice && !editLoading && (
         <div className={styles.formWrap}>
           <div className={styles.header}>
             <div className={styles.sub}>
@@ -367,7 +404,12 @@ export default function SimpleView() {
           </div>
 
           {activeMode === 'edit' ? (
-            <InvoiceForm initial={activeInvoice} onSubmit={handleUpdate} loading={saving} />
+            <InvoiceForm
+              key={`${activeInvoice.id}-${activeInvoice.updated_at ?? ''}-${activeInvoice.form_paid_amount ?? ''}`}
+              initial={activeInvoice}
+              onSubmit={handleUpdate}
+              loading={saving}
+            />
           ) : (
             <div className={styles.section}>
               <div className={styles.sub}>Status: W toku / zaakceptowana – edycja zablokowana</div>

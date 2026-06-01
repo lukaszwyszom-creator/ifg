@@ -7,6 +7,9 @@ export const invoicesApi = {
   get: (id) =>
     client.get(`/invoices/${id}`).then((r) => r.data),
 
+  getById: (id) =>
+    client.get(`/invoices/${id}`, { params: { _: Date.now() } }).then((r) => r.data),
+
   create: (body, idempotencyKey) =>
     client
       .post('/invoices/', body, {

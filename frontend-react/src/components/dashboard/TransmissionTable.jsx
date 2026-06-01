@@ -8,6 +8,18 @@ import styles from './TransmissionTable.module.css';
 const TERMINAL = new Set(['success', 'failed_permanent']);
 const POLL_INTERVAL_MS = 8000;
 
+/** Znacznik czasu transmisji: ddmmyyyyggmmss (gg = godzina). */
+function formatTransmissionMarker(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${pad(d.getDate())}${pad(d.getMonth() + 1)}${d.getFullYear()}`
+    + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  );
+}
+
 function RetryBtn({ transmission, onDone, onError }) {
   const [busy, setBusy] = useState(false);
   const run = async () => {
@@ -62,10 +74,18 @@ export default function TransmissionTable() {
 
   const columns = [
     {
-      key: 'invoice_id',
-      label: 'Faktura ID',
-      width: 110,
-      render: (v) => <span className={styles.mono}>{v?.slice(0, 8)}…</span>,
+      key: 'created_at',
+      label: 'Znacznik',
+      width: 130,
+      render: (v) => <span className={styles.mono}>{formatTransmissionMarker(v)}</span>,
+    },
+    {
+      key: 'invoice_number_local',
+      label: 'Nr faktury',
+      width: 140,
+      render: (v) => v
+        ? <span className={styles.mono}>{v}</span>
+        : <span className={styles.dash}>—</span>,
     },
     {
       key: 'status',
@@ -74,9 +94,10 @@ export default function TransmissionTable() {
       render: (v) => <StatusBadge status={v} />,
     },
     {
-      key: 'attempt_count',
+      key: 'attempt_no',
       label: 'Próby',
       width: 60,
+      render: (v) => v ?? '—',
     },
     {
       key: 'ksef_reference_number',
@@ -89,12 +110,6 @@ export default function TransmissionTable() {
       render: (v) => v
         ? <span className={styles.errText} title={v}>{v.length > 50 ? v.slice(0, 50) + '…' : v}</span>
         : <span className={styles.dash}>—</span>,
-    },
-    {
-      key: 'updated_at',
-      label: 'Aktualizacja',
-      width: 150,
-      render: (v) => new Date(v).toLocaleString('pl-PL'),
     },
     {
       key: '_actions',

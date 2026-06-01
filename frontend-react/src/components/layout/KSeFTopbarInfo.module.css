@@ -1,0 +1,77 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.77rem;
+  color: var(--color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.sep {
+  color: #555;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.metaItem {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  flex-shrink: 1;
+}
+
+.refItem {
+  font-family: 'Courier New', monospace;
+  font-size: 0.72rem;
+  max-width: 140px;
+}
+
+.refreshBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-2);
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.refreshBtn:hover:not(:disabled) {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+.refreshBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.flashMsg {
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.flashSuccess { color: var(--color-success, #10b981); }
+.flashError   { color: var(--color-error, #ef4444); }
+
+/* Schowaj meta-tekst na węższych ekranach, zostaw tylko przycisk */
+@media (max-width: 1100px) {
+  .metaItem { display: none; }
+  .sep      { display: none; }
+}
+
+@media (max-width: 800px) {
+  .wrap { display: none; }
+}

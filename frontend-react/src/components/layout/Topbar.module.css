@@ -54,7 +54,9 @@
 .right {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ---- Mobile ---- */
