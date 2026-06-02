@@ -1,4 +1,8 @@
 # Invoice numbering rules
+---
+description: Reguła numeracji faktur
+alwaysApply: true
+---
 
 ## Cel
 Numeracja faktur musi być deterministyczna, miesięczna i odporna na kolizje.

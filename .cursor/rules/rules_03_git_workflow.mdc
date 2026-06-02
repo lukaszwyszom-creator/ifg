@@ -1,5 +1,8 @@
 # Git workflow rules
-
+---
+description: Zasada główna
+alwaysApply: true
+---
 ## Zasada główna
 
 Nie używaj automatycznie:

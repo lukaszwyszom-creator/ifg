@@ -1,4 +1,8 @@
 # SQL result validation rules
+---
+description: Reguła walidacji
+alwaysApply: true
+---
 
 ## Cel
 Agent ma NIE tylko generować SQL, ale również krytycznie oceniać wynik.

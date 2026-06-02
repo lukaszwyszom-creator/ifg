@@ -1,4 +1,8 @@
 # IFG agent execution rules
+---
+description:Opis agenta IFG
+alwaysApply: true
+---
 
 ## Rola
 Dzialasz jako krytyczny agent techniczny dla systemu IFG (faktury + KSeF).
