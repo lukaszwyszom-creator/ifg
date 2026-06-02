@@ -50,11 +50,10 @@ fi
 info "Buduję frontend-react (Mac mini)..."
 (cd "${REPO_ROOT}/frontend-react" && npm run build)
 
-info "Synchronizuję frontend-react/dist/ → NAS..."
-rsync -avz --delete \
-  -e "ssh -p ${DS723_PORT}" \
-  "${REPO_ROOT}/frontend-react/dist/" \
-  "${DS723_USER}@${DS723_HOST}:${DS723_REPO}/frontend-react/dist/"
+info "Synchronizuję frontend-react/dist/ → NAS (tar przez SSH)..."
+tar czf - -C "${REPO_ROOT}/frontend-react/dist" . | \
+  ssh -p "${DS723_PORT}" "${DS723_USER}@${DS723_HOST}" \
+  "mkdir -p '${DS723_REPO}/frontend-react/dist' && find '${DS723_REPO}/frontend-react/dist' -mindepth 1 -delete && tar xzf - -C '${DS723_REPO}/frontend-react/dist'"
 
 SSH_BASE=(ssh -p "${DS723_PORT}" "${DS723_USER}@${DS723_HOST}")
 
