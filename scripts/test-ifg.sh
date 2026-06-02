@@ -7,7 +7,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "[test-ifg] backend: pytest tests/unit"
 cd "${REPO_ROOT}"
-python3 -m pytest tests/unit -q
+PYTHON="python3"
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  PYTHON="${REPO_ROOT}/.venv/bin/python"
+fi
+"${PYTHON}" -m pytest tests/unit -q
 
 echo "[test-ifg] frontend: npm run build"
 cd "${REPO_ROOT}/frontend-react"
