@@ -1,0 +1,18 @@
+# mobile-expo — aplikacja iPhone (Expo + TypeScript)
+#
+# Rozwijana równolegle na Mac mini, branch: feature/mobile-expo
+# Korzysta z API IFG (DS723+ lub lokalny backend dev).
+# Nie modyfikuje backendu, frontend-react ani docker produkcyjnego.
+
+node_modules/
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.env
+.env.local

@@ -9,6 +9,8 @@ build/
 node_modules/
 frontend-react/node_modules/
 frontend-react/dist/
+mobile-expo/node_modules/
+mobile-expo/.expo/
 
 # Temp
 _tmp_session.py
