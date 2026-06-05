@@ -56,3 +56,42 @@ class NotificationItem(BaseModel):
 
 class NotificationsResponse(BaseModel):
     items: list[NotificationItem] = Field(default_factory=list)
+
+
+class SettlementInvoiceItem(BaseModel):
+    invoice_id: UUID
+    number: str
+    issue_date: date
+    due_date: date | None = None
+    amount_due: Decimal
+    overdue_days: int | None = None
+
+
+class CounterpartyListItem(BaseModel):
+    id: UUID
+    name: str
+    total_due: Decimal
+    overdue_due: Decimal
+    invoices_count: int
+    overdue_invoices_count: int
+    last_invoice_due_date: date | None = None
+
+
+class CounterpartiesListResponse(BaseModel):
+    items: list[CounterpartyListItem] = Field(default_factory=list)
+
+
+class CounterpartyDetailResponse(BaseModel):
+    id: UUID
+    name: str
+    total_due: Decimal
+    overdue_due: Decimal
+    invoices_count: int
+    overdue_invoices_count: int
+    invoices: list[SettlementInvoiceItem] = Field(default_factory=list)
+
+
+DebtorsListResponse = CounterpartiesListResponse
+DebtorDetailResponse = CounterpartyDetailResponse
+CreditorsListResponse = CounterpartiesListResponse
+CreditorDetailResponse = CounterpartyDetailResponse

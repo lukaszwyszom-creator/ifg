@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -13,7 +14,14 @@ from app.api.deps import (
     get_settings_service,
 )
 from app.core.security import AuthenticatedUser
-from app.schemas.mobile import DashboardResponse, NotificationsResponse
+from app.schemas.mobile import (
+    CreditorDetailResponse,
+    CreditorsListResponse,
+    DashboardResponse,
+    DebtorDetailResponse,
+    DebtorsListResponse,
+    NotificationsResponse,
+)
 from app.services.invoice_service import InvoiceService
 from app.services.ksef_session_service import KSeFSessionService
 from app.services.ksef_sync_service import KSeFSyncService
@@ -65,3 +73,41 @@ def get_mobile_notifications(
 ) -> NotificationsResponse:
     payload = mobile_service.get_notifications()
     return NotificationsResponse.model_validate(payload)
+
+
+@router.get("/debtors", response_model=DebtorsListResponse)
+def get_mobile_debtors(
+    mobile_service: Annotated[MobileService, Depends(get_mobile_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> DebtorsListResponse:
+    payload = mobile_service.get_debtors()
+    return DebtorsListResponse.model_validate(payload)
+
+
+@router.get("/debtors/{debtor_id}", response_model=DebtorDetailResponse)
+def get_mobile_debtor(
+    debtor_id: UUID,
+    mobile_service: Annotated[MobileService, Depends(get_mobile_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> DebtorDetailResponse:
+    payload = mobile_service.get_debtor(debtor_id)
+    return DebtorDetailResponse.model_validate(payload)
+
+
+@router.get("/creditors", response_model=CreditorsListResponse)
+def get_mobile_creditors(
+    mobile_service: Annotated[MobileService, Depends(get_mobile_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> CreditorsListResponse:
+    payload = mobile_service.get_creditors()
+    return CreditorsListResponse.model_validate(payload)
+
+
+@router.get("/creditors/{creditor_id}", response_model=CreditorDetailResponse)
+def get_mobile_creditor(
+    creditor_id: UUID,
+    mobile_service: Annotated[MobileService, Depends(get_mobile_service)],
+    _: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> CreditorDetailResponse:
+    payload = mobile_service.get_creditor(creditor_id)
+    return CreditorDetailResponse.model_validate(payload)

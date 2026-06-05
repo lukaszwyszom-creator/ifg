@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
+from app.core.exceptions import NotFoundError
 from app.domain.enums import InvoiceStatus
 from app.domain.models.invoice import Invoice, calculate_overdue_days
 from app.services.invoice_service import InvoiceService
@@ -91,6 +92,134 @@ class MobileService:
 
     def get_notifications(self) -> dict[str, Any]:
         return {"items": self._build_notification_items()}
+
+    def get_debtors(self) -> dict[str, Any]:
+        settlements = self._payment_service.get_settlement_summary(side="sales", month=None)
+        return {"items": self._build_counterparty_list(settlements.get("debtors", []), side="debtor")}
+
+    def get_debtor(self, debtor_id: UUID) -> dict[str, Any]:
+        settlements = self._payment_service.get_settlement_summary(side="sales", month=None)
+        return self._build_counterparty_detail(
+            settlements.get("debtors", []),
+            side="debtor",
+            counterparty_id=debtor_id,
+            not_found_label="dłużnika",
+        )
+
+    def get_creditors(self) -> dict[str, Any]:
+        settlements = self._payment_service.get_settlement_summary(side="purchase", month=None)
+        return {"items": self._build_counterparty_list(settlements.get("creditors", []), side="creditor")}
+
+    def get_creditor(self, creditor_id: UUID) -> dict[str, Any]:
+        settlements = self._payment_service.get_settlement_summary(side="purchase", month=None)
+        return self._build_counterparty_detail(
+            settlements.get("creditors", []),
+            side="creditor",
+            counterparty_id=creditor_id,
+            not_found_label="wierzyciela",
+        )
+
+    def _build_counterparty_list(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        side: str,
+    ) -> list[dict[str, Any]]:
+        grouped = self._group_settlement_rows(rows)
+        items = [self._counterparty_summary(name, data, side=side) for name, data in grouped.items()]
+        items.sort(
+            key=lambda item: (item["overdue_due"], item["total_due"]),
+            reverse=True,
+        )
+        return items
+
+    def _build_counterparty_detail(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        side: str,
+        counterparty_id: UUID,
+        not_found_label: str,
+    ) -> dict[str, Any]:
+        grouped = self._group_settlement_rows(rows)
+        for name, data in grouped.items():
+            summary = self._counterparty_summary(name, data, side=side)
+            if summary["id"] == counterparty_id:
+                invoices = [self._settlement_invoice_item(row) for row in data["rows"]]
+                invoices.sort(
+                    key=lambda inv: (
+                        inv["overdue_days"] is not None and inv["overdue_days"] > 0,
+                        inv["due_date"] or date.min,
+                    ),
+                    reverse=True,
+                )
+                return {
+                    **summary,
+                    "invoices": invoices,
+                }
+        raise NotFoundError(f"Nie znaleziono {not_found_label}.")
+
+    @staticmethod
+    def _group_settlement_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            name = (row.get("contractor_name") or "").strip() or "Nieznany kontrahent"
+            bucket = grouped.setdefault(name, {"rows": [], "last_invoice_due_date": None})
+            bucket["rows"].append(row)
+            due_date = MobileService._as_date(row.get("due_date"))
+            if due_date is not None and (
+                bucket["last_invoice_due_date"] is None
+                or due_date > bucket["last_invoice_due_date"]
+            ):
+                bucket["last_invoice_due_date"] = due_date
+        return grouped
+
+    def _counterparty_summary(
+        self,
+        name: str,
+        data: dict[str, Any],
+        *,
+        side: str,
+    ) -> dict[str, Any]:
+        total_due = Decimal("0")
+        overdue_due = Decimal("0")
+        overdue_invoices_count = 0
+        for row in data["rows"]:
+            remaining = self._as_decimal(row.get("remaining_amount"))
+            total_due += remaining
+            if self._is_overdue(row.get("due_date")):
+                overdue_due += remaining
+                overdue_invoices_count += 1
+        return {
+            "id": self._counterparty_id(side, name),
+            "name": name,
+            "total_due": total_due.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
+            "overdue_due": overdue_due.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP),
+            "invoices_count": len(data["rows"]),
+            "overdue_invoices_count": overdue_invoices_count,
+            "last_invoice_due_date": data.get("last_invoice_due_date"),
+        }
+
+    def _settlement_invoice_item(self, row: dict[str, Any]) -> dict[str, Any]:
+        due_date = self._as_date(row.get("due_date"))
+        issue_date = self._as_date(row.get("issue_date"))
+        if issue_date is None:
+            issue_date = date.today()
+        return {
+            "invoice_id": row["invoice_id"],
+            "number": row.get("number_local") or row.get("ksef_reference_number") or "",
+            "issue_date": issue_date,
+            "due_date": due_date,
+            "amount_due": self._as_decimal(row.get("remaining_amount")).quantize(
+                _TWO_PLACES, rounding=ROUND_HALF_UP
+            ),
+            "overdue_days": calculate_overdue_days(due_date),
+        }
+
+    @staticmethod
+    def _counterparty_id(side: str, name: str) -> UUID:
+        normalized = name.strip().lower()
+        return uuid5(NAMESPACE_DNS, f"mobile:{side}:{normalized}")
 
     def _build_notification_items(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
