@@ -63,6 +63,7 @@ def _make_invoice(**kwargs) -> Invoice:
         issue_date=date(2026, 4, 6),
         sale_date=date(2026, 4, 6),
         currency="PLN",
+        number_local="FV/1/04/2026",
         seller_snapshot={
             "nip": "1000000035",
             "name": "Sprzedawca Sp. z o.o.",
@@ -305,19 +306,18 @@ class TestValidateForKsef:
 # ---------------------------------------------------------------------------
 
 class TestAdnotacje:
-    def test_default_all_zeros(self):
+    def test_default_all_twos(self):
         inv = _make_invoice()
         xml = KSeFMapper.invoice_to_xml(inv)
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_16") == "0"
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_17") == "0"
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18") == "0"
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18A") == "0"
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18B") == "0"
+        assert _xml_text(xml, "//fa:Adnotacje/fa:P_16") == "2"
+        assert _xml_text(xml, "//fa:Adnotacje/fa:P_17") == "2"
+        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18") == "2"
+        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18A") == "2"
 
-    def test_p_18b_set_when_reverse_charge_flag(self):
+    def test_p18b_not_emitted(self):
         inv = _make_invoice(reverse_charge_flag=True)
         xml = KSeFMapper.invoice_to_xml(inv)
-        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18B") == "1"
+        assert _xml_text(xml, "//fa:Adnotacje/fa:P_18B") is None
 
     def test_p16_mpp(self):
         inv = _make_invoice(use_split_payment=True)

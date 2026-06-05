@@ -602,10 +602,10 @@ class TestMapperZwNpRates:
         xml = KSeFMapper.invoice_to_xml(inv)
         root = etree.fromstring(xml)
         ns = {"fa": "http://crd.gov.pl/wzor/2025/06/25/13775/"}
-        p13_4 = root.find(".//fa:Fa/fa:P_13_4", ns)
-        assert p13_4 is not None, "Stawka 0% powinna generować P_13_4"
+        p13_6_1 = root.find(".//fa:Fa/fa:P_13_6_1", ns)
+        assert p13_6_1 is not None, "Stawka 0% powinna generować P_13_6_1"
         p14_4 = root.find(".//fa:Fa/fa:P_14_4", ns)
-        assert p14_4 is not None, "Stawka 0% powinna generować P_14_4"
+        assert p14_4 is None, "Stawka 0% nie powinna generować P_14_4"
 
     def test_mapper_23_generates_p13_1_and_p14_1(self):
         """Stawka 23% generuje P_13_1 i P_14_1."""

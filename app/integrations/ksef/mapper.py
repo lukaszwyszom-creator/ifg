@@ -27,7 +27,7 @@ _VAT_RATE_FIELDS: dict[str, tuple[str, str | None]] = {
     "23": ("P_13_1", "P_14_1"),
     "8": ("P_13_2", "P_14_2"),
     "5": ("P_13_3", "P_14_3"),
-    "0": ("P_13_4", "P_14_4"),
+    "0": ("P_13_6_1", None),
     "zw": ("P_13_7", None),
     "np": ("P_13_8", None),
 }
@@ -324,11 +324,10 @@ class FA3Mapper:
     @staticmethod
     def _build_adnotacje(fa: etree._Element, invoice: Invoice) -> None:
         adnotacje = _el(fa, "Adnotacje")
-        _el(adnotacje, "P_16", _yn01(invoice.use_split_payment))
-        _el(adnotacje, "P_17", _yn01(invoice.self_billing))
-        _el(adnotacje, "P_18", _yn01(invoice.reverse_charge))
-        _el(adnotacje, "P_18A", "0")
-        _el(adnotacje, "P_18B", _yn01(invoice.reverse_charge_flag))
+        _el(adnotacje, "P_16", _yn12(invoice.use_split_payment))
+        _el(adnotacje, "P_17", _yn12(invoice.self_billing))
+        _el(adnotacje, "P_18", _yn12(invoice.reverse_charge))
+        _el(adnotacje, "P_18A", _yn12(invoice.reverse_charge_art))
 
         if invoice.cash_accounting_method:
             _el(adnotacje, "P_19", "1")
@@ -368,6 +367,10 @@ class FA3Mapper:
             raise KSeFMappingError(
                 f"NIP sprzedawcy jest nieprawidłowy: '{raw_nip}'. "
                 "Wymagane dokładnie 10 cyfr bez separatorów."
+            )
+        if invoice.direction == "sale" and not (invoice.number_local or "").strip():
+            raise KSeFMappingError(
+                "Pole P_2 (numer faktury) jest wymagane."
             )
         if not invoice.items:
             raise KSeFMappingError(
