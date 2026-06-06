@@ -1,0 +1,48 @@
+---
+description: IFG Guardian — weryfikacja zgodności API przed deployem
+alwaysApply: true
+---
+
+# IFG Guardian
+
+## Cel
+
+Chronić deploy przed rozjazdem endpointów mobile-expo i backendu IFG.
+
+## Zasady
+
+1. **Przed sugerowaniem deployu** uruchom Guardian:
+
+   ```bash
+   python scripts/guardian.py
+   ```
+
+2. **Nie sugeruj deployu**, jeśli Guardian zgłasza błędy (`exit code != 0`).
+
+3. **Przy nowych endpointach** zawsze pokaż w raporcie:
+   - pliki frontend (`mobile-expo/src/api/**`),
+   - pliki backend (`app/api/routers/**`, `app/main.py`),
+   - przykładowy test curl, np.:
+
+   ```bash
+   curl -s -H "Authorization: Bearer $TOKEN" \
+     "http://127.0.0.1:8000/api/v1/mobile/dashboard?period=2026-05"
+   ```
+
+## Zakres Guardian MVP
+
+Skrypt `scripts/guardian.py` skanuje wyłącznie:
+
+- `mobile-expo/src/api/**/*.ts` — wywołania `apiClient.get/post/put/delete`
+- `app/api/routers/**/*.py` — definicje `APIRouter` i dekoratory tras
+- `app/main.py` — rejestracja routerów (`include_router`)
+
+## Interpretacja raportu
+
+| Symbol | Znaczenie |
+|--------|-----------|
+| ✅ | Endpoint OK / router zarejestrowany |
+| ❌ | Endpoint użyty we frontendzie, brak w backendzie |
+| ⚠️ | Router zdefiniowany, nie zarejestrowany w `app/main.py` |
+
+Jeżeli występuje choć jeden ❌ lub ⚠️ — **nie deployuj**.
