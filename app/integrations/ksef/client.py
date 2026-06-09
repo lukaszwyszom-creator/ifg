@@ -348,12 +348,28 @@ class KSeFClient:
             f"/sessions/{session_reference}/invoices/query",
             f"/sessions/{session_reference}/invoices",
         ]
-        params = {
-            "invoiceType": "received",
-            "subjectType": subject_type,
-            "invoicingDateFrom": invoicing_date_from,
-            "invoicingDateTo": invoicing_date_to,
-        }
+        get_param_variants = [
+            {
+                "invoiceType": "received",
+                "subjectType": subject_type,
+                "invoicingDateFrom": invoicing_date_from,
+                "invoicingDateTo": invoicing_date_to,
+            },
+            {
+                "subjectType": subject_type,
+                "invoicingDateFrom": invoicing_date_from,
+                "invoicingDateTo": invoicing_date_to,
+            },
+            {
+                "invoiceType": "received",
+                "invoicingDateFrom": invoicing_date_from,
+                "invoicingDateTo": invoicing_date_to,
+            },
+            {
+                "invoicingDateFrom": invoicing_date_from,
+                "invoicingDateTo": invoicing_date_to,
+            },
+        ]
 
         invoice_refs: list[str] = []
         query_ref: str | None = None
@@ -363,51 +379,57 @@ class KSeFClient:
         def _is_wrong_invoice_reference_error(exc: KSeFClientError) -> bool:
             return exc.status_code == 400 and "21405" in str(exc)
 
+        get_done = False
         for candidate in get_candidates:
-            # DIAGNOSTICS: log endpoint and params (no token values)
-            logger.info(
-                "KSeF query_received_invoices GET attempt: endpoint=%s params=%s "
-                "invoiceReferenceNumber_present=%s",
-                candidate,
-                {k: v for k, v in params.items()},
-                "invoiceReferenceNumber" in params,
-            )
-            try:
-                resp = self._request_with_retry(
-                    method="GET",
-                    path=candidate,
-                    headers=headers,
-                    params=params,
-                )
-            except KSeFClientError as exc:
-                if exc.status_code in (404, 405) or _is_wrong_invoice_reference_error(exc):
-                    last_exc = exc
-                    logger.warning(
-                        "KSeF GET endpoint %s unavailable (%s), trying next fallback",
-                        candidate,
-                        exc.status_code,
-                    )
-                    continue
-                raise
-
-            data = resp.json()
-            if isinstance(data, dict) and isinstance(data.get("referenceNumber"), str):
-                query_ref = data["referenceNumber"]
-                poll_path_prefix = candidate
-                logger.info("KSeF query received invoices: queryRef=%s", query_ref)
+            if get_done:
                 break
-
-            invoice_refs = _extract_invoice_refs(data)
-            if invoice_refs:
+            for params in get_param_variants:
+                # DIAGNOSTICS: log endpoint and params (no token values)
                 logger.info(
-                    "KSeF received invoices via %s: count=%d",
+                    "KSeF query_received_invoices GET attempt: endpoint=%s params=%s "
+                    "invoiceReferenceNumber_present=%s",
                     candidate,
-                    len(invoice_refs),
+                    {k: v for k, v in params.items()},
+                    "invoiceReferenceNumber" in params,
                 )
-                break
+                try:
+                    resp = self._request_with_retry(
+                        method="GET",
+                        path=candidate,
+                        headers=headers,
+                        params=params,
+                    )
+                except KSeFClientError as exc:
+                    if exc.status_code in (404, 405) or _is_wrong_invoice_reference_error(exc):
+                        last_exc = exc
+                        logger.warning(
+                            "KSeF GET endpoint %s unavailable (%s), trying next fallback",
+                            candidate,
+                            exc.status_code,
+                        )
+                        break
+                    raise
 
-            # Sukces bez listy faktur traktujemy jako pusty wynik.
-            logger.info("KSeF received invoices via %s: empty result", candidate)
+                data = resp.json()
+                if isinstance(data, dict) and isinstance(data.get("referenceNumber"), str):
+                    query_ref = data["referenceNumber"]
+                    poll_path_prefix = candidate
+                    logger.info("KSeF query received invoices: queryRef=%s", query_ref)
+                    get_done = True
+                    break
+
+                invoice_refs = _extract_invoice_refs(data)
+                if invoice_refs:
+                    logger.info(
+                        "KSeF received invoices via %s: count=%d",
+                        candidate,
+                        len(invoice_refs),
+                    )
+                    get_done = True
+                    break
+
+                # Sukces bez listy faktur traktujemy jako pusty wynik.
+                logger.info("KSeF received invoices via %s: empty result", candidate)
 
         # 2. Fallback do POST endpointów query.
         # UWAGA: NIE używamy /sessions/online/{ref}/invoices/query — KSeF v2
