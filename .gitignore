@@ -47,3 +47,7 @@ Thumbs.db
 alembic/versions/__pycache__/
 *.zip
 .github/skills/
+tmp/
+
+# Local mockups
+tmp/
