@@ -329,8 +329,9 @@ class KSeFSessionService:
         days_back: int,
         force_full: bool,
         sync_state_json: dict | None,
+        incremental: bool = False,
     ) -> tuple[date, date]:
-        """Wylicza zakres dat zapytania KSeF (inkrementalny lub pełny)."""
+        """Wylicza zakres dat zapytania KSeF (manualny lub inkrementalny)."""
         resolved_to = date_to or datetime.now(UTC).date()
         if date_from is not None:
             return date_from, resolved_to
@@ -338,7 +339,7 @@ class KSeFSessionService:
         if force_full:
             return resolved_to - timedelta(days=settings.ksef_purchase_sync_full_days), resolved_to
 
-        if sync_state_json:
+        if incremental and sync_state_json:
             last_date_to_raw = sync_state_json.get("last_date_to")
             if isinstance(last_date_to_raw, str):
                 try:
@@ -346,8 +347,7 @@ class KSeFSessionService:
                     incremental_from = last_date_to - timedelta(
                         days=settings.ksef_purchase_sync_overlap_days
                     )
-                    default_from = resolved_to - timedelta(days=days_back)
-                    return max(default_from, incremental_from), resolved_to
+                    return incremental_from, resolved_to
                 except ValueError:
                     pass
 
@@ -361,6 +361,7 @@ class KSeFSessionService:
         date_to: date | None = None,
         days_back: int | None = None,
         force_full: bool = False,
+        incremental: bool = False,
         actor_user_id: UUID | None = None,
     ) -> dict:
         """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
@@ -377,6 +378,7 @@ class KSeFSessionService:
             days_back=resolved_days_back,
             force_full=force_full,
             sync_state_json=state.state_json,
+            incremental=incremental,
         )
 
         sync_repo.mark_running(_SCOPE_PURCHASE_INVOICES)
@@ -408,8 +410,9 @@ class KSeFSessionService:
                 },
             )
             logger.info(
-                "KSeF purchases sync done: date_from=%s date_to=%s subjectType=%s "
+                "KSeF purchases sync done: incremental=%s date_from=%s date_to=%s subjectType=%s "
                 "ksef_returned=%d created=%d skipped_existing=%d errors=%d",
+                incremental,
                 resolved_from,
                 resolved_to,
                 report["subject_type"],

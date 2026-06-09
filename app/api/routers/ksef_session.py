@@ -195,6 +195,7 @@ class KSeFPurchaseSyncRequest(BaseModel):
     date_to: date | None = None
     days_back: int | None = None
     force_full: bool = False
+    incremental: bool = False
 
 
 class KSeFPurchaseSyncReportResponse(BaseModel):
@@ -263,6 +264,7 @@ def sync_ksef_purchases_now(
         date_to=body.date_to,
         days_back=body.days_back,
         force_full=body.force_full,
+        incremental=body.incremental,
         actor_user_id=current_user.user_id,
     )
     return KSeFPurchaseSyncReportResponse.model_validate(report)
