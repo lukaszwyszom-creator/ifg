@@ -1,4 +1,5 @@
 import { API_V1_PREFIX, getApiBaseUrl } from './config';
+import { AuthError } from './auth-error';
 
 export type ApiError = {
   code: string;
@@ -10,6 +11,10 @@ export class IfgApiClient {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  getToken(): string | null {
+    return this.token;
   }
 
   private url(path: string): string {
@@ -45,13 +50,36 @@ export class IfgApiClient {
   }
 
   private async parse<T>(response: Response): Promise<T> {
+    const contentType = response.headers.get('content-type') ?? '';
+    const cfAccess = response.headers.get('www-authenticate')?.includes('Cloudflare-Access');
+    const cfRedirect =
+      response.status === 302 ||
+      response.status === 301 ||
+      response.url.includes('cloudflareaccess.com');
+
+    if (cfAccess || cfRedirect) {
+      throw new Error(
+        'API jest chronione Cloudflare Access. Użyj adresu LAN/Tailscale serwera IFG (np. http://192.168.1.50:8000).',
+      );
+    }
+
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       const message =
         (payload as { error?: ApiError })?.error?.message ??
         `HTTP ${response.status}`;
+      if (response.status === 401) {
+        throw new AuthError(message);
+      }
       throw new Error(message);
     }
+
+    if (payload === null && contentType.includes('text/html')) {
+      throw new Error(
+        'API zwróciło stronę HTML zamiast JSON — prawdopodobnie Cloudflare Access. Użyj adresu LAN serwera IFG.',
+      );
+    }
+
     return payload as T;
   }
 }
