@@ -336,17 +336,29 @@ class KSeFSessionService:
 
         ctx = self.get_session_context(nip)
 
-        try:
-            received = self.ksef_client.query_received_invoices(
-                access_token=ctx.access_token,
-                session_reference=ctx.session_reference,
-                symmetric_key=ctx.symmetric_key,
-                iv=ctx.initialization_vector,
-                invoicing_date_from=date_from.isoformat(),
-                invoicing_date_to=date_to.isoformat(),
+        received = []
+        for subject_type in ("subject2", "subject1", "subject3"):
+            try:
+                batch = self.ksef_client.query_received_invoices(
+                    access_token=ctx.access_token,
+                    session_reference=ctx.session_reference,
+                    symmetric_key=ctx.symmetric_key,
+                    iv=ctx.initialization_vector,
+                    invoicing_date_from=date_from.isoformat(),
+                    invoicing_date_to=date_to.isoformat(),
+                    subject_type=subject_type,
+                )
+            except KSeFClientError as exc:
+                raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
+
+            logger.info(
+                "KSeF purchases sync subjectType=%s result_count=%d",
+                subject_type,
+                len(batch),
             )
-        except KSeFClientError as exc:
-            raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
+            if batch:
+                received = batch
+                break
 
         saved = 0
         skipped_existing = 0

@@ -311,6 +311,7 @@ class KSeFClient:
         iv: bytes,
         invoicing_date_from: str,
         invoicing_date_to: str,
+        subject_type: str = "subject2",
     ) -> list[ReceivedInvoiceResult]:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
@@ -349,7 +350,7 @@ class KSeFClient:
         ]
         params = {
             "invoiceType": "received",
-            "subjectType": "subject2",
+            "subjectType": subject_type,
             "invoicingDateFrom": invoicing_date_from,
             "invoicingDateTo": invoicing_date_to,
         }
@@ -424,15 +425,16 @@ class KSeFClient:
             query_body = {
                 "queryCriteria": {
                     "invoiceType": "received",
-                    "subjectType": "subject2",
+                    "subjectType": subject_type,
                     "invoicingDateFrom": invoicing_date_from,
                     "invoicingDateTo": invoicing_date_to,
                 },
             }
             # DIAGNOSTICS: log POST body (no tokens/certs)
             logger.info(
-                "KSeF query_received_invoices POST fallback: body_keys=%s "
+                "KSeF query_received_invoices POST fallback: subjectType=%s body_keys=%s "
                 "invoiceReferenceNumber_in_body=%s",
+                subject_type,
                 list(query_body.get("queryCriteria", {}).keys()),
                 "invoiceReferenceNumber" in query_body.get("queryCriteria", {}),
             )
