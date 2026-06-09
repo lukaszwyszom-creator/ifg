@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     enable_warehouse: bool = Field(default=True, alias="ENABLE_WAREHOUSE")
     enable_payments: bool = Field(default=True, alias="ENABLE_PAYMENTS")
 
+    # KSeF — synchronizacja faktur zakupowych
+    ksef_purchase_sync_days_back: int = Field(default=90, alias="KSEF_PURCHASE_SYNC_DAYS_BACK")
+    ksef_purchase_sync_full_days: int = Field(default=365, alias="KSEF_PURCHASE_SYNC_FULL_DAYS")
+    ksef_purchase_sync_overlap_days: int = Field(default=2, alias="KSEF_PURCHASE_SYNC_OVERLAP_DAYS")
+
     @field_validator(
         "seller_nip",
         "seller_name",

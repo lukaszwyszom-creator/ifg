@@ -190,8 +190,23 @@ class KSeFSyncStatusResponse(BaseModel):
 
 
 class KSeFPurchaseSyncRequest(BaseModel):
-    force: bool = False
     nip: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    days_back: int | None = None
+    force_full: bool = False
+
+
+class KSeFPurchaseSyncReportResponse(BaseModel):
+    status: str
+    date_from: str
+    date_to: str
+    subject_type: str | None = None
+    ksef_returned: int
+    created: int
+    skipped_existing: int
+    errors: int
+    error_samples: list[str] = []
 
 
 class KSeFPurchaseSyncResponse(BaseModel):
@@ -234,32 +249,23 @@ def get_ksef_sync_status(
 
 @router_status.post(
     "/sync/purchases",
-    response_model=KSeFPurchaseSyncResponse,
-    summary="Ręczne odświeżenie zakupów z KSeF",
+    response_model=KSeFPurchaseSyncReportResponse,
+    summary="Synchronizacja faktur zakupowych z KSeF",
 )
 def sync_ksef_purchases_now(
     body: KSeFPurchaseSyncRequest,
-    ksef_sync_service: Annotated[KSeFSyncService, Depends(get_ksef_sync_service)],
+    ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
-) -> KSeFPurchaseSyncResponse:
-    payload = ksef_sync_service.sync_purchase_invoices(
-        force=body.force,
-        actor_user_id=current_user.user_id,
+) -> KSeFPurchaseSyncReportResponse:
+    report = ksef_session_service.sync_purchase_invoices(
         nip=body.nip,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        days_back=body.days_back,
+        force_full=body.force_full,
+        actor_user_id=current_user.user_id,
     )
-    counts = payload["counts"]
-    status = payload["status"]
-    return KSeFPurchaseSyncResponse(
-        counts=SyncPurchaseResponse(**counts),
-        status=KSeFSyncStatusResponse(
-            scope=status["scope"],
-            status=status["status"],
-            last_success_at=status["last_success_at"],
-            last_attempt_at=status["last_attempt_at"],
-            last_error=status["last_error"],
-            state_json=status["state_json"],
-        ),
-    )
+    return KSeFPurchaseSyncReportResponse.model_validate(report)
 
 
 @router_sessions.post(

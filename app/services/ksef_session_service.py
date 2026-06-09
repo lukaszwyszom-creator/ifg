@@ -20,6 +20,7 @@ from app.integrations.ksef.client import KSeFClient, KSeFClientError
 from app.integrations.ksef.xml_parser import parse_fa3_xml
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
+from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
 from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ SESSION_ACTIVE = "active"
 SESSION_TERMINATED = "terminated"
 SESSION_EXPIRED = "expired"
 SESSION_FAILED = "failed"
+_SCOPE_PURCHASE_INVOICES = "purchase_invoices"
+_MAX_ERROR_SAMPLES = 5
 
 # Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
 _TOKEN_CACHE_MARGIN = timedelta(seconds=30)
@@ -318,6 +321,108 @@ class KSeFSessionService:
     # PURCHASE INVOICE SYNC
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def resolve_purchase_sync_window(
+        date_from: date | None,
+        date_to: date | None,
+        *,
+        days_back: int,
+        force_full: bool,
+        sync_state_json: dict | None,
+    ) -> tuple[date, date]:
+        """Wylicza zakres dat zapytania KSeF (inkrementalny lub pełny)."""
+        resolved_to = date_to or datetime.now(UTC).date()
+        if date_from is not None:
+            return date_from, resolved_to
+
+        if force_full:
+            return resolved_to - timedelta(days=settings.ksef_purchase_sync_full_days), resolved_to
+
+        if sync_state_json:
+            last_date_to_raw = sync_state_json.get("last_date_to")
+            if isinstance(last_date_to_raw, str):
+                try:
+                    last_date_to = date.fromisoformat(last_date_to_raw)
+                    incremental_from = last_date_to - timedelta(
+                        days=settings.ksef_purchase_sync_overlap_days
+                    )
+                    default_from = resolved_to - timedelta(days=days_back)
+                    return max(default_from, incremental_from), resolved_to
+                except ValueError:
+                    pass
+
+        return resolved_to - timedelta(days=days_back), resolved_to
+
+    def sync_purchase_invoices(
+        self,
+        *,
+        nip: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        days_back: int | None = None,
+        force_full: bool = False,
+        actor_user_id: UUID | None = None,
+    ) -> dict:
+        """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
+        resolved_nip = self._resolve_seller_nip(nip)
+        resolved_days_back = (
+            days_back if days_back is not None else settings.ksef_purchase_sync_days_back
+        )
+
+        sync_repo = KSeFSyncStateRepository(self.session)
+        state = sync_repo.get_or_create(_SCOPE_PURCHASE_INVOICES)
+        resolved_from, resolved_to = self.resolve_purchase_sync_window(
+            date_from,
+            date_to,
+            days_back=resolved_days_back,
+            force_full=force_full,
+            sync_state_json=state.state_json,
+        )
+
+        sync_repo.mark_running(_SCOPE_PURCHASE_INVOICES)
+        try:
+            counts = self.sync_received_invoices(
+                nip=resolved_nip,
+                date_from=resolved_from,
+                date_to=resolved_to,
+                actor_user_id=actor_user_id,
+            )
+            report = {
+                "status": "ok",
+                "date_from": resolved_from.isoformat(),
+                "date_to": resolved_to.isoformat(),
+                "subject_type": counts.get("subject_type"),
+                "ksef_returned": counts["received"],
+                "created": counts["saved"],
+                "skipped_existing": counts["skipped_existing"],
+                "errors": counts["skipped_parse"],
+                "error_samples": counts.get("error_samples", []),
+            }
+            sync_repo.mark_success(
+                _SCOPE_PURCHASE_INVOICES,
+                state_json={
+                    "last_date_from": resolved_from.isoformat(),
+                    "last_date_to": resolved_to.isoformat(),
+                    "last_subject_type": counts.get("subject_type"),
+                    "last_counts": report,
+                },
+            )
+            logger.info(
+                "KSeF purchases sync done: date_from=%s date_to=%s subjectType=%s "
+                "ksef_returned=%d created=%d skipped_existing=%d errors=%d",
+                resolved_from,
+                resolved_to,
+                report["subject_type"],
+                report["ksef_returned"],
+                report["created"],
+                report["skipped_existing"],
+                report["errors"],
+            )
+            return report
+        except Exception as exc:
+            sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, str(exc))
+            raise
+
     def sync_received_invoices(
         self,
         nip: str,
@@ -329,7 +434,7 @@ class KSeFSessionService:
 
         Wymaga aktywnej sesji KSeF dla podanego NIP.
         Pomija faktury już istniejące w bazie (identyfikacja po ksefReferenceNumber).
-        Zwraca słownik: {received, saved, skipped_existing, skipped_parse}.
+        Zwraca słownik: {received, saved, skipped_existing, skipped_parse, subject_type, error_samples}.
         """
         if self.invoice_repository is None:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
@@ -337,6 +442,7 @@ class KSeFSessionService:
         ctx = self.get_session_context(nip)
 
         received = []
+        subject_type_used: str | None = None
         for subject_type in ("subject2", "subject1", "subject3"):
             try:
                 batch = self.ksef_client.query_received_invoices(
@@ -352,10 +458,13 @@ class KSeFSessionService:
                 raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
 
             logger.info(
-                "KSeF purchases sync subjectType=%s result_count=%d",
+                "KSeF purchases sync subjectType=%s result_count=%d date_from=%s date_to=%s",
                 subject_type,
                 len(batch),
+                date_from,
+                date_to,
             )
+            subject_type_used = subject_type
             if batch:
                 received = batch
                 break
@@ -363,6 +472,7 @@ class KSeFSessionService:
         saved = 0
         skipped_existing = 0
         skipped_parse = 0
+        error_samples: list[str] = []
         for result in received:
             if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
                 logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
@@ -373,6 +483,10 @@ class KSeFSessionService:
             except (ValueError, Exception) as exc:  # noqa: BLE001
                 logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
                 skipped_parse += 1
+                if len(error_samples) < _MAX_ERROR_SAMPLES:
+                    error_samples.append(
+                        f"{result.ksef_reference_number}: parse error: {str(exc)[:120]}"
+                    )
                 continue
 
             try:
@@ -452,13 +566,29 @@ class KSeFSessionService:
                     exc_info=True,
                 )
                 skipped_parse += 1
+                if len(error_samples) < _MAX_ERROR_SAMPLES:
+                    error_samples.append(
+                        f"{result.ksef_reference_number}: import error: {str(exc)[:120]}"
+                    )
 
         return {
             "received": len(received),
             "saved": saved,
             "skipped_existing": skipped_existing,
             "skipped_parse": skipped_parse,
+            "subject_type": subject_type_used,
+            "error_samples": error_samples,
         }
+
+    def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
+        requested_nip = (requested_nip or "").strip()
+        if requested_nip:
+            return requested_nip
+
+        seller_nip = (settings.seller_nip or "").strip()
+        if not seller_nip:
+            raise AppError("Brak NIP właściciela aplikacji w konfiguracji.")
+        return seller_nip
 
     # -------------------------------------------------------------------------
     # PRIVATE HELPERS
