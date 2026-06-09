@@ -359,7 +359,6 @@ class KSeFClient:
         query_ref: str | None = None
         poll_path_prefix: str | None = None
         last_exc: KSeFClientError | None = None
-        get_candidate_succeeded: bool = False
 
         def _is_wrong_invoice_reference_error(exc: KSeFClientError) -> bool:
             return exc.status_code == 400 and "21405" in str(exc)
@@ -391,7 +390,6 @@ class KSeFClient:
                     continue
                 raise
 
-            get_candidate_succeeded = True
             data = resp.json()
             if isinstance(data, dict) and isinstance(data.get("referenceNumber"), str):
                 query_ref = data["referenceNumber"]
@@ -410,14 +408,15 @@ class KSeFClient:
 
             # Sukces bez listy faktur traktujemy jako pusty wynik.
             logger.info("KSeF received invoices via %s: empty result", candidate)
-            invoice_refs = []
-            break
 
         # 2. Fallback do POST endpointów query.
         # UWAGA: NIE używamy /sessions/online/{ref}/invoices/query — KSeF v2
         # interpretuje ten path jako /sessions/online/{ref}/invoices/{invoiceReferenceNumber}
         # (gdzie invoiceReferenceNumber="query") i zwraca 400 / exceptionCode 21405.
-        if not invoice_refs and query_ref is None and not get_candidate_succeeded:
+        if not invoice_refs and query_ref is None:
+            logger.info(
+                "KSeF GET returned empty results, trying POST query fallback"
+            )
             query_path_candidates = [
                 f"/sessions/{session_reference}/invoices/query",
                 "/invoices/query",
@@ -472,7 +471,7 @@ class KSeFClient:
                         exc.status_code,
                     )
 
-        if not invoice_refs and query_ref is None and not get_candidate_succeeded:
+        if not invoice_refs and query_ref is None:
             raise last_exc or KSeFClientError("Brak dostępnego endpointu query dla KSeF.")
 
         # 3. Polling query reference — max 60s co 3s
