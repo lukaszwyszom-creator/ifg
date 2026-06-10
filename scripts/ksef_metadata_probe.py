@@ -15,8 +15,10 @@ Przykład:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from pathlib import Path
 
@@ -40,6 +42,26 @@ SUBJECT_CHOICES = ("Subject1", "Subject2", "Subject3")
 DATE_TYPE_CHOICES = ("Issue", "Invoicing", "PermanentStorage")
 KSEF_NUMBER_KEYS = ("ksefNumber", "ksefReferenceNumber", "ksef_reference_number")
 
+# Klucz używany przez KSeFSessionService / KSeFClient w normalnym syncu.
+_SYNC_ACCESS_TOKEN_KEY = "access_token"
+_TOKEN_LIKE_METADATA_KEYS = (
+    "access_token",
+    "refresh_token",
+    "session_token",
+    "bearer",
+    "token",
+)
+
+
+@dataclass(frozen=True)
+class ResolvedAuth:
+    access_token: str
+    auth_mode: str
+    token_source: str
+    session_reference: str | None = None
+    db_session_id: str | None = None
+    metadata_keys_present: tuple[str, ...] = ()
+
 
 def _parse_date_arg(value: str, *, end_of_day: bool = False) -> str:
     parsed = date.fromisoformat(value)
@@ -50,11 +72,42 @@ def _parse_date_arg(value: str, *, end_of_day: bool = False) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env: str) -> str:
+def _token_sha256_prefix(token: str, *, length: int = 12) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:length]
+
+
+def _token_like_keys_present(metadata: dict) -> tuple[str, ...]:
+    return tuple(key for key in _TOKEN_LIKE_METADATA_KEYS if metadata.get(key))
+
+
+def _log_token_diagnostics(resolved: ResolvedAuth) -> None:
+    token = resolved.access_token
+    print(
+        f"[auth-diag] source={resolved.auth_mode} "
+        f"token_field={resolved.token_source} "
+        f"length={len(token)} "
+        f"sha256_prefix={_token_sha256_prefix(token)}"
+    )
+    if resolved.metadata_keys_present:
+        print(
+            "[auth-diag] token_metadata_json token-like keys present: "
+            f"{', '.join(resolved.metadata_keys_present)}"
+        )
+    if resolved.db_session_id:
+        print(f"[auth-diag] db_session_id={resolved.db_session_id}")
+    if resolved.session_reference:
+        print(f"[auth-diag] session_reference={resolved.session_reference}")
+
+
+def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env: str) -> ResolvedAuth:
     if auth == "token":
         if not access_token:
             raise SystemExit("--access-token wymagany przy --auth token")
-        return access_token
+        return ResolvedAuth(
+            access_token=access_token,
+            auth_mode="token",
+            token_source="--access-token",
+        )
 
     if auth == "session":
         with session_scope() as db:
@@ -67,11 +120,25 @@ def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env:
             if orm is None:
                 raise SystemExit(f"Brak aktywnej sesji KSeF dla NIP={nip}")
             metadata = orm.token_metadata_json or {}
-            token = metadata.get("access_token")
+            keys_present = _token_like_keys_present(metadata)
+            token = metadata.get(_SYNC_ACCESS_TOKEN_KEY)
             if not token:
-                raise SystemExit("Aktywna sesja nie zawiera access_token w token_metadata_json")
-            print(f"[auth] Użyto access_token z sesji DB (id={orm.id}, ref={orm.session_reference})")
-            return token
+                raise SystemExit(
+                    f"Aktywna sesja nie zawiera {_SYNC_ACCESS_TOKEN_KEY!r} w token_metadata_json "
+                    f"(obecne klucze token-like: {', '.join(keys_present) or 'brak'})"
+                )
+            print(
+                f"[auth] Użyto {_SYNC_ACCESS_TOKEN_KEY!r} z token_metadata_json "
+                f"(to samo pole co KSeFClient/sync; id={orm.id})"
+            )
+            return ResolvedAuth(
+                access_token=token,
+                auth_mode="session",
+                token_source=f"token_metadata_json.{_SYNC_ACCESS_TOKEN_KEY}",
+                session_reference=orm.session_reference,
+                db_session_id=str(orm.id),
+                metadata_keys_present=keys_present,
+            )
 
     ksef_token = settings.ksef_auth_token
     if not ksef_token:
@@ -86,7 +153,70 @@ def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env:
     except KSeFAuthError as exc:
         raise SystemExit(f"Błąd uwierzytelnienia KSeF: {exc}") from exc
     print(f"[auth] Nowy access_token z KSeFAuthProvider (env={env}, nip={nip})")
-    return session.access_token
+    return ResolvedAuth(
+        access_token=session.access_token,
+        auth_mode="fresh",
+        token_source="KSeFAuthProvider.access_token",
+    )
+
+
+def _run_auth_sanity_checks(
+    *,
+    base_url: str,
+    access_token: str,
+    session_reference: str | None,
+    date_from: str,
+    date_to: str,
+    timeout: int,
+) -> None:
+    public_url = f"{base_url}/security/public-key-certificates"
+    print(f"[auth-check] GET {public_url} (no auth, connectivity control)")
+    try:
+        resp = httpx.get(public_url, timeout=timeout)
+        print(
+            f"[auth-check] public-key-certificates HTTP {resp.status_code} "
+            f"body_len={len(resp.content)}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[auth-check] public-key-certificates failed: {exc}")
+
+    if not session_reference:
+        print("[auth-check] session probe skipped (brak session_reference — użyj --auth session)")
+        return
+
+    session_url = f"{base_url}/sessions/{session_reference}/invoices"
+    params = {
+        "invoicingDateFrom": date_from,
+        "invoicingDateTo": date_to,
+    }
+    print(f"[auth-check] GET {session_url} params={params} (session endpoint, same token as metadata)")
+    try:
+        resp = httpx.get(
+            session_url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            timeout=timeout,
+        )
+        if resp.status_code >= 400:
+            snippet = resp.text[:200]
+            print(f"[auth-check] session/invoices HTTP {resp.status_code}: {snippet}")
+        else:
+            print(
+                f"[auth-check] session/invoices HTTP {resp.status_code} "
+                f"body_len={len(resp.content)}"
+            )
+        if resp.status_code == 200:
+            print(
+                "[auth-check] token akceptowany na sesyjnym GET — "
+                "401 na metadata sugeruje inny wymóg auth/scope niż sesja online"
+            )
+        elif resp.status_code == 401:
+            print(
+                "[auth-check] token odrzucony także na sesyjnym GET — "
+                "wygasły/nieważny token lub zły typ"
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[auth-check] session/invoices failed: {exc}")
 
 
 def _extract_invoices(payload: dict) -> list[dict]:
@@ -255,12 +385,13 @@ def main() -> None:
     date_to = _parse_date_arg(args.date_to, end_of_day=True)
     output_dir = Path(args.output_dir)
 
-    access_token = _resolve_access_token(
+    resolved = _resolve_access_token(
         auth=args.auth,
         nip=nip,
         access_token=args.access_token,
         env=env,
     )
+    _log_token_diagnostics(resolved)
 
     subjects = _expand_choice(args.subject, SUBJECT_CHOICES)
     date_types = _expand_choice(args.date_type, DATE_TYPE_CHOICES)
@@ -268,12 +399,21 @@ def main() -> None:
     print(f"[config] env={env} base_url={base_url} nip={nip} auth={args.auth}")
     print(f"[config] combinations={len(subjects) * len(date_types)}")
 
+    _run_auth_sanity_checks(
+        base_url=base_url,
+        access_token=resolved.access_token,
+        session_reference=resolved.session_reference,
+        date_from=date_from,
+        date_to=date_to,
+        timeout=args.timeout,
+    )
+
     exit_code = 0
     for subject_type in subjects:
         for date_type in date_types:
             rc = _run_probe(
                 base_url=base_url,
-                access_token=access_token,
+                access_token=resolved.access_token,
                 subject_type=subject_type,
                 date_type=date_type,
                 date_from=date_from,
