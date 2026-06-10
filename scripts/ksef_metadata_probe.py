@@ -88,15 +88,14 @@ def _log_token_diagnostics(resolved: ResolvedAuth) -> None:
         f"length={len(token)} "
         f"sha256_prefix={_token_sha256_prefix(token)}"
     )
-    if resolved.metadata_keys_present:
+    if resolved.auth_mode == "session":
+        print(f"[auth-diag] session_id={resolved.db_session_id or 'brak'}")
+        print(f"[auth-diag] session_reference={resolved.session_reference or 'brak'}")
+        keys = resolved.metadata_keys_present or ()
         print(
-            "[auth-diag] token_metadata_json token-like keys present: "
-            f"{', '.join(resolved.metadata_keys_present)}"
+            "[auth-diag] token_metadata_json token-like keys: "
+            f"{', '.join(keys) if keys else 'brak'}"
         )
-    if resolved.db_session_id:
-        print(f"[auth-diag] db_session_id={resolved.db_session_id}")
-    if resolved.session_reference:
-        print(f"[auth-diag] session_reference={resolved.session_reference}")
 
 
 def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env: str) -> ResolvedAuth:
@@ -160,36 +159,23 @@ def _resolve_access_token(*, auth: str, nip: str, access_token: str | None, env:
     )
 
 
-def _run_auth_sanity_checks(
+def _run_session_auth_check(
     *,
     base_url: str,
     access_token: str,
-    session_reference: str | None,
+    session_reference: str,
     date_from: str,
     date_to: str,
     timeout: int,
 ) -> None:
-    public_url = f"{base_url}/security/public-key-certificates"
-    print(f"[auth-check] GET {public_url} (no auth, connectivity control)")
-    try:
-        resp = httpx.get(public_url, timeout=timeout)
-        print(
-            f"[auth-check] public-key-certificates HTTP {resp.status_code} "
-            f"body_len={len(resp.content)}"
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(f"[auth-check] public-key-certificates failed: {exc}")
-
-    if not session_reference:
-        print("[auth-check] session probe skipped (brak session_reference — użyj --auth session)")
-        return
-
     session_url = f"{base_url}/sessions/{session_reference}/invoices"
     params = {
+        "invoiceType": "received",
+        "subjectType": "subject2",
         "invoicingDateFrom": date_from,
         "invoicingDateTo": date_to,
     }
-    print(f"[auth-check] GET {session_url} params={params} (session endpoint, same token as metadata)")
+    print(f"[auth-check] GET {session_url} params={params}")
     try:
         resp = httpx.get(
             session_url,
@@ -197,26 +183,11 @@ def _run_auth_sanity_checks(
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             timeout=timeout,
         )
-        if resp.status_code >= 400:
-            snippet = resp.text[:200]
-            print(f"[auth-check] session/invoices HTTP {resp.status_code}: {snippet}")
-        else:
-            print(
-                f"[auth-check] session/invoices HTTP {resp.status_code} "
-                f"body_len={len(resp.content)}"
-            )
-        if resp.status_code == 200:
-            print(
-                "[auth-check] token akceptowany na sesyjnym GET — "
-                "401 na metadata sugeruje inny wymóg auth/scope niż sesja online"
-            )
-        elif resp.status_code == 401:
-            print(
-                "[auth-check] token odrzucony także na sesyjnym GET — "
-                "wygasły/nieważny token lub zły typ"
-            )
+        print(f"[auth-check] status={resp.status_code}")
+        print(f"[auth-check] body_snippet={resp.text[:300]}")
     except Exception as exc:  # noqa: BLE001
-        print(f"[auth-check] session/invoices failed: {exc}")
+        print("[auth-check] status=error")
+        print(f"[auth-check] body_snippet={str(exc)[:300]}")
 
 
 def _extract_invoices(payload: dict) -> list[dict]:
@@ -399,14 +370,18 @@ def main() -> None:
     print(f"[config] env={env} base_url={base_url} nip={nip} auth={args.auth}")
     print(f"[config] combinations={len(subjects) * len(date_types)}")
 
-    _run_auth_sanity_checks(
-        base_url=base_url,
-        access_token=resolved.access_token,
-        session_reference=resolved.session_reference,
-        date_from=date_from,
-        date_to=date_to,
-        timeout=args.timeout,
-    )
+    if args.auth == "session":
+        if not resolved.session_reference:
+            print("[auth-check] session probe skipped (brak session_reference w DB)")
+        else:
+            _run_session_auth_check(
+                base_url=base_url,
+                access_token=resolved.access_token,
+                session_reference=resolved.session_reference,
+                date_from=date_from,
+                date_to=date_to,
+                timeout=args.timeout,
+            )
 
     exit_code = 0
     for subject_type in subjects:

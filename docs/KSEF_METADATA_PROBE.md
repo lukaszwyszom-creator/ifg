@@ -141,14 +141,31 @@ Przed macierzą metadata skrypt wypisuje bezpieczny fingerprint tokena (bez wart
 - `length` — długość tokena
 - `sha256_prefix` — pierwsze 12 znaków SHA256 tokena
 
-Następnie wykonuje dwa testy kontrolne:
+Przy **`--auth session`** dodatkowo:
 
-1. **`GET /security/public-key-certificates`** — bez auth (kontrola łączności z API MF).
-2. **`GET /sessions/{session_reference}/invoices`** — z tym samym tokenem i minimalnymi parametrami dat (kontrola, czy token działa na sesyjnych endpointach używanych przez sync IFG).
+- `session_id` — UUID rekordu w `ksef_sessions`
+- `session_reference` — referencja sesji online KSeF
+- lista kluczy token-like w `token_metadata_json` (np. `access_token`, `refresh_token`) — **bez wartości**
 
-Test sesyjny uruchamia się tylko przy `--auth session` (wtedy jest `session_reference` w DB). Przy `--auth fresh` / `--auth token` jest pomijany.
+Następnie (tylko `--auth session`) wykonuje test sesyjny:
 
-W trybie `--auth session` token pobierany jest z **`token_metadata_json.access_token`** — to samo pole co w `KSeFSessionService` / `KSeFClient` podczas normalnego syncu. Skrypt loguje też, które token-like klucze są obecne w JSON (np. `access_token`, `refresh_token`), bez wypisywania wartości.
+`GET /sessions/{session_reference}/invoices` z tym samym Bearer tokenem i parametrami:
+
+```
+invoiceType=received
+subjectType=subject2
+invoicingDateFrom=<date_from>
+invoicingDateTo=<date_to>
+```
+
+Wynik:
+
+```
+[auth-check] status=<kod HTTP>
+[auth-check] body_snippet=<pierwsze 300 znaków odpowiedzi>
+```
+
+Token pobierany jest z **`token_metadata_json.access_token`** — to samo pole co w sync IFG.
 
 ---
 
@@ -191,20 +208,13 @@ Brak wyników **nie potwierdza** poprawności obecnego sync IFG — wręcz wskaz
 
 ---
 
-## 9. Interpretacja HTTP 401
+## 9. Interpretacja wyników auth-check vs metadata
 
-| Scenariusz | `[auth-check]` session/invoices | `[query]` metadata | Interpretacja |
-|------------|--------------------------------|--------------------|---------------|
-| A | 200 | 401 | Token **działa na sesji online**, ale **metadata wymaga innego flow/auth** (np. świeży token z `/auth/token/redeem`, nie ten z cache sesji DB) |
-| B | 401 | 401 | Token **nieważny/wygasły** lub **niewłaściwego typu** — problem dotyczy auth ogólnie, nie tylko metadata |
-| C | 200 | 200, `total=0` | Auth OK, brak faktur w zakresie / złý subjectType / uprawnienia widoczności |
-| D | pominięty (`--auth fresh`) | 401 | Porównaj z `--auth fresh` — jeśli fresh działa, token z DB sesji jest niewłaściwy lub wygasły |
-
-Możliwe przyczyny 401 na metadata przy działającym sesyjnym GET:
-
-- **Token niewłaściwego typu** — token powiązany z sesją online vs access token z auth flow MF.
-- **Brak uprawnień** — token nie ma scope do `/invoices/query/metadata` (inna rola niż odczyt sesyjny).
-- **Metadata wymaga innego auth** — endpoint poza kontekstem sesji online; użyj `--auth fresh` zamiast `--auth session`.
+| `[auth-check]` session GET | `[query]` metadata | Interpretacja |
+|----------------------------|-------------------|---------------|
+| **200** | **401** | Token **działa dla sesji online**, ale **nie dla metadata** — inny wymóg auth/scope; spróbuj `--auth fresh` |
+| **401** | **401** | Token **nieważny / wygasły / niewłaściwy** — problem auth ogólnie |
+| **200** | **200** | **Auth OK** — badamy wyniki metadata (`total`, numery KSeF) |
 
 ---
 
