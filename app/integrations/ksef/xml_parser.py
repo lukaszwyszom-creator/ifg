@@ -176,7 +176,8 @@ def _extract_required_structure(
 
 def _extract_basic_fields(fa_el: etree._Element) -> tuple[str, str, str, str]:
     issue_date_txt = _txt(_find(fa_el, "fa:P_1"))
-    sale_date_txt = _txt(_find(fa_el, "fa:P_1M")) or issue_date_txt
+    # FA(3): P_6 = data dostawy/wykonania usługi; P_1M = miejscowość wystawienia (nie data).
+    sale_date_txt = _txt(_find(fa_el, "fa:P_6")) or issue_date_txt
     number_local = _txt(_find(fa_el, "fa:P_2"))
     currency = _txt(_find(fa_el, "fa:KodWaluty")) or "PLN"
     return issue_date_txt, sale_date_txt, number_local, currency

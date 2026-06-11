@@ -52,3 +52,44 @@ def test_parse_fa3_xml_reads_nested_identity_and_due_date() -> None:
     assert parsed["seller_snapshot"]["name"] == "Testowy Sprzedawca Sp. z o.o."
     assert parsed["buyer_snapshot"]["nip"] == "9670402857"
     assert parsed["due_date"] == "2026-04-16"
+
+
+def test_parse_fa3_xml_sale_date_uses_p6_not_p1m_place_of_issue() -> None:
+    """P_1M to miejscowość wystawienia (np. Warszawa), nie data sprzedaży."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>1112223344</NIP>
+      <Nazwa>Sprzedawca SA</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>9670402857</NIP>
+      <Nazwa>Nabywca Sp. z o.o.</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-10</P_1>
+    <P_1M>Warszawa</P_1M>
+    <P_2>FV/KSEF/1</P_2>
+    <P_6>2026-05-08</P_6>
+    <P_13_1>100.00</P_13_1>
+    <P_14_1>23.00</P_14_1>
+    <P_15>123.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+  </Fa>
+</Faktura>
+"""
+
+    parsed = parse_fa3_xml(xml)
+
+    assert parsed["issue_date"] == "2026-05-10"
+    assert parsed["sale_date"] == "2026-05-08"
+    assert parsed["sale_date"] != "Warszawa"
+
+    from datetime import date
+
+    date.fromisoformat(parsed["sale_date"])
