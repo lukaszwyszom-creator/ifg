@@ -15,6 +15,8 @@ DEFAULT_REMOTE_HOST = "ds723"
 DEFAULT_REMOTE_PATH = "/volume1/docker/ifg_v2/ifg_standalone"
 COMPOSE_FILE = "docker/docker-compose.prod.yml"
 COMMIT_MSG = "fix: harden KSeF async sync deploy flow"
+REMOTE_NPM_PATH = "/usr/local/bin:/opt/bin:/opt/homebrew/bin"
+NPM_NOT_FOUND_MSG = "npm not found on DS723+ non-interactive SSH session"
 
 DEPLOY_ALLOWLIST = (
     "app/api/routers/ksef_session.py",
@@ -46,6 +48,16 @@ def _resolve_host(cli_host: str | None) -> str:
 
 def _quote_shell(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def _remote_with_npm(shell_cmd: str) -> str:
+    """Ładuje PATH dla nieinteraktywnego SSH i weryfikuje dostępność npm."""
+    return (
+        f'export PATH="{REMOTE_NPM_PATH}:$PATH" && '
+        "command -v npm >/dev/null 2>&1 || "
+        f'{{ echo "{NPM_NOT_FOUND_MSG}" >&2; exit 127; }} && '
+        f"{shell_cmd}"
+    )
 
 
 def run(
@@ -81,6 +93,8 @@ def run(
     try:
         subprocess.run(argv, cwd=exec_cwd, check=True, text=True)
     except subprocess.CalledProcessError as exc:
+        if remote and "npm" in display and exc.returncode == 127:
+            raise DeployAbort(NPM_NOT_FOUND_MSG) from exc
         raise DeployAbort(f"Polecenie nie powiodło się (exit {exc.returncode}): {display}") from exc
 
 
@@ -164,7 +178,7 @@ def deploy_ksef_remote(*, host: str, dry_run: bool) -> None:
     _ensure_remote_production_branch(host=host, dry_run=dry_run)
     run("git pull origin production", remote=True, host=host, dry_run=dry_run)
     run(
-        "cd frontend-react && npm ci && npm run build",
+        _remote_with_npm("cd frontend-react && npm ci && npm run build"),
         remote=True,
         host=host,
         dry_run=dry_run,

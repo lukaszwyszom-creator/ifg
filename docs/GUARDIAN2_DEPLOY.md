@@ -45,7 +45,7 @@ Host SSH: `IFG_DS723_HOST` lub `ds723`.
 1. SSH → `cd /volume1/docker/ifg_v2/ifg_standalone`
 2. `git branch --show-current` → musi być `production`
 3. `git pull origin production`
-4. `cd frontend-react && npm ci && npm run build`
+4. `export PATH=...` + `cd frontend-react && npm ci && npm run build` (npm musi być w PATH)
 5. `sudo docker compose -f docker/docker-compose.prod.yml build api`
 6. `sudo docker compose -f docker/docker-compose.prod.yml up -d --no-deps --force-recreate api worker`
 7. `python3 scripts/guardian.py --ksef-async-check`
@@ -73,6 +73,27 @@ Bez `--yes`: przed remote → `Kontynuować deploy na DS723+? [y/N]`
 - Artefakt builda Vite (`npm run build`), **nie** commitowany (`.gitignore`)
 - **Lokalnie:** budowany w kroku 3 przed `--ksef-async-check` (walidacja bundle)
 - **DS723+:** budowany ponownie w kroku 4 remote — ten dist trafia do produkcji
+
+## DS723+ npm PATH w sesji SSH
+
+Nieinteraktywne `ssh host command` nie ładuje profilu powłoki — `npm` bywa niewidoczny (`sh: npm: command not found`).
+
+Guardian2 przed remote buildem ustawia:
+
+```bash
+export PATH="/usr/local/bin:/opt/bin:/opt/homebrew/bin:$PATH"
+command -v npm >/dev/null 2>&1 || { echo "npm not found on DS723+ non-interactive SSH session"; exit 127; }
+cd frontend-react && npm ci && npm run build
+```
+
+Jeśli `npm` nadal nie istnieje w PATH → deploy **abort** z komunikatem  
+`npm not found on DS723+ non-interactive SSH session`.
+
+Ręczna weryfikacja na DS723+:
+
+```bash
+ssh ds723 'export PATH="/usr/local/bin:/opt/bin:/opt/homebrew/bin:$PATH"; command -v npm; npm -v'
+```
 
 ## Bezpieczniki
 
