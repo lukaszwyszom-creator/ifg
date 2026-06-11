@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ksefApi } from '../../api/ksef';
+import { ksefApi, formatPurchaseSyncError } from '../../api/ksef';
 import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFSessionBar.module.css';
@@ -175,6 +175,7 @@ export default function KSeFSessionBar() {
     if (!session) return;
     clearMsgs();
     setSyncBusy(true);
+    setSuccessMsg('Uruchamiam async sync…');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
       const { counts } = await ksefApi.runPurchaseSync(session.nip, {
@@ -198,16 +199,11 @@ export default function KSeFSessionBar() {
       await loadSyncStatus();
     } catch (err) {
       if (err.timedOut) {
-        setSuccessMsg('Synchronizacja trwa dłużej niż oczekiwano — odśwież listę faktur za chwilę.');
+        setSuccessMsg(formatPurchaseSyncError(err, err.syncEndpoint));
         await loadSyncStatus();
         return;
       }
-      const msg =
-        err.response?.data?.error?.message ??
-        err.response?.data?.detail ??
-        err.message ??
-        'Błąd synchronizacji faktur';
-      setError(msg);
+      setError(formatPurchaseSyncError(err, err.syncEndpoint));
     } finally {
       setSyncBusy(false);
       setSyncRunning(false);

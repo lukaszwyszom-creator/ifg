@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ksefApi } from '../../api/ksef';
+import { ksefApi, formatPurchaseSyncError } from '../../api/ksef';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFTopbarInfo.module.css';
 
@@ -74,6 +74,8 @@ export default function KSeFTopbarInfo() {
     if (!sellerNip || !isConnected || syncBusy || syncRunning) return;
     setSyncBusy(true);
     setFlashMsg('');
+    setFlashType('success');
+    setFlashMsg('Uruchamiam async sync…');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
       const { counts } = await ksefApi.runPurchaseSync(sellerNip, {
@@ -98,11 +100,7 @@ export default function KSeFTopbarInfo() {
     } catch (err) {
       console.error('Błąd synchronizacji KSeF:', err);
       setFlashType('error');
-      if (err.timedOut) {
-        setFlashMsg('Trwa zbyt długo — sprawdź status');
-      } else {
-        setFlashMsg('Błąd');
-      }
+      setFlashMsg(formatPurchaseSyncError(err, err.syncEndpoint));
     } finally {
       setSyncBusy(false);
       setSyncRunning(false);

@@ -1,5 +1,6 @@
 """Endpointy zarządzania sesją KSeF."""
 
+import logging
 from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
@@ -24,6 +25,8 @@ from app.schemas.ksef_session import (
 from app.services.ksef_session_service import KSeFSessionService
 from app.services.ksef_sync_service import KSeFSyncService
 from app.services.settings_service import SettingsService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ksef/session", tags=["ksef-session"])
 router_status = APIRouter(prefix="/ksef", tags=["ksef-session"])
@@ -297,13 +300,14 @@ def sync_purchase_invoices(
 ) -> SyncPurchaseJobResponse:
     """POST /api/v1/ksef-sessions/sync-purchase — enqueue job synchronizacji faktur zakupowych."""
     from uuid import uuid4
-    from datetime import UTC, datetime
     from app.persistence.models.background_job import BackgroundJob
 
+    job_id = uuid4()
     job = BackgroundJob(
-        id=uuid4(),
+        id=job_id,
         job_type="sync_purchase_invoices",
         payload_json={
+            "job_id": str(job_id),
             "nip": body.nip,
             "date_from": body.date_from.isoformat(),
             "date_to": body.date_to.isoformat(),
@@ -314,6 +318,13 @@ def sync_purchase_invoices(
     )
     session.add(job)
     session.commit()
+    logger.info(
+        "KSEF_ASYNC_SYNC_ENQUEUE nip=%s date_from=%s date_to=%s job_id=%s",
+        body.nip,
+        body.date_from.isoformat(),
+        body.date_to.isoformat(),
+        job_id,
+    )
     return SyncPurchaseJobResponse(job_id=str(job.id), status="pending")
 
 
@@ -352,6 +363,11 @@ def get_sync_purchase_job_status(
     elif job.status == "failed":
         error = job.last_error
 
+    logger.info(
+        "KSEF_ASYNC_SYNC_JOB_STATUS job_id=%s status=%s",
+        job_id,
+        job.status,
+    )
     return SyncPurchaseJobStatusResponse(
         job_id=str(job.id),
         status=job.status,

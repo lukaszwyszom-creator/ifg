@@ -10,6 +10,8 @@ let statusDebouncedNip = null;
 export const PURCHASE_SYNC_DAYS_BACK = 90;
 export const PURCHASE_SYNC_POLL_INTERVAL_MS = 3000;
 export const PURCHASE_SYNC_MAX_POLL_ATTEMPTS = 120;
+export const PURCHASE_SYNC_ENQUEUE_ENDPOINT = '/api/v1/ksef-sessions/sync-purchase';
+export const PURCHASE_SYNC_JOB_STATUS_PREFIX = '/api/v1/ksef-sessions/sync-purchase/jobs/';
 
 function fetchStatusNow(nip = null) {
   const normalizedNip = nip || null;
@@ -113,11 +115,21 @@ function sleep(ms) {
   });
 }
 
-/** Dev/test: potwierdzenie ścieżki sync w konsoli (Network → POST sync-purchase). */
+/** Produkcyjnie bezpieczny log diagnostyczny (bez tokenów — tylko endpoint/NIP/daty/jobId). */
 function logPurchaseSyncPath(step, detail) {
-  if (import.meta.env?.DEV) {
-    console.info(`[ksef-purchase-sync] ${step}`, detail ?? '');
-  }
+  console.info('[ksef-purchase-sync]', step, detail ?? '');
+}
+
+export function formatPurchaseSyncError(err, endpoint = PURCHASE_SYNC_ENQUEUE_ENDPOINT) {
+  const status = err.response?.status ?? (err.timedOut ? 'timeout' : '—');
+  const apiMsg = err.response?.data?.error?.message ?? err.response?.data?.detail;
+  const message = apiMsg ?? err.message ?? 'Unknown error';
+  return `${status} ${endpoint}: ${message}`;
+}
+
+function attachSyncErrorMeta(err, endpoint) {
+  err.syncEndpoint = endpoint;
+  return err;
 }
 
 async function pollPurchaseSyncJob(
@@ -141,11 +153,13 @@ async function pollPurchaseSyncJob(
     if (jobStatus.status === 'failed') {
       const err = new Error(jobStatus.error || 'Synchronizacja zakończona błędem.');
       err.jobStatus = jobStatus;
+      attachSyncErrorMeta(err, `${PURCHASE_SYNC_JOB_STATUS_PREFIX}${jobId}`);
       throw err;
     }
   }
   const err = new Error('Przekroczono czas oczekiwania na synchronizację KSeF.');
   err.timedOut = true;
+  attachSyncErrorMeta(err, `${PURCHASE_SYNC_JOB_STATUS_PREFIX}${jobId}`);
   throw err;
 }
 
@@ -197,23 +211,41 @@ async function runPurchaseSync(
 
   let jobId;
   try {
-    logPurchaseSyncPath('enqueue', { nip, dateFrom, dateTo });
+    logPurchaseSyncPath('enqueue', {
+      endpoint: PURCHASE_SYNC_ENQUEUE_ENDPOINT,
+      nip,
+      dateFrom,
+      dateTo,
+    });
     const enqueueResponse = await syncPurchaseInvoices(nip, dateFrom, dateTo);
     jobId = enqueueResponse.job_id;
     if (!jobId) {
-      throw new Error('Brak job_id w odpowiedzi POST /ksef-sessions/sync-purchase');
+      throw attachSyncErrorMeta(
+        new Error('Brak job_id w odpowiedzi POST /ksef-sessions/sync-purchase'),
+        PURCHASE_SYNC_ENQUEUE_ENDPOINT,
+      );
     }
+    logPurchaseSyncPath('enqueue-ok', {
+      endpoint: PURCHASE_SYNC_ENQUEUE_ENDPOINT,
+      nip,
+      dateFrom,
+      dateTo,
+      jobId,
+    });
   } catch (err) {
     if (err.response?.status === 404) {
+      logPurchaseSyncPath('fallback-404', PURCHASE_SYNC_ENQUEUE_ENDPOINT);
       if (onStarted) {
         onStarted({ mode: 'sync' });
       }
       return syncPurchasesNowFallback(nip, { dateFrom, dateTo, daysBack, forceFull });
     }
     logPurchaseSyncPath('enqueue-error', {
+      endpoint: PURCHASE_SYNC_ENQUEUE_ENDPOINT,
       status: err.response?.status,
       message: err.message,
     });
+    attachSyncErrorMeta(err, PURCHASE_SYNC_ENQUEUE_ENDPOINT);
     throw err;
   }
 
@@ -237,6 +269,7 @@ export const ksefApi = {
   markStatusMutation,
   normalizePurchaseSyncCounts,
   purchaseSyncDateRange,
+  formatPurchaseSyncError,
 
   openSession: (nip) =>
     client.post('/ksef-sessions/', { nip }).then((r) => r.data),

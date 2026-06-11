@@ -1,13 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
+const componentsDir = join(__dir, '../components');
 
 function read(relativePath) {
   return readFileSync(join(__dir, relativePath), 'utf-8');
+}
+
+function listJsxFiles(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      files.push(...listJsxFiles(full));
+    } else if (entry.endsWith('.jsx')) {
+      files.push(full);
+    }
+  }
+  return files;
 }
 
 test('ksef API: runPurchaseSync preferuje syncPurchaseInvoices + polling job status', () => {
@@ -18,6 +32,8 @@ test('ksef API: runPurchaseSync preferuje syncPurchaseInvoices + polling job sta
   assert.match(source, /sync-purchase\/jobs/);
   assert.match(source, /ksefApi\.syncPurchaseInvoices/);
   assert.match(source, /ksefApi\.getSyncPurchaseJobStatus/);
+  assert.match(source, /console\.info\('\[ksef-purchase-sync\]'/);
+  assert.match(source, /export function formatPurchaseSyncError/);
 });
 
 test('ksef API: fallback sync tylko przy HTTP 404 na enqueue', () => {
@@ -29,13 +45,24 @@ test('ksef API: fallback sync tylko przy HTTP 404 na enqueue', () => {
   assert.doesNotMatch(source, /await pollPurchaseSyncJob[\s\S]*syncPurchasesNowFallback/);
 });
 
-test('UI Odśwież KSeF: używa runPurchaseSync, bez syncPurchasesNow', () => {
+test('UI Odśwież KSeF: używa runPurchaseSync, bez syncPurchasesNow we wszystkich komponentach', () => {
   const topbar = read('../components/layout/KSeFTopbarInfo.jsx');
   const sessionBar = read('../components/dashboard/KSeFSessionBar.jsx');
   assert.match(topbar, /ksefApi\.runPurchaseSync\(/);
-  assert.doesNotMatch(topbar, /syncPurchasesNow/);
+  assert.match(topbar, /Uruchamiam async sync/);
   assert.match(sessionBar, /ksefApi\.runPurchaseSync\(/);
-  assert.doesNotMatch(sessionBar, /syncPurchasesNow/);
+  assert.match(sessionBar, /Uruchamiam async sync/);
+  assert.match(topbar, /formatPurchaseSyncError/);
+  assert.match(sessionBar, /formatPurchaseSyncError/);
+
+  for (const jsxPath of listJsxFiles(componentsDir)) {
+    const source = readFileSync(jsxPath, 'utf-8');
+    assert.doesNotMatch(
+      source,
+      /syncPurchasesNow\s*\(/,
+      `syncPurchasesNow( w ${jsxPath}`,
+    );
+  }
 });
 
 test('normalizePurchaseSyncCounts: mapuje pola sync v2 i job result', () => {

@@ -29,6 +29,7 @@ class SyncPurchaseInvoicesJobHandler:
     def handle(self, payload: dict) -> dict:
         from datetime import date
 
+        job_id = payload.get("job_id", "?")
         nip: str = payload["nip"]
         date_from = date.fromisoformat(payload["date_from"])
         date_to = date.fromisoformat(payload["date_to"])
@@ -37,23 +38,33 @@ class SyncPurchaseInvoicesJobHandler:
         from uuid import UUID
         actor_id = UUID(actor_user_id) if actor_user_id else None
 
-        report = self._ksef_session_service.sync_purchase_invoices(
-            nip=nip,
-            date_from=date_from,
-            date_to=date_to,
-            actor_user_id=actor_id,
-        )
+        logger.info("KSEF_ASYNC_SYNC_WORKER_START job_id=%s nip=%s", job_id, nip)
+        try:
+            report = self._ksef_session_service.sync_purchase_invoices(
+                nip=nip,
+                date_from=date_from,
+                date_to=date_to,
+                actor_user_id=actor_id,
+            )
 
-        counts = {
-            "saved": report["created"],
-            "received": report["ksef_returned"],
-            "skipped_existing": report["skipped_existing"],
-            "skipped_parse": report["errors"],
-        }
+            counts = {
+                "saved": report["created"],
+                "received": report["ksef_returned"],
+                "skipped_existing": report["skipped_existing"],
+                "skipped_parse": report["errors"],
+            }
 
-        logger.info(
-            "sync_purchase_invoices job %s done: %s",
-            payload.get("job_id", "?"),
-            counts,
-        )
-        return counts
+            logger.info(
+                "KSEF_ASYNC_SYNC_WORKER_DONE job_id=%s saved=%s received=%s",
+                job_id,
+                counts["saved"],
+                counts["received"],
+            )
+            return counts
+        except Exception as exc:
+            logger.error(
+                "KSEF_ASYNC_SYNC_WORKER_ERROR job_id=%s error=%s",
+                job_id,
+                exc,
+            )
+            raise

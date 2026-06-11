@@ -18,6 +18,10 @@ Obserwacje:
 
 ## Rozwiązanie
 
+### Diagnostyka E2E (aktualizacja)
+
+Patrz **`docs/KSEF_ASYNC_SYNC_E2E_DIAGNOSTIC.md`** — logi `KSEF_ASYNC_SYNC_*` (API/worker), `[ksef-purchase-sync]` (frontend), Guardian `--ksef-async-check`, tabela „gdzie ginie request”.
+
 ### Jedyny punkt wejścia UI
 
 Komponenty używają **`ksefApi.runPurchaseSync()`** — bez bezpośredniego `syncPurchasesNow()`.

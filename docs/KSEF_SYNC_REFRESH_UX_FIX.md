@@ -25,6 +25,8 @@ Przełączenie głównego przepływu UI na **asynchroniczny job**:
 
 **Fallback** (tylko gdy job API zwraca **404**): synchroniczny `POST /api/v1/ksef/sync/purchases` z **`timeout: 600000`** — bez fałszywego „w tle” po 30 s.
 
+> **Aktualizacja (force async):** patrz `docs/KSEF_FORCE_ASYNC_PURCHASE_SYNC.md` — `runPurchaseSync()` zawsze woła `syncPurchaseInvoices()` + polling; fallback sync **wyłącznie** przy 404 na enqueue (nie przy timeout/429/500).
+
 ### Czy async używa sync v2?
 
 **Tak, dla pobierania z KSeF.** Worker `sync_purchase_invoices` wywołuje `KSeFSessionService.sync_received_invoices()`, które korzysta z `ksef_client.query_received_invoices()` — tej samej ścieżki metadata + download XML co sync produkcyjny.
@@ -35,7 +37,7 @@ Przełączenie głównego przepływu UI na **asynchroniczny job**:
 |--------|-------------------|-----------|
 | Pobieranie KSeF | `query_received_invoices` (v2) | `query_received_invoices` (v2) |
 | Okno dat | `days_back` z ustawień (domyślnie 90) | UI wysyła `date_from`/`date_to` (90 dni) |
-| `KSeFSyncStateRepository` | `mark_running` / `mark_success` | **nie aktualizuje** stanu sync |
+| `KSeFSyncStateRepository` | `mark_running` / `mark_success` | `mark_running` / `mark_success` (po patchu workera) |
 | `GET /ksef/sync/status` | pokazuje `running` → `success` | status może pozostać bez zmian podczas joba |
 
 Nie przepinano workera na `sync_purchase_invoices()` — to osobna, większa zmiana backendu; import faktur działa poprawnie na v2.
