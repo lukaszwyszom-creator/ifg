@@ -4,8 +4,8 @@ from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, Query
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.api.deps import (
     get_current_user,
@@ -190,12 +190,21 @@ class KSeFSyncStatusResponse(BaseModel):
 
 
 class KSeFPurchaseSyncRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     nip: str | None = None
     date_from: date | None = None
     date_to: date | None = None
     days_back: int | None = None
     force_full: bool = False
     incremental: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_force(cls, data):
+        if isinstance(data, dict) and "force" in data and "force_full" not in data:
+            return {**data, "force_full": data["force"]}
+        return data
 
 
 class KSeFPurchaseSyncReportResponse(BaseModel):
@@ -254,9 +263,9 @@ def get_ksef_sync_status(
     summary="Synchronizacja faktur zakupowych z KSeF",
 )
 def sync_ksef_purchases_now(
-    body: KSeFPurchaseSyncRequest,
     ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+    body: KSeFPurchaseSyncRequest = Body(default_factory=KSeFPurchaseSyncRequest),
 ) -> KSeFPurchaseSyncReportResponse:
     report = ksef_session_service.sync_purchase_invoices(
         nip=body.nip,

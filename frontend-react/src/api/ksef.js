@@ -94,6 +94,12 @@ export const ksefApi = {
   getPurchaseSyncStatus: () =>
     client.get('/ksef/sync/status').then((r) => r.data),
 
-  syncPurchasesNow: (force = false, nip = null) =>
-    client.post('/ksef/sync/purchases', { force, nip }).then((r) => r.data),
+  syncPurchasesNow: (forceFull = false, nip = null) =>
+    client
+      .post('/ksef/sync/purchases', {
+        force_full: forceFull,
+        incremental: false,
+        ...(nip ? { nip } : {}),
+      })
+      .then((r) => r.data),
 };
