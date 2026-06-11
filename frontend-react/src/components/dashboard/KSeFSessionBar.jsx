@@ -176,6 +176,7 @@ export default function KSeFSessionBar() {
     clearMsgs();
     setSyncBusy(true);
     try {
+      // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
       const { counts } = await ksefApi.runPurchaseSync(session.nip, {
         onStarted: () => {
           setSyncBusy(false);

@@ -113,8 +113,16 @@ function sleep(ms) {
   });
 }
 
+/** Dev/test: potwierdzenie ścieżki sync w konsoli (Network → POST sync-purchase). */
+function logPurchaseSyncPath(step, detail) {
+  if (import.meta.env?.DEV) {
+    console.info(`[ksef-purchase-sync] ${step}`, detail ?? '');
+  }
+}
+
 async function pollPurchaseSyncJob(
   jobId,
+  getJobStatus,
   {
     onProgress,
     intervalMs = PURCHASE_SYNC_POLL_INTERVAL_MS,
@@ -123,9 +131,7 @@ async function pollPurchaseSyncJob(
 ) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await sleep(intervalMs);
-    const jobStatus = await client
-      .get(`/ksef-sessions/sync-purchase/jobs/${jobId}`)
-      .then((r) => r.data);
+    const jobStatus = await getJobStatus(jobId);
     if (onProgress) {
       onProgress(jobStatus);
     }
@@ -143,44 +149,11 @@ async function pollPurchaseSyncJob(
   throw err;
 }
 
-/**
- * Uruchamia synchronizację zakupów KSeF bez blokowania UI na cały import.
- * Preferuje async job (202); fallback na synchroniczny endpoint tylko gdy job API = 404.
- */
-async function runPurchaseSync(
+async function syncPurchasesNowFallback(
   nip,
-  {
-    daysBack = PURCHASE_SYNC_DAYS_BACK,
-    forceFull = false,
-    onStarted,
-    onProgress,
-  } = {},
+  { dateFrom, dateTo, daysBack, forceFull },
 ) {
-  const { dateFrom, dateTo } = purchaseSyncDateRange(daysBack);
-
-  try {
-    const { job_id: jobId } = await client
-      .post('/ksef-sessions/sync-purchase', { nip, date_from: dateFrom, date_to: dateTo })
-      .then((r) => r.data);
-    if (onStarted) {
-      onStarted({ mode: 'async', jobId });
-    }
-    const jobStatus = await pollPurchaseSyncJob(jobId, { onProgress });
-    return {
-      mode: 'async',
-      jobId,
-      counts: normalizePurchaseSyncCounts(jobStatus.result || {}),
-      jobStatus,
-    };
-  } catch (err) {
-    if (err.response?.status !== 404) {
-      throw err;
-    }
-  }
-
-  if (onStarted) {
-    onStarted({ mode: 'sync' });
-  }
+  logPurchaseSyncPath('fallback-sync', 'POST /ksef/sync/purchases (404 na job API)');
   const payload = await client
     .post(
       '/ksef/sync/purchases',
@@ -204,10 +177,64 @@ async function runPurchaseSync(
   };
 }
 
+/**
+ * Uruchamia synchronizację zakupów KSeF bez blokowania UI na cały import.
+ * Zawsze zaczyna od async job (POST /ksef-sessions/sync-purchase).
+ * Fallback synchroniczny tylko gdy enqueue zwróci HTTP 404.
+ */
+async function runPurchaseSync(
+  nip,
+  syncPurchaseInvoices,
+  getSyncPurchaseJobStatus,
+  {
+    daysBack = PURCHASE_SYNC_DAYS_BACK,
+    forceFull = false,
+    onStarted,
+    onProgress,
+  } = {},
+) {
+  const { dateFrom, dateTo } = purchaseSyncDateRange(daysBack);
+
+  let jobId;
+  try {
+    logPurchaseSyncPath('enqueue', { nip, dateFrom, dateTo });
+    const enqueueResponse = await syncPurchaseInvoices(nip, dateFrom, dateTo);
+    jobId = enqueueResponse.job_id;
+    if (!jobId) {
+      throw new Error('Brak job_id w odpowiedzi POST /ksef-sessions/sync-purchase');
+    }
+  } catch (err) {
+    if (err.response?.status === 404) {
+      if (onStarted) {
+        onStarted({ mode: 'sync' });
+      }
+      return syncPurchasesNowFallback(nip, { dateFrom, dateTo, daysBack, forceFull });
+    }
+    logPurchaseSyncPath('enqueue-error', {
+      status: err.response?.status,
+      message: err.message,
+    });
+    throw err;
+  }
+
+  logPurchaseSyncPath('async-started', { jobId });
+  if (onStarted) {
+    onStarted({ mode: 'async', jobId });
+  }
+
+  const jobStatus = await pollPurchaseSyncJob(jobId, getSyncPurchaseJobStatus, { onProgress });
+  logPurchaseSyncPath('async-done', { jobId, status: jobStatus.status });
+  return {
+    mode: 'async',
+    jobId,
+    counts: normalizePurchaseSyncCounts(jobStatus.result || {}),
+    jobStatus,
+  };
+}
+
 export const ksefApi = {
   getStatus,
   markStatusMutation,
-  runPurchaseSync,
   normalizePurchaseSyncCounts,
   purchaseSyncDateRange,
 
@@ -231,7 +258,16 @@ export const ksefApi = {
   getPurchaseSyncStatus: () =>
     client.get('/ksef/sync/status').then((r) => r.data),
 
-  /** @deprecated Użyj runPurchaseSync — synchroniczny endpoint przekracza timeout UI. */
+  /** Jedyny punkt wejścia UI dla „Odśwież KSeF” — zawsze async job, fallback sync tylko przy 404. */
+  runPurchaseSync: (nip, options = {}) =>
+    runPurchaseSync(
+      nip,
+      (n, from, to) => ksefApi.syncPurchaseInvoices(n, from, to),
+      (jobId) => ksefApi.getSyncPurchaseJobStatus(jobId),
+      options,
+    ),
+
+  /** @deprecated Nie używać z UI — tylko wewnętrzny fallback runPurchaseSync (404). */
   syncPurchasesNow: (forceFull = false, nip = null) =>
     client
       .post('/ksef/sync/purchases', {

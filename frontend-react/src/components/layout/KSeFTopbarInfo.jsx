@@ -75,6 +75,7 @@ export default function KSeFTopbarInfo() {
     setSyncBusy(true);
     setFlashMsg('');
     try {
+      // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
       const { counts } = await ksefApi.runPurchaseSync(sellerNip, {
         onStarted: () => {
           setSyncBusy(false);
