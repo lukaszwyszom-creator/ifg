@@ -37,12 +37,19 @@ class SyncPurchaseInvoicesJobHandler:
         from uuid import UUID
         actor_id = UUID(actor_user_id) if actor_user_id else None
 
-        counts = self._ksef_session_service.sync_received_invoices(
+        report = self._ksef_session_service.sync_purchase_invoices(
             nip=nip,
             date_from=date_from,
             date_to=date_to,
             actor_user_id=actor_id,
         )
+
+        counts = {
+            "saved": report["created"],
+            "received": report["ksef_returned"],
+            "skipped_existing": report["skipped_existing"],
+            "skipped_parse": report["errors"],
+        }
 
         logger.info(
             "sync_purchase_invoices job %s done: %s",

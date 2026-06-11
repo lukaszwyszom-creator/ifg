@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TARGET_BRANCH = "production"
 DEFAULT_REMOTE_HOST = "ds723"
 DEFAULT_REMOTE_PATH = "/volume1/docker/ifg_v2/ifg_standalone"
+REQUIRED_COMPOSE_SERVICES = ("api", "worker", "db")
+COMPOSE_FILE = "docker/docker-compose.prod.yml"
 
 MOBILE_API_GLOB = "mobile-expo/src/api/**/*.ts"
 ROUTER_GLOB = "app/api/routers/**/*.py"
@@ -265,6 +268,184 @@ def _remote_git(host: str, repo_path: str, git_args: str) -> str:
     return _ssh(host, f"cd {repo_path} && git {git_args}")
 
 
+def _resolve_ds723_host(cli_host: str | None) -> str:
+    if cli_host is not None:
+        return cli_host
+    return os.environ.get("IFG_DS723_HOST", DEFAULT_REMOTE_HOST)
+
+
+def _container_state_ok(state: str) -> bool:
+    normalized = state.lower()
+    if any(bad in normalized for bad in ("exited", "dead", "restarting", "paused")):
+        return False
+    return "running" in normalized or re.search(r"\bup\b", normalized) is not None
+
+
+def _parse_compose_service_states(ps_output: str) -> dict[str, str]:
+    """Parsuje `docker compose ps` (format tabelaryczny lub --format)."""
+    states: dict[str, str] = {}
+
+    for line in ps_output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("NAME") or stripped.startswith("SERVICE"):
+            continue
+
+        tab_parts = stripped.split("\t")
+        if len(tab_parts) == 2 and tab_parts[0] in REQUIRED_COMPOSE_SERVICES:
+            states[tab_parts[0]] = tab_parts[1]
+            continue
+
+        parts = stripped.split()
+        if not parts:
+            continue
+
+        service = parts[-1]
+        if service in REQUIRED_COMPOSE_SERVICES and service not in states:
+            states[service] = stripped
+            continue
+
+        for svc in REQUIRED_COMPOSE_SERVICES:
+            if svc in states:
+                continue
+            if re.search(rf"\b{svc}\b", stripped, re.IGNORECASE):
+                states[svc] = stripped
+
+    return states
+
+
+def _compose_services_healthy(states: dict[str, str]) -> tuple[bool, list[str]]:
+    problems: list[str] = []
+    for svc in REQUIRED_COMPOSE_SERVICES:
+        raw = states.get(svc)
+        if raw is None:
+            problems.append(f"{svc}: brak w docker compose ps")
+        elif not _container_state_ok(raw):
+            problems.append(f"{svc}: {raw}")
+    return not problems, problems
+
+
+def _remote_compose_ps(host: str, repo_path: str) -> str:
+    compose_cmd = (
+        f"cd {repo_path} && sudo docker compose -f {COMPOSE_FILE} ps "
+        "--format '{{.Service}}\t{{.State}}'"
+    )
+    try:
+        return _ssh(host, compose_cmd)
+    except RuntimeError:
+        return _ssh(host, f"cd {repo_path} && sudo docker compose -f {COMPOSE_FILE} ps")
+
+
+def run_deploy_check(
+    *,
+    remote_host: str | None = None,
+    remote_path: str = DEFAULT_REMOTE_PATH,
+) -> int:
+    host = _resolve_ds723_host(remote_host)
+
+    print("IFG Guardian Deploy Check")
+    print("Mac mini → DS723+")
+    print("=" * 40)
+
+    try:
+        local_branch = _git("branch", "--show-current")
+        local_head = _git("rev-parse", "HEAD")
+        local_status = _git("status", "--short")
+    except RuntimeError as exc:
+        print(f"\n❌ Nie udało się odczytać stanu lokalnego repo: {exc}")
+        print("\nWerdykt: NIE MOŻNA POTWIERDZIĆ — BRAK SSH / BŁĄD UPRAWNIEŃ")
+        return 1
+
+    local_dirty = _porcelain_is_dirty(local_status)
+
+    print("\nLokalnie (Mac mini):")
+    print(f"  branch: {local_branch}")
+    print(f"  HEAD:   {local_head}")
+    if local_status:
+        print(f"  status:\n{local_status}")
+    else:
+        print("  status: (clean)")
+
+    ssh_ok = True
+    branch_match: bool | None = None
+    commit_match: bool | None = None
+    remote_dirty: bool | None = None
+    containers_ok: bool | None = None
+    container_problems: list[str] = []
+    remote_branch = remote_head = remote_status = ""
+
+    print(f"\nZdalnie (DS723+ — {host}:{remote_path}):")
+    print("-" * 40)
+    try:
+        remote_branch = _remote_git(host, remote_path, "branch --show-current")
+        remote_head = _remote_git(host, remote_path, "rev-parse HEAD")
+        remote_status = _remote_git(host, remote_path, "status --short")
+        compose_ps = _remote_compose_ps(host, remote_path)
+    except RuntimeError as exc:
+        ssh_ok = False
+        print(f"  ❌ SSH / odczyt zdalny nieudany: {exc}")
+    else:
+        remote_dirty = _porcelain_is_dirty(remote_status)
+        branch_match = local_branch == remote_branch
+        commit_match = local_head == remote_head
+        service_states = _parse_compose_service_states(compose_ps)
+        containers_ok, container_problems = _compose_services_healthy(service_states)
+
+        print(f"  branch: {remote_branch}")
+        print(f"  HEAD:   {remote_head}")
+        if remote_status:
+            print(f"  status:\n{remote_status}")
+        else:
+            print("  status: (clean)")
+        print("\n  docker compose ps:")
+        for line in compose_ps.splitlines():
+            print(f"    {line}")
+
+    print("\n" + "=" * 40)
+    print("Raport:")
+    print("-" * 40)
+
+    if not ssh_ok:
+        print("❌ branch: nie sprawdzono (brak SSH)")
+        print("❌ commit: nie sprawdzono (brak SSH)")
+        print("⚠️  repo: lokalne zmiany" if local_dirty else "✅ repo clean (lokalnie)")
+        print("❌ kontenery: nie sprawdzono (brak SSH)")
+        print("\nWerdykt: NIE MOŻNA POTWIERDZIĆ — BRAK SSH / BŁĄD UPRAWNIEŃ")
+        return 1
+
+    assert branch_match is not None and commit_match is not None
+    assert remote_dirty is not None and containers_ok is not None
+
+    print(f"{'✅' if branch_match else '❌'} branch {'zgodny' if branch_match else 'różny'}"
+          f"  (local: {local_branch}, DS723+: {remote_branch})")
+    print(f"{'✅' if commit_match else '❌'} commit {'zgodny' if commit_match else 'różny'}"
+          f"  (local: {_short_sha(local_head)}, DS723+: {_short_sha(remote_head)})")
+
+    if local_dirty or remote_dirty:
+        parts = []
+        if local_dirty:
+            parts.append("Mac mini")
+        if remote_dirty:
+            parts.append("DS723+")
+        print(f"⚠️  są lokalne zmiany ({', '.join(parts)})")
+    else:
+        print("✅ repo clean")
+
+    if containers_ok:
+        print("✅ kontenery działają (api, worker, db)")
+    else:
+        print("❌ problem z api/worker/db")
+        for problem in container_problems:
+            print(f"     • {problem}")
+
+    print()
+    if branch_match and commit_match and containers_ok:
+        print("Werdykt: PRODUKCJA ZGODNA Z LOKALNYM KODEM")
+        return 0
+
+    print("Werdykt: PRODUKCJA NIEZGODNA — WYMAGANY DEPLOY")
+    return 1
+
+
 def run_repo_sync(
     *,
     do_fetch: bool = False,
@@ -489,7 +670,33 @@ def run_api_guardian() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="IFG Guardian MVP")
+    parser = argparse.ArgumentParser(
+        description=(
+            "IFG Guardian — weryfikacja zgodności API (mobile-expo ↔ backend) "
+            "oraz kontrola wdrożenia Mac mini ↔ DS723+."
+        ),
+        epilog=(
+            "Przykłady:\n"
+            "  python3 scripts/guardian.py\n"
+            "      Sprawdź endpointy mobile-expo vs backend (domyślnie).\n"
+            "  python3 scripts/guardian.py --deploy-check\n"
+            "      Porównaj branch/HEAD/repo i kontenery DS723+ z lokalnym kodem.\n"
+            "  python3 scripts/guardian.py --repo-sync --remote ds723 --fetch\n"
+            "      Porównaj Mac mini, origin/production i DS723+ (git only).\n"
+            "\n"
+            "Zmienne środowiskowe:\n"
+            "  IFG_DS723_HOST   Host SSH DS723+ (domyślnie: ds723)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--deploy-check",
+        action="store_true",
+        help=(
+            "Kontrola wdrożenia Mac mini → DS723+: branch, HEAD, git status, "
+            "docker compose ps (tylko odczyt, bez deploy/restart/pull)"
+        ),
+    )
     parser.add_argument(
         "--repo-sync",
         action="store_true",
@@ -503,12 +710,12 @@ def main() -> int:
     parser.add_argument(
         "--remote",
         choices=["ds723"],
-        help="Porównaj stan repo zdalnego DS723+ przez SSH",
+        help="Porównaj stan repo zdalnego DS723+ przez SSH (--repo-sync)",
     )
     parser.add_argument(
         "--remote-host",
-        default=DEFAULT_REMOTE_HOST,
-        help=f"Host SSH (domyślnie: {DEFAULT_REMOTE_HOST})",
+        default=None,
+        help=f"Host SSH DS723+ (domyślnie: IFG_DS723_HOST lub {DEFAULT_REMOTE_HOST})",
     )
     parser.add_argument(
         "--remote-path",
@@ -517,11 +724,16 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.deploy_check:
+        return run_deploy_check(
+            remote_host=args.remote_host,
+            remote_path=args.remote_path,
+        )
     if args.repo_sync:
         return run_repo_sync(
             do_fetch=args.fetch,
             remote=args.remote,
-            remote_host=args.remote_host,
+            remote_host=_resolve_ds723_host(args.remote_host),
             remote_path=args.remote_path,
         )
     return run_api_guardian()

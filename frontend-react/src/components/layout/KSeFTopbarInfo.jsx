@@ -17,6 +17,7 @@ export default function KSeFTopbarInfo() {
   const [syncStatus, setSyncStatus] = useState(null);
   const [sessionRef, setSessionRef] = useState(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncRunning, setSyncRunning] = useState(false);
   const [flashMsg, setFlashMsg] = useState('');
   const [flashType, setFlashType] = useState('success'); // 'success' | 'error'
 
@@ -70,62 +71,41 @@ export default function KSeFTopbarInfo() {
   }, [isConnected, loadSyncStatus, loadSessionRef]);
 
   const handleSyncPurchase = async () => {
-    if (!sellerNip || !isConnected || syncBusy) return;
+    if (!sellerNip || !isConnected || syncBusy || syncRunning) return;
     setSyncBusy(true);
     setFlashMsg('');
     try {
-      try {
-        const payload = await ksefApi.syncPurchasesNow(false, sellerNip);
-        const r = payload?.counts || {};
-        const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
-        setFlashType('success');
-        setFlashMsg(`+${saved}`);
-      } catch (syncErr) {
-        if (syncErr.response?.status === 404) {
-          // Fallback: starszy async job endpoint
-          const dateTo = new Date();
-          const dateFrom = new Date();
-          dateFrom.setDate(dateFrom.getDate() - 30);
-          const fmt = (d) => {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
-          };
-          const { job_id } = await ksefApi.syncPurchaseInvoices(sellerNip, fmt(dateFrom), fmt(dateTo));
-          const MAX_POLLS = 20;
-          let done = false;
-          for (let i = 0; i < MAX_POLLS && !done; i++) {
-            await new Promise((res) => setTimeout(res, 3000));
-            const jobStatus = await ksefApi.getSyncPurchaseJobStatus(job_id);
-            if (jobStatus.status === 'done') {
-              done = true;
-              const r = jobStatus.result || {};
-              const saved = Number.isFinite(Number(r.saved)) ? Number(r.saved) : 0;
-              setFlashType('success');
-              setFlashMsg(`+${saved}`);
-            } else if (jobStatus.status === 'failed') {
-              throw new Error(jobStatus.error || 'Błąd synchronizacji');
-            }
-          }
-          if (!done) {
+      const { counts } = await ksefApi.runPurchaseSync(sellerNip, {
+        onStarted: () => {
+          setSyncBusy(false);
+          setSyncRunning(true);
+          setFlashType('success');
+          setFlashMsg('Synchronizacja uruchomiona…');
+        },
+        onProgress: (jobStatus) => {
+          if (jobStatus.status === 'pending' || jobStatus.status === 'processing') {
             setFlashType('success');
-            setFlashMsg('w tle…');
+            setFlashMsg('Synchronizacja trwa…');
           }
-        } else {
-          throw syncErr;
-        }
-      }
+        },
+      });
+      setFlashType('success');
+      setFlashMsg(`+${counts.saved}`);
       await refreshAllInvoicePools();
       window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
       await loadSyncStatus();
     } catch (err) {
       console.error('Błąd synchronizacji KSeF:', err);
       setFlashType('error');
-      setFlashMsg('Błąd');
+      if (err.timedOut) {
+        setFlashMsg('Trwa zbyt długo — sprawdź status');
+      } else {
+        setFlashMsg('Błąd');
+      }
     } finally {
       setSyncBusy(false);
-      setTimeout(() => setFlashMsg(''), 5000);
+      setSyncRunning(false);
+      setTimeout(() => setFlashMsg(''), 8000);
     }
   };
 
@@ -159,12 +139,14 @@ export default function KSeFTopbarInfo() {
         type="button"
         className={styles.refreshBtn}
         onClick={handleSyncPurchase}
-        disabled={syncBusy}
+        disabled={syncBusy || syncRunning}
         title="Odśwież faktury zakupowe z KSeF"
       >
         {syncBusy
           ? <span className="spinner" style={{ width: 10, height: 10 }} />
-          : 'Odśwież KSeF'}
+          : syncRunning
+            ? 'Sync…'
+            : 'Odśwież KSeF'}
       </button>
       {flashMsg && (
         <span className={`${styles.flashMsg} ${flashType === 'error' ? styles.flashError : styles.flashSuccess}`}>
