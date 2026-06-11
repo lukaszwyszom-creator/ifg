@@ -107,6 +107,39 @@ _FORM_CODE = {
     "value": "FA",
 }
 
+# Metadata query — zakupy (Subject2) w prod KSeF v2
+_METADATA_SUBJECT_PURCHASE = "Subject2"
+_METADATA_DATE_TYPES = ("PermanentStorage", "Invoicing")
+_METADATA_PAGE_SIZE = 50
+_REQUEST_MIN_INTERVAL = 1.2
+
+
+def _format_metadata_datetime(date_str: str, *, end_of_day: bool = False) -> str:
+    from datetime import date as date_cls, datetime, time, timezone
+
+    parsed = date_cls.fromisoformat(date_str)
+    if end_of_day:
+        dt = datetime.combine(parsed, time(23, 59, 59), tzinfo=timezone.utc)
+    else:
+        dt = datetime.combine(parsed, time(0, 0, 0), tzinfo=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _extract_metadata_invoice_refs(payload: dict) -> list[str]:
+    candidates: list[dict] = []
+    for key in ("invoices", "invoiceList", "items", "results"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates = [item for item in value if isinstance(item, dict)]
+            break
+
+    refs: list[str] = []
+    for item in candidates:
+        ref = item.get("ksefNumber") or item.get("ksefReferenceNumber")
+        if isinstance(ref, str) and ref:
+            refs.append(ref)
+    return refs
+
 
 class KSeFClient:
     def __init__(
@@ -118,6 +151,7 @@ class KSeFClient:
         self._base_url = _KSEF_URLS.get(environment, _KSEF_URLS["test"])
         self._timeout = timeout_seconds
         self._retry = retry_config or RetryConfig()
+        self._last_purchase_request_monotonic: float | None = None
 
     # -------------------------------------------------------------------------
     # SESSION MANAGEMENT
@@ -315,13 +349,33 @@ class KSeFClient:
     ) -> list[ReceivedInvoiceResult]:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
-        Flow:
-        1. Preferuj GET endpointy sesyjne dla received invoices.
-        2. Jeśli endpoint zwróci query reference, wykonaj polling GET.
-        3. Fallback do historycznych POST endpointów query (dla zgodności wstecznej).
-        4. Dla każdego ksefReferenceNumber: GET /invoices/{ref} → decrypt AES-256-CBC
-        Zwraca listę ReceivedInvoiceResult (ksef_reference_number + XML bytes).
+        Flow (subject2 / zakupy):
+        1. POST /invoices/query/metadata (Subject2, PermanentStorage/Invoicing).
+        2. Dla każdego ksefNumber: GET /invoices/ksef/{ref} → XML (application/xml).
+
+        Fallback (subject1/subject3 lub brak metadata endpoint):
+        1. GET endpointy sesyjne dla received invoices.
+        2. POST query fallback + polling.
+        3. GET /invoices/{ref} → decrypt AES-256-CBC
         """
+        if subject_type == "subject2":
+            metadata_refs = self._query_purchase_metadata_refs(
+                access_token=access_token,
+                date_from=invoicing_date_from,
+                date_to=invoicing_date_to,
+            )
+            if metadata_refs is not None:
+                logger.info(
+                    "KSeF received invoices via metadata query: count=%d date_from=%s date_to=%s",
+                    len(metadata_refs),
+                    invoicing_date_from,
+                    invoicing_date_to,
+                )
+                return self._download_metadata_purchase_invoices(
+                    access_token=access_token,
+                    invoice_refs=metadata_refs,
+                )
+
         headers = {"Authorization": f"Bearer {access_token}"}
 
         def _extract_invoice_refs(payload: dict | list) -> list[str]:
@@ -545,7 +599,131 @@ class KSeFClient:
                         status_code=code,
                     )
 
-        # 3. Pobierz i odszyfruj każdą fakturę
+        # 3. Pobierz i odszyfruj każdą fakturę (legacy — sesyjny fallback)
+        return self._download_legacy_session_invoices(
+            access_token=access_token,
+            invoice_refs=invoice_refs,
+            symmetric_key=symmetric_key,
+            iv=iv,
+        )
+
+    def _query_purchase_metadata_refs(
+        self,
+        *,
+        access_token: str,
+        date_from: str,
+        date_to: str,
+    ) -> list[str] | None:
+        """Zwraca listę ksefNumber z POST /invoices/query/metadata lub None gdy endpoint niedostępny."""
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        from_dt = _format_metadata_datetime(date_from, end_of_day=False)
+        to_dt = _format_metadata_datetime(date_to, end_of_day=True)
+
+        refs: list[str] = []
+        date_type_used: str | None = None
+
+        for date_type in _METADATA_DATE_TYPES:
+            page_offset = 0
+            batch_refs: list[str] = []
+            while True:
+                body = {
+                    "subjectType": _METADATA_SUBJECT_PURCHASE,
+                    "dateRange": {
+                        "dateType": date_type,
+                        "from": from_dt,
+                        "to": to_dt,
+                    },
+                }
+                try:
+                    self._pace_purchase_request()
+                    resp = self._request_with_retry(
+                        method="POST",
+                        path="/invoices/query/metadata",
+                        headers=headers,
+                        params={"pageOffset": page_offset, "pageSize": _METADATA_PAGE_SIZE},
+                        json=body,
+                    )
+                except KSeFClientError as exc:
+                    if exc.status_code in (404, 405):
+                        logger.info(
+                            "KSeF metadata query unavailable (%s), using session fallback",
+                            exc.status_code,
+                        )
+                        return None
+                    raise
+
+                self._mark_purchase_request()
+                data = resp.json()
+                page_refs = _extract_metadata_invoice_refs(data)
+                batch_refs.extend(page_refs)
+
+                has_more = data.get("hasMore") is True
+                page_offset += _METADATA_PAGE_SIZE
+                if not has_more or not page_refs:
+                    break
+
+            if batch_refs:
+                refs = batch_refs
+                date_type_used = date_type
+                break
+
+        if date_type_used:
+            logger.info(
+                "KSeF metadata query subjectType=%s dateType=%s refs=%d",
+                _METADATA_SUBJECT_PURCHASE,
+                date_type_used,
+                len(refs),
+            )
+
+        # Dedup zachowując kolejność
+        seen: set[str] = set()
+        unique: list[str] = []
+        for ref in refs:
+            if ref not in seen:
+                seen.add(ref)
+                unique.append(ref)
+        return unique
+
+    def _download_metadata_purchase_invoices(
+        self,
+        *,
+        access_token: str,
+        invoice_refs: list[str],
+    ) -> list[ReceivedInvoiceResult]:
+        """Subject2 + metadata: oficjalny GET /invoices/ksef/{ksefNumber} → raw XML."""
+        results: list[ReceivedInvoiceResult] = []
+        for ref in invoice_refs:
+            try:
+                self._pace_purchase_request()
+                inv_resp = self._request_with_retry(
+                    method="GET",
+                    path=f"/invoices/ksef/{ref}",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/xml",
+                    },
+                )
+                xml_bytes = inv_resp.content
+                if not xml_bytes:
+                    raise KSeFClientError(f"Pusta odpowiedź GET /invoices/ksef/{ref}")
+                self._mark_purchase_request()
+                results.append(ReceivedInvoiceResult(
+                    ksef_reference_number=ref,
+                    xml_bytes=xml_bytes,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
+        return results
+
+    def _download_legacy_session_invoices(
+        self,
+        *,
+        access_token: str,
+        invoice_refs: list[str],
+        symmetric_key: bytes,
+        iv: bytes,
+    ) -> list[ReceivedInvoiceResult]:
+        """Legacy sesyjny fallback: GET /invoices/{ref} + decrypt AES kluczem sesji."""
         results: list[ReceivedInvoiceResult] = []
         for ref in invoice_refs:
             try:
@@ -554,16 +732,30 @@ class KSeFClient:
                     path=f"/invoices/{ref}",
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
-                enc_content = base64.b64decode(inv_resp.json()["encryptedInvoiceContent"])
-                xml_bytes = _aes_cbc_decrypt(enc_content, symmetric_key, iv)
+                xml_bytes = self._parse_invoice_content(inv_resp.json(), symmetric_key, iv)
                 results.append(ReceivedInvoiceResult(
                     ksef_reference_number=ref,
                     xml_bytes=xml_bytes,
                 ))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
-
         return results
+
+    @staticmethod
+    def _parse_invoice_content(data: dict, symmetric_key: bytes, iv: bytes) -> bytes:
+        if "encryptedInvoiceContent" in data:
+            enc_content = base64.b64decode(data["encryptedInvoiceContent"])
+            return _aes_cbc_decrypt(enc_content, symmetric_key, iv)
+        for key in ("invoice", "invoiceXml", "invoiceFile"):
+            raw = data.get(key)
+            if isinstance(raw, str) and raw:
+                try:
+                    return base64.b64decode(raw)
+                except Exception:  # noqa: BLE001
+                    return raw.encode()
+        raise KSeFClientError(
+            "Nieznany format odpowiedzi GET /invoices/{ref} — brak encryptedInvoiceContent/invoice"
+        )
 
     def get_upo(self, upo_url: str) -> bytes:
         """Pobiera UPO z URL zwróconego w statusie faktury (bez uwierzytelnienia)."""
@@ -636,6 +828,17 @@ class KSeFClient:
     # INTERNAL RETRY LOGIC
     # -------------------------------------------------------------------------
 
+    def _pace_purchase_request(self) -> None:
+        """Min. 1.2 s między requestami metadata/download zakupów (invoiceMetadata/invoiceDownload)."""
+        if self._last_purchase_request_monotonic is None:
+            return
+        elapsed = time.monotonic() - self._last_purchase_request_monotonic
+        if elapsed < _REQUEST_MIN_INTERVAL:
+            time.sleep(_REQUEST_MIN_INTERVAL - elapsed)
+
+    def _mark_purchase_request(self) -> None:
+        self._last_purchase_request_monotonic = time.monotonic()
+
     def _request_with_retry(
         self,
         method: str,
@@ -686,6 +889,17 @@ class KSeFClient:
 
                 if not transient:
                     raise last_exc
+
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            sleep_secs = max(float(retry_after), _REQUEST_MIN_INTERVAL)
+                        except ValueError:
+                            sleep_secs = _REQUEST_MIN_INTERVAL
+                        time.sleep(sleep_secs)
+                    else:
+                        time.sleep(_REQUEST_MIN_INTERVAL)
 
             except KSeFClientError:
                 raise

@@ -275,6 +275,24 @@ class TestKSeFClientGetUPO:
 class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
     """Pilnuje, że sync listy zakupów nigdy nie wysyła invoiceReferenceNumber."""
 
+    @staticmethod
+    def _maybe_metadata_404(method: str, url: str):
+        if method == "POST" and "/invoices/query/metadata" in url:
+            resp = MagicMock()
+            resp.status_code = 404
+            resp.text = "Not Found"
+            return resp
+        return None
+
+    @staticmethod
+    def _maybe_post_query_404(method: str, url: str):
+        if method == "POST" and "/invoices/query" in url and "/metadata" not in url:
+            resp = MagicMock()
+            resp.status_code = 404
+            resp.text = "Not Found"
+            return resp
+        return None
+
     def _make_client(self) -> KSeFClient:
         return KSeFClient(
             environment="test",
@@ -299,6 +317,12 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
         recorded_calls: list[dict] = []
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            meta = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_metadata_404(method, url)
+            if meta is not None:
+                return meta
+            post_q = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_post_query_404(method, url)
+            if post_q is not None:
+                return post_q
             recorded_calls.append({"method": method, "url": url, "params": params or {}, "json": json or {}})
             return ok_resp
 
@@ -342,6 +366,9 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
         call_count = [0]
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            meta = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_metadata_404(method, url)
+            if meta is not None:
+                return meta
             call_count[0] += 1
             if method == "GET" and "/invoices" in url and "query" not in url and "received" not in url:
                 # polling call after query_ref set
@@ -396,6 +423,9 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
         recorded_urls: list[str] = []
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            meta = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_metadata_404(method, url)
+            if meta is not None:
+                return meta
             recorded_urls.append(url)
             if method == "GET":
                 return not_found
@@ -443,6 +473,12 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
         recorded_calls: list[dict] = []
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            meta = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_metadata_404(method, url)
+            if meta is not None:
+                return meta
+            post_q = TestQueryReceivedInvoicesNoInvoiceReferenceNumber._maybe_post_query_404(method, url)
+            if post_q is not None:
+                return post_q
             recorded_calls.append({"method": method, "url": url, "params": params or {}, "json": json or {}})
             if method == "GET" and len(recorded_calls) == 1:
                 return wrong_ref
@@ -466,3 +502,118 @@ class TestQueryReceivedInvoicesNoInvoiceReferenceNumber:
         for call in recorded_calls:
             assert "invoiceReferenceNumber" not in call["params"]
             assert "invoiceReferenceNumber" not in call["json"]
+
+
+class TestQueryReceivedInvoicesMetadata:
+    """Zakupy Subject2 przez POST /invoices/query/metadata (prod KSeF v2)."""
+
+    def _make_client(self) -> KSeFClient:
+        return KSeFClient(
+            environment="production",
+            timeout_seconds=5,
+            retry_config=RetryConfig(max_retries=0, backoff_base=0.0, backoff_max=0.0),
+        )
+
+    def test_subject2_uses_metadata_query_and_official_ksef_download_path(self):
+        client = self._make_client()
+
+        metadata_resp = MagicMock()
+        metadata_resp.status_code = 200
+        metadata_resp.json.return_value = {
+            "hasMore": False,
+            "invoices": [{"ksefNumber": "KSEF-META-1"}],
+        }
+
+        invoice_resp = MagicMock()
+        invoice_resp.status_code = 200
+        invoice_resp.content = b'<?xml version="1.0"?><Faktura><numer>1</numer></Faktura>'
+
+        recorded_posts: list[dict] = []
+        recorded_gets: list[str] = []
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            if method == "POST" and "/invoices/query/metadata" in url:
+                recorded_posts.append({"json": json, "params": params})
+                return metadata_resp
+            if method == "GET" and "/invoices/ksef/KSEF-META-1" in url:
+                recorded_gets.append(url)
+                assert headers.get("Accept") == "application/xml"
+                return invoice_resp
+            if method == "GET" and "/invoices/KSEF-META-1" in url:
+                raise AssertionError(f"Użyto nieoficjalnego path bez /ksef/: {url}")
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.request.side_effect = _fake_request
+
+        with patch("httpx.Client", return_value=ctx):
+            results = client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-06-09",
+                subject_type="subject2",
+            )
+
+        assert len(recorded_posts) == 1
+        body = recorded_posts[0]["json"]
+        assert body["subjectType"] == "Subject2"
+        assert body["dateRange"]["dateType"] == "PermanentStorage"
+        assert body["dateRange"]["from"] == "2026-05-01T00:00:00Z"
+        assert body["dateRange"]["to"] == "2026-06-09T23:59:59Z"
+        assert len(recorded_gets) == 1
+        assert "/invoices/ksef/KSEF-META-1" in recorded_gets[0]
+        assert len(results) == 1
+        assert results[0].ksef_reference_number == "KSEF-META-1"
+        assert b"Faktura" in results[0].xml_bytes
+
+    def test_subject1_session_fallback_uses_legacy_path_not_ksef(self):
+        client = self._make_client()
+
+        session_resp = MagicMock()
+        session_resp.status_code = 200
+        session_resp.json.return_value = {
+            "invoices": [{"ksefReferenceNumber": "LEGACY-1"}],
+        }
+
+        legacy_invoice_resp = MagicMock()
+        legacy_invoice_resp.status_code = 200
+        legacy_invoice_resp.json.return_value = {"invoice": "PHhtbC8vPg=="}  # "<xml/>"
+
+        recorded_gets: list[str] = []
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            if method == "POST" and "/invoices/query/metadata" in url:
+                raise AssertionError("metadata nie powinno być wywoływane dla subject1")
+            if method == "GET" and "/sessions/" in url:
+                return session_resp
+            if method == "GET" and "/invoices/" in url:
+                recorded_gets.append(url)
+                if "/invoices/ksef/" in url:
+                    raise AssertionError(f"legacy fallback nie powinien używać /ksef/: {url}")
+                return legacy_invoice_resp
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.request.side_effect = _fake_request
+
+        with patch("httpx.Client", return_value=ctx):
+            results = client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-06-09",
+                subject_type="subject1",
+            )
+
+        assert len(results) == 1
+        assert results[0].ksef_reference_number == "LEGACY-1"
+        assert any("/invoices/LEGACY-1" in u and "/ksef/" not in u for u in recorded_gets)
