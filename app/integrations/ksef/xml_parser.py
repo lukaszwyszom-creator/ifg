@@ -7,7 +7,7 @@ Namespace: http://crd.gov.pl/wzor/2025/06/25/13775/
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from lxml import etree
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _NS = "http://crd.gov.pl/wzor/2025/06/25/13775/"
 _NS_MAP = {"fa": _NS}
+_TWO_PLACES = Decimal("0.01")
 
 
 def _txt(el: etree._Element | None) -> str:
@@ -59,6 +60,33 @@ def _first_child_by_local_name(el: etree._Element, *names: str) -> etree._Elemen
 def _first_text_by_local_name(el: etree._Element, *names: str) -> str:
     child = _first_child_by_local_name(el, *names)
     return _txt(child)
+
+
+def _field_dec(row_el: etree._Element, fa_tag: str, *local_names: str) -> Decimal:
+    """Odczyt kwoty z elementu FA(3) — xpath z namespace, potem localname."""
+    value = _dec(_find(row_el, f"fa:{fa_tag}"))
+    if value != Decimal("0"):
+        return value
+    for name in local_names:
+        value = _dec(_first_child_by_local_name(row_el, name))
+        if value != Decimal("0"):
+            return value
+    return Decimal("0")
+
+
+def _field_txt(row_el: etree._Element, fa_tag: str, *local_names: str) -> str:
+    text = _txt(_find(row_el, f"fa:{fa_tag}"))
+    if text:
+        return text
+    for name in local_names:
+        text = _first_text_by_local_name(row_el, name)
+        if text:
+            return text
+    return ""
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
 def _parse_address(subject_el: etree._Element) -> dict[str, str]:
@@ -106,24 +134,53 @@ def _parse_subject(subject_el: etree._Element) -> dict[str, Any]:
 
 def _parse_item(row_el: etree._Element, sort_order: int) -> dict[str, Any]:
     """Parsuje FaWiersz → dict pasujący do InvoiceItem."""
-    vat_rate_text = _txt(_find(row_el, "fa:P_12"))
+    vat_rate_text = _field_txt(row_el, "P_12", "P_12")
     try:
         vat_rate = Decimal(vat_rate_text)
     except InvalidOperation:
         # "zw", "np" itp.
         vat_rate = Decimal("0")
 
-    unit_price_net = _dec(_find(row_el, "fa:P_9A"))
-    quantity = _dec(_find(row_el, "fa:P_8B"), Decimal("1"))
-    net_total = _dec(_find(row_el, "fa:P_11"))
+    unit_price_net = _field_dec(row_el, "P_9A", "P_9A")
+    unit_price_gross = _field_dec(row_el, "P_9B", "P_9B")
+    quantity = _field_dec(row_el, "P_8B", "P_8B") or Decimal("1")
+    net_total = _field_dec(row_el, "P_11", "P_11")
+    gross_total = _field_dec(row_el, "P_11A", "P_11A")
+    vat_total = _field_dec(row_el, "P_11Vat", "P_11Vat")
 
-    vat_total = (net_total * vat_rate / Decimal("100")).quantize(Decimal("0.01"))
-    gross_total = net_total + vat_total
+    if unit_price_net == Decimal("0") and unit_price_gross > Decimal("0"):
+        if vat_rate > Decimal("0"):
+            unit_price_net = _quantize_money(
+                unit_price_gross / (Decimal("1") + vat_rate / Decimal("100"))
+            )
+        else:
+            unit_price_net = unit_price_gross
+
+    if net_total == Decimal("0") and gross_total > Decimal("0") and vat_total > Decimal("0"):
+        net_total = _quantize_money(gross_total - vat_total)
+    elif net_total == Decimal("0") and gross_total > Decimal("0") and vat_rate > Decimal("0"):
+        net_total = _quantize_money(
+            gross_total / (Decimal("1") + vat_rate / Decimal("100"))
+        )
+    elif net_total == Decimal("0") and unit_price_net > Decimal("0") and quantity > Decimal("0"):
+        net_total = _quantize_money(unit_price_net * quantity)
+
+    if vat_total == Decimal("0") and net_total > Decimal("0") and vat_rate > Decimal("0"):
+        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
+    elif vat_total == Decimal("0") and gross_total > Decimal("0") and net_total > Decimal("0"):
+        vat_total = _quantize_money(gross_total - net_total)
+
+    if gross_total == Decimal("0") and net_total > Decimal("0"):
+        gross_total = _quantize_money(net_total + vat_total)
+    elif gross_total == Decimal("0") and net_total == Decimal("0") and unit_price_net > Decimal("0"):
+        net_total = _quantize_money(unit_price_net * quantity)
+        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
+        gross_total = _quantize_money(net_total + vat_total)
 
     return {
-        "name": _txt(_find(row_el, "fa:P_7")),
+        "name": _field_txt(row_el, "P_7", "P_7"),
         "quantity": quantity,
-        "unit": _txt(_find(row_el, "fa:P_8A")) or "szt.",
+        "unit": _field_txt(row_el, "P_8A", "P_8A") or "szt.",
         "unit_price_net": unit_price_net,
         "vat_rate": vat_rate,
         "net_total": net_total,
@@ -250,9 +307,41 @@ def _extract_invoice_type(fa_el: etree._Element) -> str:
     return rodzaj
 
 
+def _findall_fawiersz(fa_el: etree._Element) -> list[etree._Element]:
+    rows = _findall(fa_el, "fa:FaWiersz")
+    if rows:
+        return rows
+    return [child for child in fa_el if _local_name(child) == "FaWiersz"]
+
+
+def parsed_item_has_nonzero_amounts(item: dict[str, Any]) -> bool:
+    for key in ("net_total", "vat_total", "gross_total"):
+        if Decimal(str(item.get(key, 0))) > Decimal("0"):
+            return True
+    return False
+
+
+def parsed_invoice_has_nonzero_items(parsed: dict[str, Any]) -> bool:
+    items = parsed.get("items") or []
+    return any(parsed_item_has_nonzero_amounts(item) for item in items)
+
+
+def purchase_items_validation_error(parsed: dict[str, Any]) -> str | None:
+    """Zwraca komunikat błędu gdy nagłówek ma brutto, a pozycje są puste/zerowe."""
+    total_gross = Decimal(str(parsed.get("total_gross", 0)))
+    if total_gross <= Decimal("0"):
+        return None
+    if parsed_invoice_has_nonzero_items(parsed):
+        return None
+    return (
+        f"total_gross={total_gross} bez niezerowych pozycji "
+        f"(items={len(parsed.get('items') or [])})"
+    )
+
+
 def _parse_items(fa_el: etree._Element) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for idx, row_el in enumerate(_findall(fa_el, "fa:FaWiersz"), start=1):
+    for idx, row_el in enumerate(_findall_fawiersz(fa_el), start=1):
         try:
             items.append(_parse_item(row_el, idx))
         except Exception as exc:  # noqa: BLE001

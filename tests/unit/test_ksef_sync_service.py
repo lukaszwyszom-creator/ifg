@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -96,7 +97,7 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
     service.ksef_client.query_received_invoices.return_value = [
         SimpleNamespace(
             ksef_reference_number="KSEF-NEW",
-            xml_bytes=b"""<?xml version="1.0" encoding="UTF-8"?>
+            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
 <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
   <Podmiot1>
     <DaneIdentyfikacyjne>
@@ -118,9 +119,16 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
     <P_14_1>23.00</P_14_1>
     <P_15>123.00</P_15>
     <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <P_7>Usługa testowa</P_7>
+      <P_8B>1</P_8B>
+      <P_9A>100.00</P_9A>
+      <P_11>100.00</P_11>
+      <P_12>23</P_12>
+    </FaWiersz>
   </Fa>
 </Faktura>
-""",
+""".encode("utf-8"),
         )
     ]
 
@@ -136,6 +144,114 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
     assert saved.number_local == "FV/DOSTAWCA/42"
     assert saved.direction == "purchase"
     assert saved.ksef_reference_number == "KSEF-NEW"
+
+
+def test_sync_received_invoices_skips_zero_line_items_when_totals_nonzero() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_ksef_service_with_repo(repo)
+    service.ksef_client.query_received_invoices.return_value = [
+        SimpleNamespace(
+            ksef_reference_number="KSEF-ZERO-LINES",
+            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>1112223344</NIP>
+      <Nazwa>Sprzedawca SA</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>9670402857</NIP>
+      <Nazwa>Nabywca Sp. z o.o.</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-10</P_1>
+    <P_2>FV/ZERO/1</P_2>
+    <P_13_1>219.51</P_13_1>
+    <P_14_1>50.49</P_14_1>
+    <P_15>270.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <P_7>Usługi księgowe</P_7>
+      <P_8B>1</P_8B>
+      <P_12>23</P_12>
+    </FaWiersz>
+  </Fa>
+</Faktura>
+""".encode("utf-8"),
+        )
+    ]
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    assert counts["saved"] == 0
+    assert counts["skipped_parse"] == 1
+    assert repo.add_calls == 0
+    assert repo.invoices == []
+
+
+def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_ksef_service_with_repo(repo)
+    service.ksef_client.query_received_invoices.return_value = [
+        SimpleNamespace(
+            ksef_reference_number="KSEF-P11A",
+            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>1112223344</NIP>
+      <Nazwa>Biuro Rachunkowe</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>9670402857</NIP>
+      <Nazwa>Nabywca</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-01</P_1>
+    <P_2>FV/KS/42</P_2>
+    <P_13_1>219.51</P_13_1>
+    <P_14_1>50.49</P_14_1>
+    <P_15>270.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <P_7>Usługi księgowe</P_7>
+      <P_8A>mies</P_8A>
+      <P_8B>1</P_8B>
+      <P_11A>270.00</P_11A>
+      <P_12>23</P_12>
+    </FaWiersz>
+  </Fa>
+</Faktura>
+""".encode("utf-8"),
+        )
+    ]
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    assert counts["saved"] == 1
+    saved = repo.invoices[0]
+    assert len(saved.items) == 1
+    item = saved.items[0]
+    assert item.name == "Usługi księgowe"
+    assert item.net_total == Decimal("219.51")
+    assert item.vat_total == Decimal("50.49")
+    assert item.gross_total == Decimal("270.00")
 
 
 def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:

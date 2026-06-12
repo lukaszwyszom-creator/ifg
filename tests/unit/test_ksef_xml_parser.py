@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.integrations.ksef.xml_parser import parse_fa3_xml
 
 
@@ -94,3 +96,68 @@ def test_parse_fa3_xml_sale_date_uses_p6_not_p1m_place_of_issue() -> None:
     from datetime import date
 
     date.fromisoformat(parsed["sale_date"])
+
+
+def test_parse_fa3_xml_reads_gross_line_fields_p11a_p9b() -> None:
+    """FA(3) art. 106e ust. 7/8: pozycja z P_11A/P_9B zamiast P_11/P_9A."""
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>1112223344</NIP>
+      <Nazwa>Biuro Rachunkowe</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>9670402857</NIP>
+      <Nazwa>Nabywca</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-01</P_1>
+    <P_2>FV/KS/1</P_2>
+    <P_13_1>219.51</P_13_1>
+    <P_14_1>50.49</P_14_1>
+    <P_15>270.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <P_7>Usługi księgowe</P_7>
+      <P_8A>mies</P_8A>
+      <P_8B>1</P_8B>
+      <P_9B>270.00</P_9B>
+      <P_11A>270.00</P_11A>
+      <P_12>23</P_12>
+    </FaWiersz>
+  </Fa>
+</Faktura>
+""".encode("utf-8")
+
+    parsed = parse_fa3_xml(xml)
+
+    assert parsed["total_gross"] == parsed["items"][0]["gross_total"]
+    item = parsed["items"][0]
+    assert item["name"] == "Usługi księgowe"
+    assert item["net_total"] == Decimal("219.51")
+    assert item["vat_total"] == Decimal("50.49")
+    assert item["gross_total"] == Decimal("270.00")
+    assert item["unit_price_net"] == Decimal("219.51")
+
+
+def test_purchase_items_validation_error_when_totals_without_line_amounts() -> None:
+    from app.integrations.ksef.xml_parser import purchase_items_validation_error
+
+    parsed = {
+        "total_gross": Decimal("270.00"),
+        "items": [
+            {
+                "name": "Usługi księgowe",
+                "net_total": Decimal("0"),
+                "vat_total": Decimal("0"),
+                "gross_total": Decimal("0"),
+            }
+        ],
+    }
+
+    assert purchase_items_validation_error(parsed) is not None

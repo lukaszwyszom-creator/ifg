@@ -17,7 +17,7 @@ from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
 from app.integrations.ksef.client import KSeFClient, KSeFClientError
-from app.integrations.ksef.xml_parser import parse_fa3_xml
+from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
@@ -489,6 +489,21 @@ class KSeFSessionService:
                 if len(error_samples) < _MAX_ERROR_SAMPLES:
                     error_samples.append(
                         f"{result.ksef_reference_number}: parse error: {str(exc)[:120]}"
+                    )
+                continue
+
+            items_error = purchase_items_validation_error(parsed)
+            if items_error:
+                logger.error(
+                    "KSeF sync: faktura %s (nr=%s) — %s — pomijam zapis",
+                    result.ksef_reference_number,
+                    parsed.get("number_local"),
+                    items_error,
+                )
+                skipped_parse += 1
+                if len(error_samples) < _MAX_ERROR_SAMPLES:
+                    error_samples.append(
+                        f"{result.ksef_reference_number}: {items_error[:120]}"
                     )
                 continue
 
