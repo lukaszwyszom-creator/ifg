@@ -747,7 +747,8 @@ class TestMarkAsReady:
 
         result = service.mark_as_ready(sample_invoice.id, actor)
 
-        assert result.number_local is not None
+        assert result.number_local is None
+        service.invoice_repository.get_next_sequence_number.assert_not_called()
 
 
 class TestIsInvoiceEditable:

@@ -168,6 +168,27 @@ export default function InvoiceCardList({
   const contractorHeader = direction === 'purchase' ? 'Sprzedawca' : 'Nabywca';
 
   const preparedItems = React.useMemo(() => {
+    if (direction === 'purchase') {
+      return items
+        .map((invoice, idx) => {
+          const dateTs = Number.isNaN(new Date(invoice.issue_date).getTime())
+            ? 0
+            : new Date(invoice.issue_date).getTime();
+          const rawNumber = String(invoice.number_local || '').trim();
+          return {
+            invoice,
+            idx,
+            dateTs,
+            displayNumber: rawNumber || 'brak numeru',
+            numberSource: rawNumber ? 'ksef:P_2' : 'missing',
+          };
+        })
+        .sort((a, b) => {
+          if (a.dateTs !== b.dateTs) return b.dateTs - a.dateTs;
+          return a.idx - b.idx;
+        });
+    }
+
     const entries = items.map((invoice, idx) => {
       const dateTs = Number.isNaN(new Date(invoice.issue_date).getTime())
         ? Number.MAX_SAFE_INTEGER
@@ -236,7 +257,7 @@ export default function InvoiceCardList({
     }
 
     return result;
-  }, [items]);
+  }, [items, direction]);
 
   // Intersection: zachowaj tylko zaznaczenia faktur nadal widocznych w items.
   useEffect(() => {

@@ -155,6 +155,7 @@ class InvoiceRepository:
             InvoiceORM.issue_date >= month_start,
             InvoiceORM.issue_date < month_end,
             InvoiceORM.number_local.isnot(None),
+            InvoiceORM.direction == "sale",
         )
         count = self.session.execute(stmt).scalar_one()
         return count + 1

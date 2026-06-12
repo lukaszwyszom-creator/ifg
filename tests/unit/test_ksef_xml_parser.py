@@ -51,6 +51,7 @@ def test_parse_fa3_xml_reads_nested_identity_and_due_date() -> None:
     assert parsed["seller_snapshot"]["nip"] == "1112223344"
     assert parsed["seller_snapshot"]["name"] == "Testowy Sprzedawca Sp. z o.o."
     assert parsed["buyer_snapshot"]["nip"] == "9670402857"
+    assert parsed["number_local"] == "FV/TEST/1"
     assert parsed["due_date"] == "2026-04-16"
 
 

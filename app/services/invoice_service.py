@@ -471,6 +471,9 @@ class InvoiceService:
                     )
                     return invoice
 
+                if (invoice.direction or "").strip().lower() != "sale":
+                    return invoice
+
                 return self._assign_number_local(invoice_id, invoice, actor)
 
             except (InvalidStatusTransitionError, NotFoundError, ValueError):

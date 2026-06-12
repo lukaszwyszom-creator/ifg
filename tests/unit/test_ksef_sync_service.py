@@ -15,6 +15,7 @@ from app.services.ksef_sync_service import KSeFSyncService
 class _FakeInvoiceRepository:
     def __init__(self) -> None:
         self.rows: list[tuple[str, str | None]] = []
+        self.invoices: list = []
         self.add_calls = 0
 
     def exists_by_ksef_number(self, ksef_reference_number: str) -> bool:
@@ -22,6 +23,7 @@ class _FakeInvoiceRepository:
 
     def add(self, invoice, source_system: str | None = None):
         self.rows.append((invoice.ksef_reference_number, source_system))
+        self.invoices.append(invoice)
         self.add_calls += 1
         return invoice
 
@@ -86,6 +88,54 @@ def test_sync_received_invoices_reimport_does_not_duplicate_existing_invoice() -
     assert counts["skipped_existing"] == 1
     assert counts["skipped_parse"] == 0
     assert repo.rows == [("KSEF-1", "ksef_import")]
+
+
+def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_ksef_service_with_repo(repo)
+    service.ksef_client.query_received_invoices.return_value = [
+        SimpleNamespace(
+            ksef_reference_number="KSEF-NEW",
+            xml_bytes=b"""<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>1112223344</NIP>
+      <Nazwa>Sprzedawca SA</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>9670402857</NIP>
+      <Nazwa>Nabywca Sp. z o.o.</Nazwa>
+    </DaneIdentyfikacyjne>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-10</P_1>
+    <P_2>FV/DOSTAWCA/42</P_2>
+    <P_13_1>100.00</P_13_1>
+    <P_14_1>23.00</P_14_1>
+    <P_15>123.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+  </Fa>
+</Faktura>
+""",
+        )
+    ]
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    assert counts["saved"] == 1
+    assert len(repo.invoices) == 1
+    saved = repo.invoices[0]
+    assert saved.number_local == "FV/DOSTAWCA/42"
+    assert saved.direction == "purchase"
+    assert saved.ksef_reference_number == "KSEF-NEW"
 
 
 def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:

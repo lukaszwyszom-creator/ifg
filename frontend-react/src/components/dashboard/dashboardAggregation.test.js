@@ -230,6 +230,17 @@ test('InvoiceCardList: dla zakupów używa nagłówka Sprzedawca', () => {
   assert.ok(src.includes("direction === 'purchase' ? 'Sprzedawca' : 'Nabywca'"), 'brak logiki Sprzedawca/Nabywca');
 });
 
+test('InvoiceCardList: dla zakupów pokazuje numer z KSeF/XML bez sekwencji IFG', () => {
+  const src = readFileSync(
+    join(__dir, '../invoice/InvoiceCardList.jsx'),
+    'utf-8',
+  );
+  assert.ok(src.includes("direction === 'purchase'"), 'brak gałęzi purchase');
+  assert.ok(src.includes("numberSource: rawNumber ? 'ksef:P_2' : 'missing'"), 'brak źródła numeru KSeF');
+  assert.ok(src.includes("displayNumber: rawNumber || 'brak numeru'"), 'brak fallbacku brak numeru');
+  assert.ok(src.includes('return b.dateTs - a.dateTs'), 'brak sortowania zakupów po dacie malejąco');
+});
+
 test('AdvancedDashboard: ukrywa kolumnę Status KSeF w zestawieniach sprzedaży i zakupu', () => {
   const src = readFileSync(
     join(__dir, '../../pages/advanced/AdvancedDashboard.jsx'),
