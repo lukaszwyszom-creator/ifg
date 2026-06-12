@@ -25,13 +25,13 @@
   --invoice-grid-columns: 28px 62px 86px minmax(207px, 1fr) 100px 88px 80px 86px 136px;
 }
 
-/* Zakupy: stała szerokość kolumny Numer (~20 znaków) + ellipsis */
+/* Zakupy: węższy Numer (~10ch), szerszy Sprzedawca, więcej miejsca na PDF */
 .purchaseNumberColumn.withCheckbox {
-  --invoice-grid-columns: 28px 20ch 86px minmax(168px, 1fr) 100px 88px 80px 86px 92px 136px;
+  --invoice-grid-columns: 28px 10ch 82px minmax(218px, 1.35fr) 96px 84px 76px 82px 92px 148px;
 }
 
 .purchaseNumberColumn.withCheckbox.noKsef {
-  --invoice-grid-columns: 28px 20ch 86px minmax(187px, 1fr) 100px 88px 80px 86px 136px;
+  --invoice-grid-columns: 28px 10ch 82px minmax(243px, 1.35fr) 96px 84px 76px 82px 148px;
 }
 
 .loadingState,
@@ -187,16 +187,36 @@
 }
 
 .purchaseNumberColumn .invoiceCellNumber {
-  max-width: 20ch;
+  max-width: 10ch;
   overflow: hidden;
 }
 
 .purchaseNumberValue {
   display: block;
-  max-width: 20ch;
+  max-width: 10ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.purchaseNumberColumn .headerRow .invoiceCellNumber {
+  text-align: left;
+}
+
+.purchaseNumberColumn .invoiceCellPdf {
+  min-width: 0;
+  padding-right: 0;
+  justify-self: stretch;
+}
+
+.purchaseNumberColumn .pdfCell {
+  overflow: hidden;
+}
+
+.purchaseNumberColumn .pdfActions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 /* Column 2: Data — centered */
@@ -457,11 +477,11 @@
   }
 
   .purchaseNumberColumn.withCheckbox {
-    --invoice-grid-columns: 28px 20ch 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 120px;
+    --invoice-grid-columns: 28px 10ch 82px minmax(180px, 1.35fr) 92px 80px 72px 78px 92px 140px;
   }
 
   .purchaseNumberColumn.withCheckbox.noKsef {
-    --invoice-grid-columns: 28px 20ch 88px minmax(140px, 1fr) 96px 90px 56px 90px 120px;
+    --invoice-grid-columns: 28px 10ch 82px minmax(200px, 1.35fr) 92px 80px 72px 78px 140px;
   }
 
   .cardContent {

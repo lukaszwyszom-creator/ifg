@@ -254,7 +254,22 @@ test('InvoiceCardList: dla zakupów obcina długi numer w kolumnie (ellipsis + t
   assert.ok(jsxSrc.includes('styles.purchaseNumberValue'), 'brak klasy purchaseNumberValue');
   assert.ok(cssSrc.includes('.purchaseNumberValue'), 'brak stylu purchaseNumberValue');
   assert.ok(cssSrc.includes('text-overflow: ellipsis'), 'brak ellipsis w CSS');
-  assert.ok(cssSrc.includes('20ch'), 'brak stałej szerokości 20ch');
+  assert.ok(cssSrc.includes('10ch'), 'brak stałej szerokości 10ch dla numeru zakupu');
+  assert.ok(cssSrc.includes('minmax(243px'), 'brak szerszej kolumny Sprzedawca');
+  assert.ok(cssSrc.includes('148px'), 'brak szerszej kolumny PDF');
+});
+
+test('InvoiceCardList: dla zakupów pokazuje pełną nazwę sprzedawcy w title', () => {
+  const jsxSrc = readFileSync(
+    join(__dir, '../invoice/InvoiceCardList.jsx'),
+    'utf-8',
+  );
+  assert.ok(jsxSrc.includes('styles.purchaseSellerValue'), 'brak klasy purchaseSellerValue');
+  assert.ok(jsxSrc.includes('contractorName'), 'brak zmiennej contractorName');
+  assert.ok(
+    jsxSrc.includes("direction === 'purchase' && contractorName !== '—'"),
+    'brak title dla pełnej nazwy sprzedawcy',
+  );
 });
 
 test('AdvancedDashboard: ukrywa kolumnę Status KSeF w zestawieniach sprzedaży i zakupu', () => {
