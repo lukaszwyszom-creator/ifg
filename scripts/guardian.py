@@ -345,6 +345,86 @@ def _dist_js_blobs() -> str:
     )
 
 
+FRONTEND_SRC_PREFIX = "frontend-react/src"
+FRONTEND_DIST_STALE_MSG = "Frontend dist wymaga przebudowy (npm run build)."
+
+
+def _frontend_src_last_commit_epoch() -> int | None:
+    try:
+        return int(_git("log", "-1", "--format=%ct", "--", FRONTEND_SRC_PREFIX))
+    except RuntimeError:
+        return None
+
+
+def _frontend_dist_newest_epoch() -> float | None:
+    dist_assets = ROOT / "frontend-react" / "dist" / "assets"
+    if not dist_assets.is_dir():
+        return None
+    js_files = list(dist_assets.glob("*.js"))
+    if not js_files:
+        return None
+    return max(f.stat().st_mtime for f in js_files)
+
+
+def check_frontend_dist_freshness(*, label: str = "lokalnie") -> tuple[bool, str]:
+    commit_ts = _frontend_src_last_commit_epoch()
+    dist_ts = _frontend_dist_newest_epoch()
+    if dist_ts is None:
+        return False, f"❌ [{label}] {FRONTEND_DIST_STALE_MSG}"
+    if commit_ts is None:
+        return True, f"✅ [{label}] brak historii commitów {FRONTEND_SRC_PREFIX} (pominięto)"
+    if dist_ts < commit_ts:
+        try:
+            commit_ref = _git("log", "-1", "--format=%h", "--", FRONTEND_SRC_PREFIX)
+        except RuntimeError:
+            commit_ref = "?"
+        return False, (
+            f"❌ [{label}] {FRONTEND_DIST_STALE_MSG} "
+            f"(dist starszy niż commit {commit_ref} w {FRONTEND_SRC_PREFIX})"
+        )
+    return True, f"✅ [{label}] frontend-react/dist aktualny względem ostatniego commita src"
+
+
+def _remote_frontend_dist_newest_epoch(host: str, repo_path: str) -> float | None:
+    quoted_path = repo_path.replace("'", "'\"'\"'")
+    raw = _ssh(
+        host,
+        "cd '" + quoted_path + "' && "
+        "ls frontend-react/dist/assets/*.js 2>/dev/null | "
+        "xargs stat -c %Y 2>/dev/null | sort -n | tail -1",
+    )
+    if not raw:
+        return None
+    try:
+        return float(raw.splitlines()[-1].strip())
+    except ValueError:
+        return None
+
+
+def check_remote_frontend_dist_freshness(host: str, repo_path: str) -> tuple[bool, str]:
+    try:
+        commit_ts = int(
+            _remote_git(host, repo_path, f"log -1 --format=%ct -- {FRONTEND_SRC_PREFIX}")
+        )
+    except RuntimeError as exc:
+        return False, f"❌ [DS723+] nie udało się odczytać commita src: {exc}"
+    dist_ts = _remote_frontend_dist_newest_epoch(host, repo_path)
+    if dist_ts is None:
+        return False, f"❌ [DS723+] {FRONTEND_DIST_STALE_MSG}"
+    if dist_ts < commit_ts:
+        try:
+            commit_ref = _remote_git(
+                host, repo_path, f"log -1 --format=%h -- {FRONTEND_SRC_PREFIX}"
+            )
+        except RuntimeError:
+            commit_ref = "?"
+        return False, (
+            f"❌ [DS723+] {FRONTEND_DIST_STALE_MSG} "
+            f"(dist starszy niż commit {commit_ref} w {FRONTEND_SRC_PREFIX})"
+        )
+    return True, "✅ [DS723+] frontend-react/dist aktualny względem ostatniego commita src"
+
+
 def _fetch_openapi_text() -> tuple[str | None, str]:
     import urllib.error
     import urllib.request
@@ -416,6 +496,11 @@ def run_ksef_async_check() -> int:
         else:
             notes.append("✅ dist NIE zawiera syncPurchasesNow(!1/false")
 
+    dist_ok, dist_note = check_frontend_dist_freshness()
+    if not dist_ok:
+        has_error = True
+    notes.append(dist_note)
+
     openapi_text, openapi_src = _fetch_openapi_text()
     if openapi_text is None:
         has_error = True
@@ -468,10 +553,12 @@ def run_deploy_check(
         return 1
 
     local_dirty = _porcelain_is_dirty(local_status)
+    local_dist_ok, local_dist_note = check_frontend_dist_freshness()
 
     print("\nLokalnie (Mac mini):")
     print(f"  branch: {local_branch}")
     print(f"  HEAD:   {local_head}")
+    print(f"  frontend dist: {local_dist_note}")
     if local_status:
         print(f"  status:\n{local_status}")
     else:
@@ -481,6 +568,8 @@ def run_deploy_check(
     branch_match: bool | None = None
     commit_match: bool | None = None
     remote_dirty: bool | None = None
+    remote_dist_ok: bool | None = None
+    remote_dist_note = ""
     containers_ok: bool | None = None
     container_problems: list[str] = []
     remote_branch = remote_head = remote_status = ""
@@ -499,11 +588,13 @@ def run_deploy_check(
         remote_dirty = _porcelain_is_dirty(remote_status)
         branch_match = local_branch == remote_branch
         commit_match = local_head == remote_head
+        remote_dist_ok, remote_dist_note = check_remote_frontend_dist_freshness(host, remote_path)
         service_states = _parse_compose_service_states(compose_ps)
         containers_ok, container_problems = _compose_services_healthy(service_states)
 
         print(f"  branch: {remote_branch}")
         print(f"  HEAD:   {remote_head}")
+        print(f"  frontend dist: {remote_dist_note}")
         if remote_status:
             print(f"  status:\n{remote_status}")
         else:
@@ -549,8 +640,19 @@ def run_deploy_check(
         for problem in container_problems:
             print(f"     • {problem}")
 
+    print(f"{'✅' if local_dist_ok else '❌'} frontend dist (Mac mini)")
+    if ssh_ok and remote_dist_ok is not None:
+        print(f"{'✅' if remote_dist_ok else '❌'} frontend dist (DS723+)")
+
     print()
-    if branch_match and commit_match and containers_ok:
+    deploy_ok = (
+        branch_match
+        and commit_match
+        and containers_ok
+        and local_dist_ok
+        and (remote_dist_ok is not False)
+    )
+    if deploy_ok:
         print("Werdykt: PRODUKCJA ZGODNA Z LOKALNYM KODEM")
         return 0
 
@@ -808,7 +910,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Kontrola async sync KSeF: brak syncPurchasesNow w UI, runPurchaseSync w dist, "
-            "endpoint w openapi.json"
+            "świeżość frontend-react/dist, endpoint w openapi.json"
         ),
     )
     parser.add_argument(
@@ -816,7 +918,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Kontrola wdrożenia Mac mini → DS723+: branch, HEAD, git status, "
-            "docker compose ps (tylko odczyt, bez deploy/restart/pull)"
+            "świeżość frontend-react/dist, docker compose ps (tylko odczyt, bez deploy/restart/pull)"
         ),
     )
     parser.add_argument(

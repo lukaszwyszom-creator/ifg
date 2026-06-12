@@ -74,10 +74,17 @@
    $ chmod 600 .env.production
 
 4. Uruchomienie kontenerów
-1. Zbuduj i uruchom:
+1. Zbuduj frontend (OBOWIĄZKOWE przy każdej zmianie w frontend-react/src):
+   $ cd /volume1/docker/ifg/ifg_standalone/frontend-react
+   $ npm ci
+   $ npm run build
+   $ cd ..
+   Weryfikacja (opcjonalnie):
+   $ python3 scripts/guardian.py --ksef-async-check
+2. Zbuduj i uruchom kontenery:
    $ cd /volume1/docker/ifg/ifg_standalone
-   $ docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build
-2. Sprawdź status:
+   $ docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d --build --force-recreate api worker
+3. Sprawdź status:
    $ docker compose -f docker/docker-compose.prod.yml --env-file .env.production ps
 
 5. Migracje

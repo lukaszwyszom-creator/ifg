@@ -8,6 +8,8 @@ Data: 2026-05-22
 
 **Guardian** (`scripts/guardian.py`) — read-only (diagnostyka, bez wdrożenia).
 
+> **⚠️ Frontend dist:** Zmiany w `frontend-react/src` **nie są wdrażane** przez sam rebuild kontenerów API/worker. Wymagane jest przebudowanie `frontend-react/dist` (`npm ci && npm run build` na DS723+). Katalog `dist/` jest montowany z hosta — nie trafia do obrazu Docker ani do git.
+
 ## CLI (MVP)
 
 ```bash
@@ -51,6 +53,8 @@ Host SSH: `IFG_DS723_HOST` lub `ds723`.
 7. `python3 scripts/guardian.py --ksef-async-check`
 8. `python3 scripts/guardian.py --deploy-check`
 9. `curl -fsS http://127.0.0.1:8000/health`
+
+Krok 8 (`--deploy-check`) weryfikuje m.in. świeżość `frontend-react/dist` względem ostatniego commita w `frontend-react/src`.
 
 Bez `--yes`: przed remote → `Kontynuować deploy na DS723+? [y/N]`
 
