@@ -458,7 +458,7 @@ export default function InvoiceCardList({
   }
 
   return (
-    <div className={`${styles.container} ${showKsefStatus ? '' : styles.noKsef} ${direction === 'purchase' ? styles.withCheckbox : ''}`}>
+    <div className={`${styles.container} ${showKsefStatus ? '' : styles.noKsef} ${direction === 'purchase' ? styles.withCheckbox : ''}${direction === 'purchase' ? ` ${styles.purchaseNumberColumn}` : ''}`}>
       {direction === 'purchase' && selected.size > 0 && (
         <div className={styles.bulkBar}>
           <span className={styles.bulkCount}>Zaznaczono: {selected.size}</span>
@@ -544,7 +544,14 @@ export default function InvoiceCardList({
                 )}
                 <div className={`${styles.cell} ${styles.invoiceCellNumber}`}>
                   <span className={styles.label}>Numer</span>
-                  <span className={styles.value} title={`Źródło numeru: ${item.numberSource}`}>
+                  <span
+                    className={`${styles.value}${direction === 'purchase' ? ` ${styles.purchaseNumberValue}` : ''}`}
+                    title={
+                      direction === 'purchase'
+                        ? (item.displayNumber !== 'brak numeru' ? item.displayNumber : undefined)
+                        : `Źródło numeru: ${item.numberSource}`
+                    }
+                  >
                     {item.displayNumber}
                   </span>
                 </div>

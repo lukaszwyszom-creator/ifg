@@ -241,6 +241,22 @@ test('InvoiceCardList: dla zakupów pokazuje numer z KSeF/XML bez sekwencji IFG'
   assert.ok(src.includes('return b.dateTs - a.dateTs'), 'brak sortowania zakupów po dacie malejąco');
 });
 
+test('InvoiceCardList: dla zakupów obcina długi numer w kolumnie (ellipsis + title)', () => {
+  const jsxSrc = readFileSync(
+    join(__dir, '../invoice/InvoiceCardList.jsx'),
+    'utf-8',
+  );
+  const cssSrc = readFileSync(
+    join(__dir, '../invoice/InvoiceCardList.module.css'),
+    'utf-8',
+  );
+  assert.ok(jsxSrc.includes('styles.purchaseNumberColumn'), 'brak klasy purchaseNumberColumn');
+  assert.ok(jsxSrc.includes('styles.purchaseNumberValue'), 'brak klasy purchaseNumberValue');
+  assert.ok(cssSrc.includes('.purchaseNumberValue'), 'brak stylu purchaseNumberValue');
+  assert.ok(cssSrc.includes('text-overflow: ellipsis'), 'brak ellipsis w CSS');
+  assert.ok(cssSrc.includes('20ch'), 'brak stałej szerokości 20ch');
+});
+
 test('AdvancedDashboard: ukrywa kolumnę Status KSeF w zestawieniach sprzedaży i zakupu', () => {
   const src = readFileSync(
     join(__dir, '../../pages/advanced/AdvancedDashboard.jsx'),

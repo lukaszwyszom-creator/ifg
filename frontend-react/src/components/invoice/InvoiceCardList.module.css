@@ -25,6 +25,15 @@
   --invoice-grid-columns: 28px 62px 86px minmax(207px, 1fr) 100px 88px 80px 86px 136px;
 }
 
+/* Zakupy: stała szerokość kolumny Numer (~20 znaków) + ellipsis */
+.purchaseNumberColumn.withCheckbox {
+  --invoice-grid-columns: 28px 20ch 86px minmax(168px, 1fr) 100px 88px 80px 86px 92px 136px;
+}
+
+.purchaseNumberColumn.withCheckbox.noKsef {
+  --invoice-grid-columns: 28px 20ch 86px minmax(187px, 1fr) 100px 88px 80px 86px 136px;
+}
+
 .loadingState,
 .emptyState {
   padding: 36px 20px;
@@ -174,6 +183,19 @@
 /* Column 1: Numer */
 .invoiceCellNumber {
   justify-self: auto;
+  white-space: nowrap;
+}
+
+.purchaseNumberColumn .invoiceCellNumber {
+  max-width: 20ch;
+  overflow: hidden;
+}
+
+.purchaseNumberValue {
+  display: block;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -424,6 +446,14 @@
 
   .withCheckbox.noKsef {
     --invoice-grid-columns: 28px 78px 88px minmax(160px, 1fr) 96px 90px 56px 90px 120px;
+  }
+
+  .purchaseNumberColumn.withCheckbox {
+    --invoice-grid-columns: 28px 20ch 88px minmax(110px, 1fr) 96px 90px 56px 90px 84px 120px;
+  }
+
+  .purchaseNumberColumn.withCheckbox.noKsef {
+    --invoice-grid-columns: 28px 20ch 88px minmax(140px, 1fr) 96px 90px 56px 90px 120px;
   }
 
   .cardContent {
