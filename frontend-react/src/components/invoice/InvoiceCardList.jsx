@@ -516,6 +516,7 @@ export default function InvoiceCardList({
         {preparedItems.map((item) => {
           const invoice = item.invoice;
           const grossAmount = getGrossAmount(invoice);
+          const contractorName = getContractorName(invoice, direction);
 
           return (
             <div key={invoice.id} className={styles.card}>
@@ -563,8 +564,15 @@ export default function InvoiceCardList({
 
                 <div className={`${styles.cell} ${styles.invoiceCellBuyer}`}>
                   <span className={styles.label}>{contractorHeader}</span>
-                  <span className={`${styles.value} ${styles.buyerValue}`}>
-                    {getContractorName(invoice, direction)}
+                  <span
+                    className={`${styles.value} ${styles.buyerValue}${direction === 'purchase' ? ` ${styles.purchaseSellerValue}` : ''}`}
+                    title={
+                      direction === 'purchase' && contractorName !== '—'
+                        ? contractorName
+                        : undefined
+                    }
+                  >
+                    {contractorName}
                   </span>
                 </div>
 
