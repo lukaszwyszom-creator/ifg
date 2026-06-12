@@ -120,6 +120,10 @@ function logPurchaseSyncPath(step, detail) {
   console.info('[ksef-purchase-sync]', step, detail ?? '');
 }
 
+export function logKsefUiTriggerPurchaseSync(nip, source) {
+  console.info('KSEF_UI_TRIGGER_PURCHASE_SYNC', { nip, source });
+}
+
 export function formatPurchaseSyncError(err, endpoint = PURCHASE_SYNC_ENQUEUE_ENDPOINT) {
   const status = err.response?.status ?? (err.timedOut ? 'timeout' : '—');
   const apiMsg = err.response?.data?.error?.message ?? err.response?.data?.detail;
@@ -208,6 +212,7 @@ async function runPurchaseSync(
   } = {},
 ) {
   const { dateFrom, dateTo } = purchaseSyncDateRange(daysBack);
+  logKsefUiTriggerPurchaseSync(nip, 'runPurchaseSync');
 
   let jobId;
   try {

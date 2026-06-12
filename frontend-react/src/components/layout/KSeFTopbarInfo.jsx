@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ksefApi, formatPurchaseSyncError } from '../../api/ksef';
+import { ksefApi, formatPurchaseSyncError, logKsefUiTriggerPurchaseSync } from '../../api/ksef';
+import { settingsApi } from '../../api/settings';
+import {
+  evaluateKsefSyncTrigger,
+  resolveKsefSyncNip,
+} from '../../utils/ksefSyncTrigger';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFTopbarInfo.module.css';
 
@@ -11,6 +16,7 @@ const REFRESH_EVENT = 'ksef:status-refresh';
  */
 export default function KSeFTopbarInfo() {
   const sellerNip = useAppStore((s) => s.sellerNip);
+  const setSellerNip = useAppStore((s) => s.setSellerNip);
   const ksefStatus = useAppStore((s) => s.ksefConnection);
   const refreshAllInvoicePools = useAppStore((s) => s.refreshAllInvoicePools);
 
@@ -70,15 +76,38 @@ export default function KSeFTopbarInfo() {
     };
   }, [isConnected, loadSyncStatus, loadSessionRef]);
 
+  const resolveSyncNip = async () => resolveKsefSyncNip(sellerNip, {
+    getSettings: () => settingsApi.get(),
+    getActiveSession: (nip) => ksefApi.getActiveSession(nip),
+  });
+
   const handleSyncPurchase = async () => {
-    if (!sellerNip || !isConnected || syncBusy || syncRunning) return;
+    if (!isConnected || syncBusy || syncRunning) return;
+    const nip = await resolveSyncNip();
+    const trigger = evaluateKsefSyncTrigger({
+      isConnected,
+      syncBusy,
+      syncRunning,
+      nip,
+    });
+    if (trigger.action === 'user_error') {
+      setFlashType('error');
+      setFlashMsg(trigger.message);
+      setTimeout(() => setFlashMsg(''), 8000);
+      return;
+    }
+    if (trigger.action !== 'proceed') return;
+    if (nip !== sellerNip) {
+      setSellerNip(nip);
+    }
+    logKsefUiTriggerPurchaseSync(trigger.nip, 'KSeFTopbarInfo');
     setSyncBusy(true);
     setFlashMsg('');
     setFlashType('success');
     setFlashMsg('Uruchamiam async sync…');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
-      const { counts } = await ksefApi.runPurchaseSync(sellerNip, {
+      const { counts } = await ksefApi.runPurchaseSync(trigger.nip, {
         onStarted: () => {
           setSyncBusy(false);
           setSyncRunning(true);

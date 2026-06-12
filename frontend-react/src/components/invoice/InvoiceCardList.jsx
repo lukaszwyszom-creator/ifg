@@ -4,6 +4,7 @@ import { invoicesApi } from '../../api/invoices';
 import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceActions from './InvoiceActions';
 import { getInvoiceOpenMode } from './invoiceOpenMode';
+import { getPurchaseDisplayNumber } from '../../utils/purchaseInvoiceDisplay';
 import styles from './InvoiceCardList.module.css';
 
 const DIRECT_REMAINING_FIELDS = [
@@ -174,13 +175,13 @@ export default function InvoiceCardList({
           const dateTs = Number.isNaN(new Date(invoice.issue_date).getTime())
             ? 0
             : new Date(invoice.issue_date).getTime();
-          const rawNumber = String(invoice.number_local || '').trim();
+          const { displayNumber, numberSource } = getPurchaseDisplayNumber(invoice);
           return {
             invoice,
             idx,
             dateTs,
-            displayNumber: rawNumber || 'brak numeru',
-            numberSource: rawNumber ? 'ksef:P_2' : 'missing',
+            displayNumber,
+            numberSource,
           };
         })
         .sort((a, b) => {

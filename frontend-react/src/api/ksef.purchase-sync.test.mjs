@@ -33,6 +33,7 @@ test('ksef API: runPurchaseSync preferuje syncPurchaseInvoices + polling job sta
   assert.match(source, /ksefApi\.syncPurchaseInvoices/);
   assert.match(source, /ksefApi\.getSyncPurchaseJobStatus/);
   assert.match(source, /console\.info\('\[ksef-purchase-sync\]'/);
+  assert.match(source, /KSEF_UI_TRIGGER_PURCHASE_SYNC/);
   assert.match(source, /export function formatPurchaseSyncError/);
 });
 

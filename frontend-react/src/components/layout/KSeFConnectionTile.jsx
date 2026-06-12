@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { ksefApi } from '../../api/ksef';
+import { ksefApi, logKsefUiTriggerPurchaseSync } from '../../api/ksef';
 import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFConnectionTile.module.css';
@@ -242,6 +242,7 @@ export default function KSeFConnectionTile() {
 
     try {
       const session = await ksefApi.openSession(nipToUse);
+      setSellerNip(nipToUse);
       ksefApi.markStatusMutation();
       applyStatus({
         ui_status: 'CONNECTED',
@@ -252,6 +253,28 @@ export default function KSeFConnectionTile() {
           last_error: null,
         },
       });
+      window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
+      logKsefUiTriggerPurchaseSync(nipToUse, 'KSeFConnectionTile.connect');
+      void ksefApi.runPurchaseSync(nipToUse)
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
+        })
+        .catch((syncErr) => {
+          ksefApi.markStatusMutation();
+          applyStatus({
+            ui_status: 'CONNECTED',
+            details: {
+              reason: 'UNKNOWN',
+              has_session: true,
+              session_expires_at: session.expires_at,
+              last_error:
+                syncErr?.response?.data?.error?.message ??
+                syncErr?.response?.data?.detail ??
+                syncErr?.message ??
+                'Synchronizacja zakupów nie wystartowała.',
+            },
+          });
+        });
     } catch (error) {
       ksefApi.markStatusMutation();
       applyStatus({

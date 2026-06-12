@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ksefApi, formatPurchaseSyncError } from '../../api/ksef';
+import { ksefApi, formatPurchaseSyncError, logKsefUiTriggerPurchaseSync } from '../../api/ksef';
 import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
 import styles from './KSeFSessionBar.module.css';
@@ -176,6 +176,7 @@ export default function KSeFSessionBar() {
     clearMsgs();
     setSyncBusy(true);
     setSuccessMsg('Uruchamiam async sync…');
+    logKsefUiTriggerPurchaseSync(session.nip, 'KSeFSessionBar');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
       const { counts } = await ksefApi.runPurchaseSync(session.nip, {

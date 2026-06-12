@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoicesApi } from '../api/invoices';
 import { buildInvoicePoolKey, buildInvoicePoolQuery } from '../components/dashboard/dashboardQuery';
+import { buildRefreshInvoicePoolTasks } from '../utils/invoicePoolRefresh';
 
 function disconnectedKsefConnection() {
   return {
@@ -153,30 +154,11 @@ export const useAppStore = create(
 
       refreshAllInvoicePools: async ({ force = true } = {}) => {
         const pool = get().invoicePool || emptyInvoicePool();
-        const tasks = [];
-
-        for (const direction of ['sale', 'purchase']) {
-          const entries = Object.values(pool?.[direction] || {});
-          for (const entry of entries) {
-            const query = entry?.query;
-            if (!query) continue;
-            tasks.push(
-              get().loadInvoicePool({
-                direction,
-                filters: {
-                  month: '',
-                  issue_date_from: query.issue_date_from || '',
-                  issue_date_to: query.issue_date_to || '',
-                  issue_date_before: query.issue_date_before || '',
-                  status: query.status || '',
-                  contractor: query.number_filter || '',
-                },
-                options: { defaultToCurrentMonth: false },
-                force,
-              }).catch(() => null)
-            );
-          }
-        }
+        const filters = get().filters || {};
+        const taskSpecs = buildRefreshInvoicePoolTasks(pool, filters, { force });
+        const tasks = taskSpecs.map((spec) =>
+          get().loadInvoicePool(spec).catch(() => null),
+        );
 
         if (tasks.length === 0) return;
         await Promise.all(tasks);
