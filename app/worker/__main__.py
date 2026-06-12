@@ -9,13 +9,11 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from datetime import UTC, datetime
-
 from app.core.config import settings
 from app.integrations.ksef.auth import KSeFAuthProvider
 from app.integrations.ksef.client import KSeFClient, RetryConfig
 from app.persistence.db import SessionLocal
-from app.persistence.models.background_job import claimable_jobs
+from app.persistence.models.background_job import claim_and_lock_jobs, prepare_job_queue
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
@@ -64,46 +62,95 @@ def _build_handlers(session, ksef_client, ksef_session_service):
     }
 
 
+def _build_ksef_session_service(session):
+    ksef_client = KSeFClient(
+        environment=settings.ksef_environment,
+        timeout_seconds=settings.ksef_timeout_seconds,
+        retry_config=RetryConfig(),
+    )
+    audit_service = AuditService(
+        session=session,
+        audit_repository=AuditRepository(session),
+    )
+    return KSeFSessionService(
+        session=session,
+        auth_provider=KSeFAuthProvider(
+            environment=settings.ksef_environment,
+            timeout_seconds=settings.ksef_timeout_seconds,
+            auth_redeem_timeout_seconds=settings.ksef_auth_redeem_timeout_seconds,
+        ),
+        ksef_client=ksef_client,
+        audit_service=audit_service,
+        invoice_repository=InvoiceRepository(session),
+    ), ksef_client
+
+
+def _log_poll_tick(queue_stats: dict[str, int]) -> None:
+    pending_count = queue_stats["pending_count"]
+    claimable_count = queue_stats["claimable_count"]
+    if pending_count == 0 and claimable_count == 0:
+        return
+
+    logger.info(
+        "WORKER_POLL_TICK pending_count=%s claimable_count=%s processing=%s",
+        pending_count,
+        claimable_count,
+        queue_stats["processing"],
+    )
+    if pending_count > 0 and claimable_count == 0:
+        logger.warning(
+            "WORKER_JOB_SKIPPED reason=no_claimable_jobs future_available_at=%s "
+            "exhausted_attempts=%s processing=%s",
+            queue_stats["future_available_at"],
+            queue_stats["exhausted_attempts"],
+            queue_stats["processing"],
+        )
+
+
 def _process_batch() -> int:
     session = SessionLocal()
     try:
-        jobs = claimable_jobs(session, BATCH_SIZE)
+        queue_stats = prepare_job_queue(session)
+        _log_poll_tick(queue_stats)
+
+        jobs = claim_and_lock_jobs(session, BATCH_SIZE)
         if not jobs:
+            session.commit()
             return 0
 
-        ksef_client = KSeFClient(
-            environment=settings.ksef_environment,
-            timeout_seconds=settings.ksef_timeout_seconds,
-            retry_config=RetryConfig(),
-        )
-        audit_service = AuditService(
-            session=session,
-            audit_repository=AuditRepository(session),
-        )
-        ksef_session_service = KSeFSessionService(
-            session=session,
-            auth_provider=KSeFAuthProvider(
-                environment=settings.ksef_environment,
-                timeout_seconds=settings.ksef_timeout_seconds,
-                auth_redeem_timeout_seconds=settings.ksef_auth_redeem_timeout_seconds,
-            ),
-            ksef_client=ksef_client,
-            audit_service=audit_service,
-            invoice_repository=InvoiceRepository(session),
-        )
-        handlers = _build_handlers(session, ksef_client, ksef_session_service)
+        for job in jobs:
+            logger.info(
+                "WORKER_JOB_CLAIMED job_id=%s job_type=%s attempts=%s",
+                job.id,
+                job.job_type,
+                job.attempts,
+            )
+
+        try:
+            ksef_session_service, ksef_client = _build_ksef_session_service(session)
+            handlers = _build_handlers(session, ksef_client, ksef_session_service)
+        except Exception as exc:
+            logger.exception("WORKER_JOB_SKIPPED reason=worker_init_failed error=%s", exc)
+            for job in jobs:
+                job.last_error = f"Inicjalizacja workera nie powiodła się: {exc}"[:1024]
+                if job.attempts >= job.max_attempts:
+                    job.status = "failed"
+                else:
+                    job.status = "pending"
+                job.locked_at = None
+                job.locked_by = None
+            session.commit()
+            return 0
 
         processed = 0
         for job in jobs:
-            job.status = "processing"
-            job.locked_at = datetime.now(UTC)
-            job.locked_by = "worker"
-            job.attempts += 1
-            session.flush()
-
             handler = handlers.get(job.job_type)
             if handler is None:
-                logger.warning("Nieznany job_type=%s id=%s — pomijam.", job.job_type, job.id)
+                logger.warning(
+                    "WORKER_JOB_SKIPPED reason=unknown_job_type job_id=%s job_type=%s",
+                    job.id,
+                    job.job_type,
+                )
                 job.status = "failed"
                 job.last_error = f"Nieznany job_type: {job.job_type}"
                 session.flush()
@@ -116,6 +163,8 @@ def _process_batch() -> int:
                 if isinstance(result, dict):
                     job.payload_json = {**job.payload_json, "result": result}
                 job.status = "done"
+                job.locked_at = None
+                job.locked_by = None
                 logger.info("Job %s (%s) zakończony.", job.id, job.job_type)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Job %s (%s) BŁĄD: %s", job.id, job.job_type, exc)
@@ -124,6 +173,8 @@ def _process_batch() -> int:
                     job.status = "failed"
                 else:
                     job.status = "pending"
+                    job.locked_at = None
+                    job.locked_by = None
 
             session.flush()
             session.commit()

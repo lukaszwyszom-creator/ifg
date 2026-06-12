@@ -52,13 +52,16 @@ class SyncPurchaseInvoicesJobHandler:
                 "received": report["ksef_returned"],
                 "skipped_existing": report["skipped_existing"],
                 "skipped_parse": report["errors"],
+                "rate_limited": report.get("rate_limited", False),
+                "warning": report.get("warning"),
             }
 
             logger.info(
-                "KSEF_ASYNC_SYNC_WORKER_DONE job_id=%s saved=%s received=%s",
+                "KSEF_ASYNC_SYNC_WORKER_DONE job_id=%s saved=%s received=%s rate_limited=%s",
                 job_id,
                 counts["saved"],
                 counts["received"],
+                counts["rate_limited"],
             )
             return counts
         except Exception as exc:
