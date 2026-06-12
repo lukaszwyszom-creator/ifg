@@ -16,7 +16,7 @@ from app.core.exceptions import AppError, ConflictError, ExternalServiceError, N
 from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
-from app.integrations.ksef.client import KSeFClient, KSeFClientError
+from app.integrations.ksef.client import KSeFClient, KSeFClientError, QueryReceivedInvoicesResult
 from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
@@ -31,6 +31,9 @@ SESSION_EXPIRED = "expired"
 SESSION_FAILED = "failed"
 _SCOPE_PURCHASE_INVOICES = "purchase_invoices"
 _MAX_ERROR_SAMPLES = 5
+_RATE_LIMIT_WARNING = (
+    "KSeF ograniczył tempo pobierania faktur (HTTP 429). Część faktur nie została pobrana."
+)
 
 # Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
 _TOKEN_CACHE_MARGIN = timedelta(seconds=30)
@@ -399,6 +402,8 @@ class KSeFSessionService:
                 "skipped_existing": counts["skipped_existing"],
                 "errors": counts["skipped_parse"],
                 "error_samples": counts.get("error_samples", []),
+                "rate_limited": counts.get("rate_limited", False),
+                "warning": counts.get("warning"),
             }
             sync_repo.mark_success(
                 _SCOPE_PURCHASE_INVOICES,
@@ -444,7 +449,8 @@ class KSeFSessionService:
 
         ctx = self.get_session_context(nip)
 
-        received = []
+        received: list = []
+        query_result: QueryReceivedInvoicesResult | None = None
         subject_type_used: str | None = None
         for subject_type in ("subject2", "subject1", "subject3"):
             try:
@@ -460,22 +466,34 @@ class KSeFSessionService:
             except KSeFClientError as exc:
                 raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
 
+            if isinstance(batch, list):
+                query_result = QueryReceivedInvoicesResult(invoices=batch)
+            else:
+                query_result = batch
+
+            result_count = query_result.metadata_refs_count or len(query_result.invoices)
             logger.info(
                 "KSeF purchases sync subjectType=%s result_count=%d date_from=%s date_to=%s",
                 subject_type,
-                len(batch),
+                result_count,
                 date_from,
                 date_to,
             )
             subject_type_used = subject_type
-            if batch:
-                received = batch
+            if query_result.invoices or query_result.metadata_refs_count:
+                received = query_result.invoices
                 break
 
         saved = 0
         skipped_existing = 0
         skipped_parse = 0
         error_samples: list[str] = []
+        rate_limited = bool(query_result and query_result.rate_limited)
+        if query_result:
+            for err in query_result.download_errors:
+                skipped_parse += 1
+                if len(error_samples) < _MAX_ERROR_SAMPLES:
+                    error_samples.append(err)
         for result in received:
             if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
                 logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
@@ -589,13 +607,20 @@ class KSeFSessionService:
                         f"{result.ksef_reference_number}: import error: {str(exc)[:120]}"
                     )
 
+        received_count = (
+            query_result.metadata_refs_count
+            if query_result and query_result.metadata_refs_count
+            else len(received)
+        )
         return {
-            "received": len(received),
+            "received": received_count,
             "saved": saved,
             "skipped_existing": skipped_existing,
             "skipped_parse": skipped_parse,
             "subject_type": subject_type_used,
             "error_samples": error_samples,
+            "rate_limited": rate_limited,
+            "warning": _RATE_LIMIT_WARNING if rate_limited else None,
         }
 
     def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:

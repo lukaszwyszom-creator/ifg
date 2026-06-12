@@ -535,18 +535,22 @@ class TestQueryReceivedInvoicesMetadata:
             if method == "POST" and "/invoices/query/metadata" in url:
                 recorded_posts.append({"json": json, "params": params})
                 return metadata_resp
-            if method == "GET" and "/invoices/ksef/KSEF-META-1" in url:
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+        def _fake_get(url, *, headers=None, **kw):
+            if "/invoices/ksef/KSEF-META-1" in url:
                 recorded_gets.append(url)
                 assert headers.get("Accept") == "application/xml"
                 return invoice_resp
-            if method == "GET" and "/invoices/KSEF-META-1" in url:
+            if "/invoices/KSEF-META-1" in url:
                 raise AssertionError(f"Użyto nieoficjalnego path bez /ksef/: {url}")
-            raise AssertionError(f"Unexpected request: {method} {url}")
+            raise AssertionError(f"Unexpected GET: {url}")
 
         ctx = MagicMock()
         ctx.__enter__ = MagicMock(return_value=ctx)
         ctx.__exit__ = MagicMock(return_value=False)
         ctx.request.side_effect = _fake_request
+        ctx.get.side_effect = _fake_get
 
         with patch("httpx.Client", return_value=ctx):
             results = client.query_received_invoices(
@@ -567,9 +571,9 @@ class TestQueryReceivedInvoicesMetadata:
         assert body["dateRange"]["to"] == "2026-06-09T23:59:59Z"
         assert len(recorded_gets) == 1
         assert "/invoices/ksef/KSEF-META-1" in recorded_gets[0]
-        assert len(results) == 1
-        assert results[0].ksef_reference_number == "KSEF-META-1"
-        assert b"Faktura" in results[0].xml_bytes
+        assert len(results.invoices) == 1
+        assert results.invoices[0].ksef_reference_number == "KSEF-META-1"
+        assert b"Faktura" in results.invoices[0].xml_bytes
 
     def test_subject1_session_fallback_uses_legacy_path_not_ksef(self):
         client = self._make_client()
@@ -614,6 +618,115 @@ class TestQueryReceivedInvoicesMetadata:
                 subject_type="subject1",
             )
 
-        assert len(results) == 1
-        assert results[0].ksef_reference_number == "LEGACY-1"
+        assert len(results.invoices) == 1
+        assert results.invoices[0].ksef_reference_number == "LEGACY-1"
         assert any("/invoices/LEGACY-1" in u and "/ksef/" not in u for u in recorded_gets)
+
+
+class TestPurchaseInvoiceDownloadRateLimit:
+    """GET /invoices/ksef/{ref} — retry 429 z Retry-After i kontynuacja batcha."""
+
+    def _make_client(self) -> KSeFClient:
+        return KSeFClient(
+            environment="production",
+            timeout_seconds=5,
+            retry_config=RetryConfig(max_retries=0, backoff_base=0.01, backoff_max=0.05),
+        )
+
+    def test_429_retries_then_succeeds(self):
+        client = self._make_client()
+
+        metadata_resp = MagicMock()
+        metadata_resp.status_code = 200
+        metadata_resp.json.return_value = {
+            "hasMore": False,
+            "invoices": [{"ksefNumber": "KSEF-RL-1"}],
+        }
+
+        rate_limited = MagicMock()
+        rate_limited.status_code = 429
+        rate_limited.text = "Too Many Requests"
+        rate_limited.headers = {"Retry-After": "0.01"}
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.content = b"<Faktura/>"
+
+        sleep_calls: list[float] = []
+        download_attempts = {"count": 0}
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            if method == "POST" and "/invoices/query/metadata" in url:
+                return metadata_resp
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+        def _fake_get(url, *, headers=None, **kw):
+            download_attempts["count"] += 1
+            if download_attempts["count"] == 1:
+                return rate_limited
+            return ok_resp
+
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.request.side_effect = _fake_request
+        ctx.get.side_effect = _fake_get
+
+        with patch("httpx.Client") as mock_cls, patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
+            mock_cls.return_value = ctx
+            results = client.query_received_invoices(
+                access_token="tok",
+                session_reference="sess-ref",
+                symmetric_key=b"k" * 32,
+                iv=b"i" * 16,
+                invoicing_date_from="2026-05-01",
+                invoicing_date_to="2026-05-31",
+                subject_type="subject2",
+            )
+
+        assert len(results.invoices) == 1
+        assert results.invoices[0].ksef_reference_number == "KSEF-RL-1"
+        assert sleep_calls, "powinien zastosować sleep po 429"
+
+    def test_429_exhausted_marks_invoice_error_without_crashing_batch(self):
+        client = self._make_client()
+
+        metadata_resp = MagicMock()
+        metadata_resp.status_code = 200
+        metadata_resp.json.return_value = {
+            "hasMore": False,
+            "invoices": [{"ksefNumber": "KSEF-RL-FAIL"}],
+        }
+
+        rate_limited = MagicMock()
+        rate_limited.status_code = 429
+        rate_limited.text = "Too Many Requests"
+        rate_limited.headers = {"Retry-After": "0.01"}
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            if method == "POST" and "/invoices/query/metadata" in url:
+                return metadata_resp
+            raise AssertionError(f"Unexpected request: {method} {url}")
+
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.request.side_effect = _fake_request
+        ctx.get.return_value = rate_limited
+
+        with patch("httpx.Client", return_value=ctx), patch("time.sleep"):
+            with patch.object(client, "_pace_purchase_request"), patch.object(client, "_mark_purchase_request"):
+                results = client.query_received_invoices(
+                    access_token="tok",
+                    session_reference="sess-ref",
+                    symmetric_key=b"k" * 32,
+                    iv=b"i" * 16,
+                    invoicing_date_from="2026-05-01",
+                    invoicing_date_to="2026-05-31",
+                    subject_type="subject2",
+                )
+
+        assert results.invoices == []
+        assert results.rate_limited is True
+        assert results.metadata_refs_count == 1
+        assert any("KSEF-RL-FAIL" in err and "429" in err for err in results.download_errors)

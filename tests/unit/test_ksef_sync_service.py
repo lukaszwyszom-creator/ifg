@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.exceptions import ExternalServiceError
-from app.integrations.ksef.client import KSeFClientError
+from app.integrations.ksef.client import KSeFClientError, QueryReceivedInvoicesResult, ReceivedInvoiceResult
 from app.services.ksef_session_service import KSeFSessionService
 from app.services.ksef_sync_service import KSeFSyncService
 
@@ -252,6 +252,30 @@ def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
     assert item.net_total == Decimal("219.51")
     assert item.vat_total == Decimal("50.49")
     assert item.gross_total == Decimal("270.00")
+
+
+def test_sync_received_invoices_propagates_rate_limit_warning_and_error_samples() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_ksef_service_with_repo(repo)
+    service.ksef_client.query_received_invoices.return_value = QueryReceivedInvoicesResult(
+        invoices=[],
+        download_errors=["KSEF-RL-FAIL: rate limit (429) — KSeF ograniczył tempo pobierania"],
+        rate_limited=True,
+        metadata_refs_count=1,
+    )
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    assert counts["received"] == 1
+    assert counts["saved"] == 0
+    assert counts["skipped_parse"] == 1
+    assert counts["rate_limited"] is True
+    assert counts["warning"]
+    assert any("429" in sample for sample in counts["error_samples"])
 
 
 def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:

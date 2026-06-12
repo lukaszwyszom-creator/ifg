@@ -89,6 +89,16 @@ class ReceivedInvoiceResult:
 
 
 @dataclass
+class QueryReceivedInvoicesResult:
+    """Wynik query_received_invoices — pobrane XML + błędy downloadu per faktura."""
+
+    invoices: list[ReceivedInvoiceResult]
+    download_errors: list[str] = field(default_factory=list)
+    rate_limited: bool = False
+    metadata_refs_count: int = 0
+
+
+@dataclass
 class RetryConfig:
     max_retries: int = 3
     backoff_base: float = 1.0
@@ -112,6 +122,7 @@ _METADATA_SUBJECT_PURCHASE = "Subject2"
 _METADATA_DATE_TYPES = ("PermanentStorage", "Invoicing")
 _METADATA_PAGE_SIZE = 50
 _REQUEST_MIN_INTERVAL = 1.2
+_PURCHASE_INVOICE_RATE_LIMIT_RETRIES = 5
 
 
 def _format_metadata_datetime(date_str: str, *, end_of_day: bool = False) -> str:
@@ -346,7 +357,7 @@ class KSeFClient:
         invoicing_date_from: str,
         invoicing_date_to: str,
         subject_type: str = "subject2",
-    ) -> list[ReceivedInvoiceResult]:
+    ) -> QueryReceivedInvoicesResult:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
         Flow (subject2 / zakupy):
@@ -563,7 +574,7 @@ class KSeFClient:
                     "KSeF received invoices query returned empty result; "
                     "no POST query endpoint available"
                 )
-                return []
+                return QueryReceivedInvoicesResult(invoices=[])
             raise last_exc or KSeFClientError("Brak dostępnego endpointu query dla KSeF.")
 
         # 3. Polling query reference — max 60s co 3s
@@ -600,11 +611,15 @@ class KSeFClient:
                     )
 
         # 3. Pobierz i odszyfruj każdą fakturę (legacy — sesyjny fallback)
-        return self._download_legacy_session_invoices(
+        legacy_invoices = self._download_legacy_session_invoices(
             access_token=access_token,
             invoice_refs=invoice_refs,
             symmetric_key=symmetric_key,
             iv=iv,
+        )
+        return QueryReceivedInvoicesResult(
+            invoices=legacy_invoices,
+            metadata_refs_count=len(invoice_refs),
         )
 
     def _query_purchase_metadata_refs(
@@ -689,31 +704,43 @@ class KSeFClient:
         *,
         access_token: str,
         invoice_refs: list[str],
-    ) -> list[ReceivedInvoiceResult]:
+    ) -> QueryReceivedInvoicesResult:
         """Subject2 + metadata: oficjalny GET /invoices/ksef/{ksefNumber} → raw XML."""
         results: list[ReceivedInvoiceResult] = []
+        download_errors: list[str] = []
+        rate_limited = False
         for ref in invoice_refs:
             try:
-                self._pace_purchase_request()
-                inv_resp = self._request_with_retry(
-                    method="GET",
-                    path=f"/invoices/ksef/{ref}",
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/xml",
-                    },
-                )
-                xml_bytes = inv_resp.content
-                if not xml_bytes:
-                    raise KSeFClientError(f"Pusta odpowiedź GET /invoices/ksef/{ref}")
-                self._mark_purchase_request()
+                xml_bytes = self._get_purchase_invoice_xml(access_token, ref)
                 results.append(ReceivedInvoiceResult(
                     ksef_reference_number=ref,
                     xml_bytes=xml_bytes,
                 ))
-            except Exception as exc:  # noqa: BLE001
+            except KSeFClientError as exc:
+                if exc.status_code == 429:
+                    rate_limited = True
+                    download_errors.append(
+                        f"{ref}: rate limit (429) — KSeF ograniczył tempo pobierania"
+                    )
+                else:
+                    download_errors.append(f"{ref}: download error: {str(exc)[:120]}")
                 logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
-        return results
+            except Exception as exc:  # noqa: BLE001
+                download_errors.append(f"{ref}: download error: {str(exc)[:120]}")
+                logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
+        if rate_limited:
+            logger.warning(
+                "KSeF purchase download finished with rate limiting: refs=%d downloaded=%d errors=%d",
+                len(invoice_refs),
+                len(results),
+                len(download_errors),
+            )
+        return QueryReceivedInvoicesResult(
+            invoices=results,
+            download_errors=download_errors,
+            rate_limited=rate_limited,
+            metadata_refs_count=len(invoice_refs),
+        )
 
     def _download_legacy_session_invoices(
         self,
@@ -838,6 +865,115 @@ class KSeFClient:
 
     def _mark_purchase_request(self) -> None:
         self._last_purchase_request_monotonic = time.monotonic()
+
+    def _purchase_download_backoff_seconds(self, attempt: int) -> float:
+        backoff = min(
+            self._retry.backoff_base * (2 ** (attempt - 1))
+            + random.uniform(0, 0.1 * self._retry.backoff_base),
+            self._retry.backoff_max,
+        )
+        return max(backoff, _REQUEST_MIN_INTERVAL)
+
+    def _rate_limit_sleep_seconds(self, response, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), _REQUEST_MIN_INTERVAL)
+            except ValueError:
+                pass
+        return self._purchase_download_backoff_seconds(attempt)
+
+    def _get_purchase_invoice_xml(
+        self,
+        access_token: str,
+        ksef_reference_number: str,
+    ) -> bytes:
+        """GET /invoices/ksef/{ref} z dedykowanym retry dla HTTP 429."""
+        path = f"/invoices/ksef/{ksef_reference_number}"
+        url = self._base_url + path
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/xml",
+        }
+        last_exc: KSeFClientError | None = None
+
+        for attempt in range(1, _PURCHASE_INVOICE_RATE_LIMIT_RETRIES + 1):
+            self._pace_purchase_request()
+            try:
+                with httpx.Client(timeout=self._timeout) as client:
+                    response = client.get(url, headers=headers)
+            except httpx.TimeoutException as exc:
+                last_exc = KSeFClientError(
+                    f"KSeF: timeout po {self._timeout}s: {exc}",
+                    transient=True,
+                )
+                if attempt >= _PURCHASE_INVOICE_RATE_LIMIT_RETRIES:
+                    raise last_exc
+                time.sleep(self._purchase_download_backoff_seconds(attempt))
+                continue
+            except httpx.RequestError as exc:
+                last_exc = KSeFClientError(
+                    f"KSeF: błąd połączenia: {exc}",
+                    transient=True,
+                )
+                if attempt >= _PURCHASE_INVOICE_RATE_LIMIT_RETRIES:
+                    raise last_exc
+                time.sleep(self._purchase_download_backoff_seconds(attempt))
+                continue
+
+            if response.status_code in _SUCCESS_STATUS_CODES:
+                if not response.content:
+                    raise KSeFClientError(f"Pusta odpowiedź GET {path}")
+                self._mark_purchase_request()
+                return response.content
+
+            if response.status_code in (401, 403):
+                raise KSeFSessionExpiredError(
+                    f"KSeF: token wygasł lub nieautoryzowany "
+                    f"({response.status_code}): {response.text[:200]}",
+                    status_code=response.status_code,
+                )
+
+            if response.status_code == 429:
+                sleep_seconds = self._rate_limit_sleep_seconds(response, attempt)
+                logger.warning(
+                    "KSEF_RATE_LIMIT_RETRY ksef_reference_number=%s attempt=%s sleep_seconds=%.2f",
+                    ksef_reference_number,
+                    attempt,
+                    sleep_seconds,
+                )
+                if attempt >= _PURCHASE_INVOICE_RATE_LIMIT_RETRIES:
+                    raise KSeFClientError(
+                        f"KSeF rate limit (429) dla {ksef_reference_number}",
+                        status_code=429,
+                        transient=False,
+                    )
+                time.sleep(sleep_seconds)
+                continue
+
+            if response.status_code in _TRANSIENT_STATUS_CODES:
+                last_exc = KSeFClientError(
+                    f"KSeF odpowiedział statusem {response.status_code}: "
+                    f"{response.text[:200]}",
+                    status_code=response.status_code,
+                    transient=True,
+                )
+                if attempt >= _PURCHASE_INVOICE_RATE_LIMIT_RETRIES:
+                    raise last_exc
+                time.sleep(self._purchase_download_backoff_seconds(attempt))
+                continue
+
+            raise KSeFClientError(
+                f"KSeF odpowiedział statusem {response.status_code}: "
+                f"{response.text[:200]}",
+                status_code=response.status_code,
+                transient=False,
+            )
+
+        raise last_exc or KSeFClientError(
+            f"KSeF: wyczerpano próby pobrania faktury {ksef_reference_number}.",
+            transient=False,
+        )
 
     def _request_with_retry(
         self,
