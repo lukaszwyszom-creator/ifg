@@ -161,3 +161,37 @@ docker compose -f docker/docker-compose.prod.yml exec db \
 docker compose -f docker/docker-compose.prod.yml up -d --build worker
 docker compose -f docker/docker-compose.prod.yml logs -f worker
 ```
+
+---
+
+## Hotfix: ImportError po deployu (commit `4284f6f`)
+
+### Objaw
+
+Worker nie startuje:
+
+```
+ImportError: cannot import name 'claim_and_lock_jobs'
+from 'app.persistence.models.background_job'
+```
+
+### Przyczyna
+
+Commit `4284f6f` (`fix(worker): claim pending background jobs reliably`) zaktualizował
+`app/worker/__main__.py` (import `claim_and_lock_jobs`, `prepare_job_queue`), ale **nie
+zawierał** zmian w `app/persistence/models/background_job.py`. Na DS723+ obraz miał nowy
+worker i stary model — brak eksportowanych funkcji.
+
+### Fix (commit `fix(worker): fix background job claim import`)
+
+Dołożono brakujący plik `background_job.py` z:
+- `prepare_job_queue`, `claim_and_lock_jobs`
+- filtrami claim, recovery stale `processing`, licznikami kolejki
+
+### Smoke-test przed deployem
+
+```bash
+python3 -c "from app.persistence.models.background_job import claim_and_lock_jobs, prepare_job_queue; print('ok')"
+python3 -m pytest tests/unit/test_background_job_claim.py -q
+python3 -m app.worker  # oczekiwane: Worker startuje. poll_interval=5s batch=10
+```
