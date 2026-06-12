@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -781,6 +786,161 @@ def run_api_guardian() -> int:
     return 0
 
 
+class SmokeError(Exception):
+    pass
+
+
+def _sanitize_http_body(body: str) -> str:
+    redacted = re.sub(r'"access_token"\s*:\s*"[^"]*"', '"access_token":"[redacted]"', body)
+    redacted = re.sub(r'"password"\s*:\s*"[^"]*"', '"password":"[redacted]"', redacted)
+    return redacted[:2000]
+
+
+def _smoke_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    payload: dict | None = None,
+    timeout: float = 30,
+) -> tuple[int, str]:
+    data = None
+    req_headers = dict(headers or {})
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        req_headers.setdefault("Content-Type", "application/json")
+    request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise SmokeError(
+            f"HTTP {exc.code} {method} {url}: {_sanitize_http_body(body)}",
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise SmokeError(f"Połączenie nieudane {method} {url}: {exc.reason}") from exc
+
+
+def _print_smoke_log_hints() -> None:
+    print("\nLogi KSeF (DS723+):")
+    print(f"  sudo docker compose -f {COMPOSE_FILE} logs --tail=200 api | grep KSEF_ASYNC_SYNC")
+    print(f"  sudo docker compose -f {COMPOSE_FILE} logs --tail=200 worker | grep KSEF_ASYNC_SYNC")
+
+
+def run_ksef_sync_smoke() -> int:
+    print("IFG Guardian KSeF Sync Smoke")
+    print("=" * 40)
+
+    base = os.environ.get("IFG_SMOKE_API_BASE", "http://127.0.0.1:8000").rstrip("/")
+    nip = os.environ.get("IFG_KSEF_SMOKE_NIP", "9670402857")
+    username = os.environ.get("IFG_SMOKE_USERNAME", "admin")
+    password = os.environ.get("IFG_SMOKE_PASSWORD", "admin123")
+    date_to = date.today()
+    date_from = date_to - timedelta(days=90)
+
+    openapi_paths = (
+        "/api/v1/ksef-sessions/sync-purchase",
+        "/api/v1/ksef-sessions/sync-purchase/jobs/{job_id}",
+        "/api/v1/ksef/sync/status",
+    )
+
+    try:
+        print("\n1. GET /health")
+        status, _ = _smoke_request("GET", f"{base}/health")
+        if status != 200:
+            raise SmokeError(f"/health oczekiwano 200, otrzymano {status}")
+        print("   OK 200")
+
+        print("\n2. GET /openapi.json")
+        _, openapi_body = _smoke_request("GET", f"{base}/openapi.json")
+        for path in openapi_paths:
+            if path not in openapi_body:
+                raise SmokeError(f"Brak {path} w openapi.json")
+            print(f"   OK {path}")
+
+        print("\n3. POST /api/v1/auth/login")
+        _, login_body = _smoke_request(
+            "POST",
+            f"{base}/api/v1/auth/login",
+            payload={"username": username, "password": password},
+        )
+        token = json.loads(login_body).get("access_token")
+        if not token:
+            raise SmokeError("Brak access_token w odpowiedzi login")
+        print("   OK access_token obtained")
+
+        auth_headers = {"Authorization": f"Bearer {token}"}
+
+        print("\n4. POST /api/v1/ksef-sessions/sync-purchase")
+        status, enqueue_body = _smoke_request(
+            "POST",
+            f"{base}/api/v1/ksef-sessions/sync-purchase",
+            headers=auth_headers,
+            payload={
+                "nip": nip,
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+            },
+        )
+        if status != 202:
+            raise SmokeError(f"sync-purchase oczekiwano 202, otrzymano {status}")
+        enqueue = json.loads(enqueue_body)
+        job_id = enqueue.get("job_id")
+        if not job_id:
+            raise SmokeError("Brak job_id w odpowiedzi sync-purchase")
+        print(f"   OK 202 job_id={job_id}")
+
+        print("\n5. Poll job status (co 5s, max 90s)")
+        deadline = time.monotonic() + 90
+        job_payload: dict | None = None
+        while time.monotonic() < deadline:
+            _, job_body = _smoke_request(
+                "GET",
+                f"{base}/api/v1/ksef-sessions/sync-purchase/jobs/{job_id}",
+                headers=auth_headers,
+            )
+            job_payload = json.loads(job_body)
+            job_status = job_payload.get("status", "unknown")
+            print(f"   status: {job_status}")
+            if job_status == "done":
+                break
+            if job_status == "failed":
+                error = job_payload.get("error") or "unknown error"
+                print(f"\nWerdykt: ERROR — job failed: {error}")
+                _print_smoke_log_hints()
+                return 1
+            time.sleep(5)
+        else:
+            print("\nWerdykt: RUNNING — job nadal trwa po timeout 90s, sprawdź logi worker")
+            _print_smoke_log_hints()
+            return 2
+
+        print("\n6. Job done — result")
+        result = job_payload.get("result") or {}
+        for key in ("saved", "received", "skipped_existing", "skipped_parse"):
+            print(f"   {key}: {result.get(key, 0)}")
+
+        print("\n   GET /api/v1/ksef/sync/status")
+        _, sync_body = _smoke_request(
+            "GET",
+            f"{base}/api/v1/ksef/sync/status",
+            headers=auth_headers,
+        )
+        sync_status = json.loads(sync_body)
+        print(f"   status: {sync_status.get('status')}")
+        print(f"   last_success_at: {sync_status.get('last_success_at')}")
+        print(f"   last_error: {sync_status.get('last_error')}")
+
+        print("\nWerdykt: OK — job zakończony")
+        _print_smoke_log_hints()
+        return 0
+    except SmokeError as exc:
+        print(f"\nWerdykt: ERROR — {exc}", file=sys.stderr)
+        _print_smoke_log_hints()
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -795,13 +955,24 @@ def main() -> int:
             "      Porównaj branch/HEAD/repo i kontenery DS723+ z lokalnym kodem.\n"
             "  python3 scripts/guardian.py --ksef-async-check\n"
             "      Sprawdź bundle frontendu i endpoint async sync KSeF.\n"
+            "  python3 scripts/guardian.py --ksef-sync-smoke\n"
+            "      Smoke test KSeF async sync (DS723+, API localhost:8000).\n"
             "  python3 scripts/guardian.py --repo-sync --remote ds723 --fetch\n"
             "      Porównaj Mac mini, origin/production i DS723+ (git only).\n"
             "\n"
             "Zmienne środowiskowe:\n"
             "  IFG_DS723_HOST   Host SSH DS723+ (domyślnie: ds723)\n"
+            "  IFG_KSEF_SMOKE_NIP, IFG_SMOKE_USERNAME, IFG_SMOKE_PASSWORD\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--ksef-sync-smoke",
+        action="store_true",
+        help=(
+            "Smoke test KSeF async sync po deployu (health, openapi, login, enqueue job, poll); "
+            "uruchamiać na DS723+ względem http://127.0.0.1:8000"
+        ),
     )
     parser.add_argument(
         "--ksef-async-check",
@@ -851,6 +1022,8 @@ def main() -> int:
             remote_host=args.remote_host,
             remote_path=args.remote_path,
         )
+    if args.ksef_sync_smoke:
+        return run_ksef_sync_smoke()
     if args.ksef_async_check:
         return run_ksef_async_check()
     if args.repo_sync:

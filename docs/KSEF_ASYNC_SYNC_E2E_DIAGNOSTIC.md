@@ -66,6 +66,35 @@ Sprawdza:
 - brak `syncPurchasesNow(!1` w dist
 - `/api/v1/ksef-sessions/sync-purchase` w openapi.json
 
+## Smoke test po deployu: `--ksef-sync-smoke`
+
+Uruchamiać **na DS723+** (API pod `http://127.0.0.1:8000`). Kontrolowany POST enqueue + polling joba — **nie** deploy, **nie** reset DB.
+
+```bash
+ssh ds723
+cd /volume1/docker/ifg_v2/ifg_standalone
+python3 scripts/guardian.py --ksef-sync-smoke
+```
+
+| Zmienna | Domyślnie |
+|---------|-----------|
+| `IFG_KSEF_SMOKE_NIP` | `9670402857` |
+| `IFG_SMOKE_USERNAME` | `admin` |
+| `IFG_SMOKE_PASSWORD` | `admin123` |
+| `IFG_SMOKE_API_BASE` | `http://127.0.0.1:8000` |
+
+Sekwencja: `/health` → `openapi.json` → login (token, bez logowania hasła) → `POST sync-purchase` (202) → poll job 5s/90s → `GET /ksef/sync/status`.
+
+| Exit | Werdykt |
+|------|---------|
+| 0 | OK — job done |
+| 1 | ERROR — HTTP lub job failed |
+| 2 | RUNNING — timeout poll (job może nadal trwać) |
+
+Po zakończeniu wypisuje komendy `docker compose logs ... | grep KSEF_ASYNC_SYNC`.
+
+**Nie robi:** deployu, migracji, `docker compose down`, usuwania wolumenów, resetu bazy.
+
 ## Procedura deployu DS723+
 
 ```bash

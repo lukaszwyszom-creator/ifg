@@ -52,6 +52,14 @@ Host SSH: `IFG_DS723_HOST` lub `ds723`.
 8. `python3 scripts/guardian.py --deploy-check`
 9. `curl -fsS http://127.0.0.1:8000/health`
 
+**Po deployu (opcjonalnie):** smoke test integracji KSeF:
+
+```bash
+python3 scripts/guardian.py --ksef-sync-smoke
+```
+
+Patrz `docs/KSEF_ASYNC_SYNC_E2E_DIAGNOSTIC.md` — exit 0/1/2, wymaga aktywnej sesji KSeF dla NIP.
+
 Bez `--yes`: przed remote → `Kontynuować deploy na DS723+? [y/N]`
 
 ## Allowlist `git add`
