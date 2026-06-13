@@ -129,7 +129,12 @@ def main() -> int:
         elif not args.apply:
             print("Dry-run — użyj --apply aby zapisać (wymaga pg_dump przed apply na produkcji).")
 
-    report_path = Path(args.report) if args.report else ROOT / "docs" / "KSEF_PURCHASE_TOTALS_REPAIR_REPORT.json"
+    report_path = (
+        Path(args.report)
+        if args.report
+        else ROOT / "docs" / "KSEF_PURCHASE_TOTALS_REPAIR_REPORT.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
             {
