@@ -107,9 +107,22 @@ docker compose -f docker/docker-compose.prod.yml exec db \
 
 ---
 
-## Deploy
+## Wykonanie wdrożenia (2026-06-13)
 
-Tylko backend (API/worker). Bez rebuild frontendu.
+| Krok | Status |
+|------|--------|
+| Commit `27fa7e4` + push `production` | OK |
+| DS723+ `git pull` + rebuild `api`/`worker` | OK |
+| Health `http://127.0.0.1:8000/health` | OK |
+| `pg_dump` przed repair | `backups/backup_pre_totals_repair_20260613_225057.dump` (106K) |
+| Repair dry-run | 3 kandydatów (VAT=0 przy poprawnym netto — faktury zw/exempt) |
+| Repair `--apply` | 3 faktury zaktualizowane |
+| Purchase z `total_net=0` po repair | **0** |
+
+Raport repair na DS723+: `backups/KSEF_PURCHASE_TOTALS_REPAIR_REPORT.json`
+
+Commit follow-up: `d29277a` — mkdir dla raportu skryptu repair.
+
 
 ```bash
 docker compose -f docker/docker-compose.prod.yml up -d --build api worker
