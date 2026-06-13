@@ -107,7 +107,7 @@ export default function KSeFTopbarInfo() {
     setFlashMsg('Uruchamiam async sync…');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
-      const { counts } = await ksefApi.runPurchaseSync(trigger.nip, {
+      const { counts, jobStatus } = await ksefApi.runPurchaseSync(trigger.nip, {
         onStarted: () => {
           setSyncBusy(false);
           setSyncRunning(true);
@@ -122,7 +122,8 @@ export default function KSeFTopbarInfo() {
         },
       });
       setFlashType('success');
-      setFlashMsg(`+${counts.saved}`);
+      const warning = jobStatus?.result?.warning || counts.warning;
+      setFlashMsg(warning ? `+${counts.saved} — ${warning}` : `+${counts.saved}`);
       await refreshAllInvoicePools();
       window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
       await loadSyncStatus();

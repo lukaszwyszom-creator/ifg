@@ -179,7 +179,7 @@ export default function KSeFSessionBar() {
     logKsefUiTriggerPurchaseSync(session.nip, 'KSeFSessionBar');
     try {
       // Ścieżka sync: ksefApi.runPurchaseSync → POST /ksef-sessions/sync-purchase (async job)
-      const { counts } = await ksefApi.runPurchaseSync(session.nip, {
+      const { counts, jobStatus } = await ksefApi.runPurchaseSync(session.nip, {
         onStarted: () => {
           setSyncBusy(false);
           setSyncRunning(true);
@@ -191,9 +191,11 @@ export default function KSeFSessionBar() {
           }
         },
       });
+      const warning = jobStatus?.result?.warning || counts.warning;
       setSuccessMsg(
         `Pobrano ${counts.saved} nowych faktur` +
-        ` (od KSeF: ${counts.received}, duplikaty: ${counts.skippedExisting}, błędy parsowania: ${counts.skippedParse})`,
+        ` (od KSeF: ${counts.received}, duplikaty: ${counts.skippedExisting}, błędy parsowania: ${counts.skippedParse})` +
+        (warning ? ` — ${warning}` : ''),
       );
       await refreshAllInvoicePools();
       window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));

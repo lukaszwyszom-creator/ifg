@@ -181,6 +181,8 @@ class SyncPurchaseResponse(BaseModel):
     received: int
     skipped_existing: int
     skipped_parse: int
+    rate_limited: bool = False
+    warning: str | None = None
 
 
 class KSeFSyncStatusResponse(BaseModel):
@@ -220,6 +222,8 @@ class KSeFPurchaseSyncReportResponse(BaseModel):
     skipped_existing: int
     errors: int
     error_samples: list[str] = []
+    rate_limited: bool = False
+    warning: str | None = None
 
 
 class KSeFPurchaseSyncResponse(BaseModel):
@@ -270,6 +274,10 @@ def sync_ksef_purchases_now(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     body: KSeFPurchaseSyncRequest = Body(default_factory=KSeFPurchaseSyncRequest),
 ) -> KSeFPurchaseSyncReportResponse:
+    logger.info(
+        "KSEF_UI_TRIGGER_PURCHASE_SYNC nip=%s mode=sync endpoint=/ksef/sync/purchases",
+        body.nip,
+    )
     report = ksef_session_service.sync_purchase_invoices(
         nip=body.nip,
         date_from=body.date_from,
@@ -302,6 +310,10 @@ def sync_purchase_invoices(
     from uuid import uuid4
     from app.persistence.models.background_job import BackgroundJob
 
+    logger.info(
+        "KSEF_UI_TRIGGER_PURCHASE_SYNC nip=%s mode=async endpoint=/ksef-sessions/sync-purchase",
+        body.nip,
+    )
     job_id = uuid4()
     job = BackgroundJob(
         id=job_id,
