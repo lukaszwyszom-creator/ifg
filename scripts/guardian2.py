@@ -24,13 +24,16 @@ DEPLOY_ALLOWLIST = (
     "frontend-react/src/api/ksef.js",
     "frontend-react/src/api/ksef.purchase-sync.test.mjs",
     "frontend-react/src/components/dashboard/KSeFSessionBar.jsx",
+    "frontend-react/src/components/layout/KSeFConnectionTile.jsx",
     "frontend-react/src/components/layout/KSeFTopbarInfo.jsx",
     "scripts/guardian.py",
     "scripts/guardian2.py",
     "docs/KSEF_FORCE_ASYNC_PURCHASE_SYNC.md",
     "docs/KSEF_SYNC_REFRESH_UX_FIX.md",
+    "docs/KSEF_CONNECT_BUTTON_FIX.md",
     "docs/KSEF_ASYNC_SYNC_E2E_DIAGNOSTIC.md",
     "docs/GUARDIAN2_DEPLOY.md",
+    "docs/GUARDIAN_FRONTEND_BUILD_CHECK.md",
 )
 
 

@@ -46,6 +46,22 @@ test('ksef API: fallback sync tylko przy HTTP 404 na enqueue', () => {
   assert.doesNotMatch(source, /await pollPurchaseSyncJob[\s\S]*syncPurchasesNowFallback/);
 });
 
+test('ksef API: openSession dedupe + jednorazowy retry transient', () => {
+  const source = read('ksef.js');
+  assert.match(source, /async function openSessionOnce\(/);
+  assert.match(source, /openSessionInFlightPromise/);
+  assert.match(source, /isTransientOpenSessionError/);
+  assert.match(source, /openSession: \(nip\) => openSessionOnce\(nip\)/);
+});
+
+test('KSeFConnectionTile: guard przed równoległym connect i obsługa 409', () => {
+  const source = read('../components/layout/KSeFConnectionTile.jsx');
+  assert.match(source, /actionInFlightRef/);
+  assert.match(source, /ui_status === 'CONNECTING'/);
+  assert.match(source, /error\?\.response\?\.status === 409/);
+  assert.match(source, /getActiveSession\(nipToUse\)/);
+});
+
 test('UI Odśwież KSeF: używa runPurchaseSync, bez syncPurchasesNow we wszystkich komponentach', () => {
   const topbar = read('../components/layout/KSeFTopbarInfo.jsx');
   const sessionBar = read('../components/dashboard/KSeFSessionBar.jsx');

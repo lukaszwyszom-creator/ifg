@@ -106,13 +106,52 @@ export function normalizePurchaseSyncCounts(raw = {}) {
   const skippedParse = Number.isFinite(Number(raw.skipped_parse ?? raw.errors))
     ? Number(raw.skipped_parse ?? raw.errors)
     : 0;
-  return { saved, received, skippedExisting, skippedParse };
+  const rateLimited = Boolean(raw.rate_limited);
+  const warning = raw.warning ? String(raw.warning).trim() : '';
+  return { saved, received, skippedExisting, skippedParse, rateLimited, warning };
 }
 
 function sleep(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+let openSessionInFlightPromise = null;
+let openSessionInFlightNip = null;
+
+function isTransientOpenSessionError(err) {
+  if (!err?.response) {
+    return true;
+  }
+  const status = err.response.status;
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+async function openSessionOnce(nip) {
+  const normalizedNip = String(nip || '').trim();
+  if (openSessionInFlightPromise && openSessionInFlightNip === normalizedNip) {
+    return openSessionInFlightPromise;
+  }
+
+  const attemptOpen = async (attempt) => {
+    try {
+      return await client.post('/ksef-sessions/', { nip: normalizedNip }).then((r) => r.data);
+    } catch (err) {
+      if (attempt === 0 && isTransientOpenSessionError(err)) {
+        await sleep(800);
+        return attemptOpen(1);
+      }
+      throw err;
+    }
+  };
+
+  openSessionInFlightNip = normalizedNip;
+  openSessionInFlightPromise = attemptOpen(0).finally(() => {
+    openSessionInFlightPromise = null;
+    openSessionInFlightNip = null;
+  });
+  return openSessionInFlightPromise;
 }
 
 /** Produkcyjnie bezpieczny log diagnostyczny (bez tokenów — tylko endpoint/NIP/daty/jobId). */
@@ -276,8 +315,7 @@ export const ksefApi = {
   purchaseSyncDateRange,
   formatPurchaseSyncError,
 
-  openSession: (nip) =>
-    client.post('/ksef-sessions/', { nip }).then((r) => r.data),
+  openSession: (nip) => openSessionOnce(nip),
 
   getActiveSession: (nip) =>
     client.get('/ksef-sessions/active', { params: { nip } }).then((r) => r.data),

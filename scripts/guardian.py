@@ -347,6 +347,12 @@ def _dist_js_blobs() -> str:
 
 FRONTEND_SRC_PREFIX = "frontend-react/src"
 FRONTEND_DIST_STALE_MSG = "Frontend dist wymaga przebudowy (npm run build)."
+KSEF_CONNECT_JS_MARKERS = ("openSessionOnce", "openSession: (nip) => openSessionOnce(nip)")
+KSEF_CONNECT_TILE_MARKERS = ("actionInFlightRef", "response?.status === 409")
+KSEF_CONNECT_DIST_MARKERS = (
+    "KSeFConnectionTile.connect",
+    "Sesja KSeF jest już aktywna",
+)
 
 
 def _frontend_src_last_commit_epoch() -> int | None:
@@ -366,11 +372,100 @@ def _frontend_dist_newest_epoch() -> float | None:
     return max(f.stat().st_mtime for f in js_files)
 
 
+def _frontend_src_dirty_max_mtime() -> float | None:
+    try:
+        porcelain = _git("status", "--porcelain", "--", FRONTEND_SRC_PREFIX)
+    except RuntimeError:
+        return None
+    max_mtime: float | None = None
+    for line in porcelain.splitlines():
+        if not line.strip():
+            continue
+        path_part = line[3:].strip()
+        if " -> " in path_part:
+            path_part = path_part.split(" -> ", 1)[1]
+        path = ROOT / path_part
+        if path.is_file():
+            max_mtime = max(max_mtime or 0.0, path.stat().st_mtime)
+    return max_mtime
+
+
+def check_frontend_worktree_requires_build(*, label: str = "lokalnie") -> tuple[bool, str]:
+    dirty_mtime = _frontend_src_dirty_max_mtime()
+    if dirty_mtime is None:
+        return True, f"✅ [{label}] brak niezcommitowanych zmian {FRONTEND_SRC_PREFIX}"
+    dist_ts = _frontend_dist_newest_epoch()
+    if dist_ts is None:
+        return False, (
+            f"❌ [{label}] niezcommitowane zmiany {FRONTEND_SRC_PREFIX} — "
+            f"brak dist (cd frontend-react && npm run build)"
+        )
+    if dist_ts < dirty_mtime:
+        return False, (
+            f"❌ [{label}] niezcommitowane zmiany {FRONTEND_SRC_PREFIX} — "
+            f"dist nieaktualny (cd frontend-react && npm run build)"
+        )
+    return True, f"✅ [{label}] dist nowszy niż niezcommitowane zmiany src"
+
+
+def check_ksef_connect_button_fix() -> tuple[bool, list[str]]:
+    notes: list[str] = []
+    ok = True
+
+    ksef_js = ROOT / "frontend-react" / "src" / "api" / "ksef.js"
+    tile = ROOT / "frontend-react" / "src" / "components" / "layout" / "KSeFConnectionTile.jsx"
+
+    if not ksef_js.is_file():
+        ok = False
+        notes.append("❌ brak frontend-react/src/api/ksef.js")
+    else:
+        js_source = ksef_js.read_text(encoding="utf-8")
+        if all(marker in js_source for marker in KSEF_CONNECT_JS_MARKERS):
+            notes.append("✅ ksef.js: openSessionOnce + dedupe connect")
+        else:
+            ok = False
+            notes.append("❌ ksef.js: brak openSessionOnce (KSEF_CONNECT_BUTTON_FIX)")
+
+    if not tile.is_file():
+        ok = False
+        notes.append("❌ brak KSeFConnectionTile.jsx")
+    else:
+        tile_source = tile.read_text(encoding="utf-8")
+        if all(marker in tile_source for marker in KSEF_CONNECT_TILE_MARKERS):
+            notes.append("✅ KSeFConnectionTile: actionInFlightRef + obsługa 409")
+        else:
+            ok = False
+            notes.append("❌ KSeFConnectionTile: brak guard/409 (KSEF_CONNECT_BUTTON_FIX)")
+
+    dist_blob = _dist_js_blobs()
+    if not dist_blob:
+        ok = False
+        notes.append("❌ dist/assets/*.js — brak bundle (npm run build)")
+    elif all(marker in dist_blob for marker in KSEF_CONNECT_DIST_MARKERS):
+        notes.append("✅ dist zawiera markery connect fix (409 fallback + connect sync trigger)")
+    else:
+        ok = False
+        notes.append(
+            "❌ dist NIE zawiera connect fix — wymagany: cd frontend-react && npm run build"
+        )
+
+    return ok, notes
+
+
 def check_frontend_dist_freshness(*, label: str = "lokalnie") -> tuple[bool, str]:
     commit_ts = _frontend_src_last_commit_epoch()
     dist_ts = _frontend_dist_newest_epoch()
     if dist_ts is None:
         return False, f"❌ [{label}] {FRONTEND_DIST_STALE_MSG}"
+    try:
+        src_head = _git("log", "-1", "--format=%H", "--", FRONTEND_SRC_PREFIX)
+        dist_head = _git("log", "-1", "--format=%H", "--", "frontend-react/dist")
+        if src_head == dist_head:
+            return True, (
+                f"✅ [{label}] dist i src w tym samym commicie ({src_head[:7]})"
+            )
+    except RuntimeError:
+        pass
     if commit_ts is None:
         return True, f"✅ [{label}] brak historii commitów {FRONTEND_SRC_PREFIX} (pominięto)"
     if dist_ts < commit_ts:
@@ -403,6 +498,14 @@ def _remote_frontend_dist_newest_epoch(host: str, repo_path: str) -> float | Non
 
 def check_remote_frontend_dist_freshness(host: str, repo_path: str) -> tuple[bool, str]:
     try:
+        src_head = _remote_git(
+            host, repo_path, f"log -1 --format=%H -- {FRONTEND_SRC_PREFIX}"
+        )
+        dist_head = _remote_git(
+            host, repo_path, "log -1 --format=%H -- frontend-react/dist"
+        )
+        if src_head == dist_head:
+            return True, f"✅ [DS723+] dist i src w tym samym commicie ({src_head[:7]})"
         commit_ts = int(
             _remote_git(host, repo_path, f"log -1 --format=%ct -- {FRONTEND_SRC_PREFIX}")
         )
@@ -501,6 +604,16 @@ def run_ksef_async_check() -> int:
         has_error = True
     notes.append(dist_note)
 
+    worktree_ok, worktree_note = check_frontend_worktree_requires_build()
+    if not worktree_ok:
+        has_error = True
+    notes.append(worktree_note)
+
+    connect_ok, connect_notes = check_ksef_connect_button_fix()
+    if not connect_ok:
+        has_error = True
+    notes.extend(connect_notes)
+
     openapi_text, openapi_src = _fetch_openapi_text()
     if openapi_text is None:
         has_error = True
@@ -554,11 +667,16 @@ def run_deploy_check(
 
     local_dirty = _porcelain_is_dirty(local_status)
     local_dist_ok, local_dist_note = check_frontend_dist_freshness()
+    local_worktree_ok, local_worktree_note = check_frontend_worktree_requires_build()
+    connect_ok, connect_notes = check_ksef_connect_button_fix()
 
     print("\nLokalnie (Mac mini):")
     print(f"  branch: {local_branch}")
     print(f"  HEAD:   {local_head}")
     print(f"  frontend dist: {local_dist_note}")
+    print(f"  frontend worktree: {local_worktree_note}")
+    for note in connect_notes:
+        print(f"  connect fix: {note}")
     if local_status:
         print(f"  status:\n{local_status}")
     else:
@@ -640,9 +758,11 @@ def run_deploy_check(
         for problem in container_problems:
             print(f"     • {problem}")
 
-    print(f"{'✅' if local_dist_ok else '❌'} frontend dist (Mac mini)")
+    print(f"{'✅' if local_dist_ok else '❌'} frontend dist commit-vs-dist (Mac mini)")
+    print(f"{'✅' if local_worktree_ok else '❌'} frontend dist worktree-vs-dist (Mac mini)")
+    print(f"{'✅' if connect_ok else '❌'} KSeF connect button fix w src+dist")
     if ssh_ok and remote_dist_ok is not None:
-        print(f"{'✅' if remote_dist_ok else '❌'} frontend dist (DS723+)")
+        print(f"{'✅' if remote_dist_ok else '❌'} frontend dist commit-vs-dist (DS723+)")
 
     print()
     deploy_ok = (
@@ -650,6 +770,8 @@ def run_deploy_check(
         and commit_match
         and containers_ok
         and local_dist_ok
+        and local_worktree_ok
+        and connect_ok
         and (remote_dist_ok is not False)
     )
     if deploy_ok:

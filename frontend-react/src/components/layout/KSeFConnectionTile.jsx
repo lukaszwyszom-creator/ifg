@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ksefApi, logKsefUiTriggerPurchaseSync } from '../../api/ksef';
 import { settingsApi } from '../../api/settings';
 import { useAppStore } from '../../store/useAppStore';
@@ -63,10 +63,49 @@ export default function KSeFConnectionTile() {
   const setSellerNip = useAppStore((s) => s.setSellerNip);
   const status = useAppStore((s) => s.ksefConnection);
   const setKsefConnection = useAppStore((s) => s.setKsefConnection);
+  const actionInFlightRef = useRef(false);
 
   const applyStatus = useCallback((nextStatus) => {
     setKsefConnection(nextStatus);
   }, [setKsefConnection]);
+
+  const applyConnectedSession = useCallback((session, nip) => {
+    setSellerNip(nip);
+    ksefApi.markStatusMutation();
+    applyStatus({
+      ui_status: 'CONNECTED',
+      details: {
+        reason: 'UNKNOWN',
+        has_session: true,
+        session_expires_at: session?.expires_at ?? null,
+        last_error: null,
+      },
+    });
+  }, [applyStatus, setSellerNip]);
+
+  const startPurchaseSync = useCallback((nip, sessionExpiresAt) => {
+    logKsefUiTriggerPurchaseSync(nip, 'KSeFConnectionTile.connect');
+    void ksefApi.runPurchaseSync(nip)
+      .then(() => {
+        window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
+      })
+      .catch((syncErr) => {
+        ksefApi.markStatusMutation();
+        applyStatus({
+          ui_status: 'CONNECTED',
+          details: {
+            reason: 'UNKNOWN',
+            has_session: true,
+            session_expires_at: sessionExpiresAt,
+            last_error:
+              syncErr?.response?.data?.error?.message ??
+              syncErr?.response?.data?.detail ??
+              syncErr?.message ??
+              'Synchronizacja zakupów nie wystartowała.',
+          },
+        });
+      });
+  }, [applyStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +129,12 @@ export default function KSeFConnectionTile() {
     };
 
     const refreshKsefStatus = async () => {
+      if (actionInFlightRef.current) {
+        return;
+      }
+      if (useAppStore.getState().ksefConnection.ui_status === 'CONNECTING') {
+        return;
+      }
       try {
         const nipToUse = await ensureSellerNip();
         const nextStatus = await ksefApi.getStatus(nipToUse || null);
@@ -146,10 +191,12 @@ export default function KSeFConnectionTile() {
   }, [sellerNip, setSellerNip, applyStatus]);
 
   const handleClick = async () => {
-    if (status.ui_status === 'CONNECTING') {
+    if (actionInFlightRef.current || status.ui_status === 'CONNECTING') {
       return;
     }
 
+    actionInFlightRef.current = true;
+    try {
     let nipToUse = sellerNip;
     if (!nipToUse || nipToUse.length !== 10) {
       try {
@@ -242,40 +289,34 @@ export default function KSeFConnectionTile() {
 
     try {
       const session = await ksefApi.openSession(nipToUse);
-      setSellerNip(nipToUse);
-      ksefApi.markStatusMutation();
-      applyStatus({
-        ui_status: 'CONNECTED',
-        details: {
-          reason: 'UNKNOWN',
-          has_session: true,
-          session_expires_at: session.expires_at,
-          last_error: null,
-        },
-      });
+      applyConnectedSession(session, nipToUse);
       window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
-      logKsefUiTriggerPurchaseSync(nipToUse, 'KSeFConnectionTile.connect');
-      void ksefApi.runPurchaseSync(nipToUse)
-        .then(() => {
-          window.dispatchEvent(new CustomEvent('ksef:invoices-synced'));
-        })
-        .catch((syncErr) => {
+      startPurchaseSync(nipToUse, session?.expires_at ?? null);
+    } catch (error) {
+      if (error?.response?.status === 409) {
+        try {
+          const session = await ksefApi.getActiveSession(nipToUse);
+          applyConnectedSession(session, nipToUse);
+          window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
+          startPurchaseSync(nipToUse, session?.expires_at ?? null);
+          return;
+        } catch (resolveErr) {
           ksefApi.markStatusMutation();
           applyStatus({
-            ui_status: 'CONNECTED',
+            ui_status: 'ERROR',
             details: {
               reason: 'UNKNOWN',
-              has_session: true,
-              session_expires_at: session.expires_at,
+              has_session: false,
+              session_expires_at: null,
               last_error:
-                syncErr?.response?.data?.error?.message ??
-                syncErr?.response?.data?.detail ??
-                syncErr?.message ??
-                'Synchronizacja zakupów nie wystartowała.',
+                resolveErr?.response?.data?.error?.message ??
+                resolveErr?.response?.data?.detail ??
+                'Sesja KSeF jest już aktywna, ale nie udało się pobrać jej statusu.',
             },
           });
-        });
-    } catch (error) {
+          return;
+        }
+      }
       ksefApi.markStatusMutation();
       applyStatus({
         ui_status: 'ERROR',
@@ -289,6 +330,9 @@ export default function KSeFConnectionTile() {
             'Nie udało się połączyć z KSeF.',
         },
       });
+    }
+    } finally {
+      actionInFlightRef.current = false;
     }
   };
 
