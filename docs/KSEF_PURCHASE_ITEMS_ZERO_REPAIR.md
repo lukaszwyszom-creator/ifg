@@ -117,4 +117,28 @@ WHERE i.direction = 'purchase'
 
 ---
 
+## Wykonanie backfill (2026-06-13, DS723+)
+
+Skrypt: `scripts/repair_purchase_items_from_ksef.py`
+
+| Krok | Wynik |
+|------|--------|
+| Backup | `backups/backup_pre_items_repair_20260613_225855.dump` |
+| Naprawione (`--no-ksef`, totals fallback) | **15 / 16** |
+| Pozostała | `FAW/00037/W/04/26` — **3 pozycje**, wymaga pobrania XML z KSeF (brak aktywnej sesji) |
+| Weryfikacja `FAS/BYD/999/2026` | net=219.51, vat=50.49, gross=270.00 |
+
+Ponowny repair dla `FAW/00037/W/04/26` po połączeniu KSeF:
+
+```bash
+sudo docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+  -v $(pwd)/scripts:/app/scripts:ro api \
+  python /app/scripts/repair_purchase_items_from_ksef.py \
+  --auth session --number FAW/00037/W/04/26 --apply
+```
+
+Raport: `backups/KSEF_PURCHASE_ITEMS_REPAIR_REPORT.json`
+
+---
+
 *KSeF Purchase Items Zero Repair — parser FA(3) + walidacja importu.*
