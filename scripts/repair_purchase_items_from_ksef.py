@@ -149,12 +149,21 @@ def _parsed_items_to_dicts(parsed: dict) -> list[dict]:
     return items
 
 
+def _split_amount(total: Decimal, parts: int) -> list[Decimal]:
+    if parts <= 0:
+        return []
+    base = (total / parts).quantize(_TWO, rounding=ROUND_HALF_UP)
+    amounts = [base] * parts
+    diff = total - sum(amounts)
+    if diff != 0:
+        amounts[-1] = (amounts[-1] + diff).quantize(_TWO, rounding=ROUND_HALF_UP)
+    return amounts
+
+
 def _fallback_items_from_totals(
     existing: list[InvoiceItemORM],
     totals: dict,
 ) -> list[dict] | None:
-    if len(existing) != 1:
-        return None
     totals = totals or {}
     net = _dec(totals.get("total_net"))
     vat = _dec(totals.get("total_vat"))
@@ -162,25 +171,58 @@ def _fallback_items_from_totals(
     if gross <= 0 or net <= 0:
         return None
 
-    row = existing[0]
-    qty = _dec(row.quantity) if _dec(row.quantity) > 0 else Decimal("1")
-    vat_rate = _dec(row.vat_rate)
-    if vat_rate == 0 and net > 0 and vat > 0:
-        vat_rate = (vat / net * Decimal("100")).quantize(_TWO, rounding=ROUND_HALF_UP)
+    if len(existing) == 1:
+        row = existing[0]
+        qty = _dec(row.quantity) if _dec(row.quantity) > 0 else Decimal("1")
+        vat_rate = _dec(row.vat_rate)
+        if vat_rate == 0 and net > 0 and vat > 0:
+            vat_rate = (vat / net * Decimal("100")).quantize(_TWO, rounding=ROUND_HALF_UP)
+        unit_price_net = (net / qty).quantize(_TWO, rounding=ROUND_HALF_UP)
+        return [
+            {
+                "name": row.name,
+                "quantity": qty,
+                "unit": row.unit or "szt.",
+                "unit_price_net": unit_price_net,
+                "vat_rate": vat_rate,
+                "net_amount": net,
+                "vat_amount": vat,
+                "gross_amount": gross if gross > 0 else net + vat,
+                "sort_order": row.sort_order,
+            }
+        ]
 
-    unit_price_net = (net / qty).quantize(_TWO, rounding=ROUND_HALF_UP)
+    if len(existing) < 2:
+        return None
+
+    qtys = {_dec(row.quantity) for row in existing}
+    vats = {_dec(row.vat_rate) for row in existing}
+    if len(qtys) != 1 or len(vats) != 1:
+        return None
+    qty = qtys.pop()
+    vat_rate = vats.pop()
+    if qty <= 0:
+        return None
+
+    n = len(existing)
+    nets = _split_amount(net, n)
+    vats_split = _split_amount(vat, n)
+    grosses = _split_amount(gross if gross > 0 else net + vat, n)
     return [
         {
             "name": row.name,
             "quantity": qty,
             "unit": row.unit or "szt.",
-            "unit_price_net": unit_price_net,
+            "unit_price_net": (line_net / qty).quantize(_TWO, rounding=ROUND_HALF_UP),
             "vat_rate": vat_rate,
-            "net_amount": net,
-            "vat_amount": vat,
-            "gross_amount": gross if gross > 0 else net + vat,
+            "net_amount": line_net,
+            "vat_amount": line_vat,
+            "gross_amount": line_gross,
             "sort_order": row.sort_order,
         }
+        for row, line_net, line_vat, line_gross in zip(
+            existing, nets, vats_split, grosses, strict=True
+        )
     ]
 
 
@@ -307,6 +349,10 @@ def main() -> int:
                     source = "totals_fallback"
                 elif not error:
                     error = "brak danych z KSeF i fallback totals niemożliwy"
+                elif "429" in error or "rate limit" in error.lower():
+                    print(
+                        f"  [hint] KSeF rate limit — użyj --no-ksef jeśli pozycje mają tę samą ilość/VAT"
+                    )
 
             record = {
                 **entry,
