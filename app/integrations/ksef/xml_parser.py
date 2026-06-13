@@ -349,6 +349,58 @@ def _parse_items(fa_el: etree._Element) -> list[dict[str, Any]]:
     return items
 
 
+def _sum_item_totals(items: list[dict[str, Any]]) -> tuple[Decimal, Decimal, Decimal]:
+    net = Decimal("0")
+    vat = Decimal("0")
+    gross = Decimal("0")
+    for item in items:
+        net += Decimal(str(item.get("net_total", 0)))
+        vat += Decimal(str(item.get("vat_total", 0)))
+        gross += Decimal(str(item.get("gross_total", 0)))
+    return _quantize_money(net), _quantize_money(vat), _quantize_money(gross)
+
+
+def _resolve_totals_with_item_fallback(
+    total_net: Decimal,
+    total_vat: Decimal,
+    total_gross: Decimal,
+    items: list[dict[str, Any]],
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Uzupełnia net/VAT/brutto z pozycji, gdy nagłówek FA(3) nie ma P_13/P_14."""
+    if not items:
+        return total_net, total_vat, total_gross
+
+    items_net, items_vat, items_gross = _sum_item_totals(items)
+    has_item_amounts = (
+        items_net > Decimal("0") or items_vat > Decimal("0") or items_gross > Decimal("0")
+    )
+    if not has_item_amounts:
+        return total_net, total_vat, total_gross
+
+    header_has_net_vat = total_net > Decimal("0") or total_vat > Decimal("0")
+
+    if not header_has_net_vat:
+        if items_net > Decimal("0"):
+            total_net = items_net
+        if items_vat > Decimal("0"):
+            total_vat = items_vat
+        elif total_gross > Decimal("0") and total_net > Decimal("0"):
+            total_vat = _quantize_money(total_gross - total_net)
+        if total_gross == Decimal("0") and items_gross > Decimal("0"):
+            total_gross = items_gross
+    elif total_gross > Decimal("0") and total_net == Decimal("0") and items_net > Decimal("0"):
+        total_net = items_net
+        if items_vat > Decimal("0"):
+            total_vat = items_vat
+        elif total_gross > total_net:
+            total_vat = _quantize_money(total_gross - total_net)
+
+    if total_gross == Decimal("0") and total_net > Decimal("0"):
+        total_gross = _quantize_money(total_net + total_vat)
+
+    return total_net, total_vat, total_gross
+
+
 def _build_parsed_invoice_payload(
     fa_el: etree._Element,
     seller_snapshot: dict[str, Any],
@@ -359,6 +411,10 @@ def _build_parsed_invoice_payload(
         raise ValueError("Brak daty wystawienia (P_1) w dokumencie FA(3)")
 
     total_net, total_vat, total_gross = _extract_totals(fa_el)
+    items = _parse_items(fa_el)
+    total_net, total_vat, total_gross = _resolve_totals_with_item_fallback(
+        total_net, total_vat, total_gross, items
+    )
     exchange_rate, exchange_rate_date = _extract_exchange_rate(fa_el)
 
     return {
@@ -372,7 +428,7 @@ def _build_parsed_invoice_payload(
         "total_vat": total_vat,
         "total_gross": total_gross,
         "invoice_type": _extract_invoice_type(fa_el),
-        "items": _parse_items(fa_el),
+        "items": items,
         **_extract_annotations(fa_el),
         "exchange_rate": exchange_rate,
         "exchange_rate_date": exchange_rate_date,
