@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { CounterpartyListItem, fetchDebtors, parseAmount } from '@/api/mobile';
+import { useRouter, Href } from 'expo-router';
+import { CounterpartyListItem, fetchCreditors, parseAmount } from '@/api/mobile';
 import { isAuthFailure } from '@/api/auth';
 import { useAuth } from '@/auth/AuthContext';
 import { ScreenShell } from '@/components/ScreenShell';
 import { formatPln } from '@/data/mock';
 import { colors } from '@/theme/colors';
 
-export default function DebtorsListScreen() {
+export default function CreditorsListScreen() {
   const router = useRouter();
   const { logout } = useAuth();
   const [items, setItems] = useState<CounterpartyListItem[]>([]);
@@ -19,7 +19,7 @@ export default function DebtorsListScreen() {
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchDebtors();
+      const payload = await fetchCreditors();
       setItems(payload);
     } catch (err) {
       if (isAuthFailure(err)) {
@@ -28,7 +28,7 @@ export default function DebtorsListScreen() {
         return;
       }
       setItems([]);
-      setError(err instanceof Error ? err.message : 'Nie udało się pobrać dłużników');
+      setError(err instanceof Error ? err.message : 'Nie udało się pobrać wierzycieli');
     } finally {
       setLoading(false);
     }
@@ -49,11 +49,11 @@ export default function DebtorsListScreen() {
   );
 
   return (
-    <ScreenShell title="Dłużnicy" subtitle="Należności po kontrahentach" showBack scroll>
+    <ScreenShell title="Wierzyciele" subtitle="Zobowiązania po kontrahentach" showBack scroll>
       {loading ? (
         <View style={styles.stateBox}>
           <ActivityIndicator color={colors.gold} size="large" />
-          <Text style={styles.stateText}>Ładowanie dłużników…</Text>
+          <Text style={styles.stateText}>Ładowanie wierzycieli…</Text>
         </View>
       ) : null}
 
@@ -67,14 +67,14 @@ export default function DebtorsListScreen() {
       ) : null}
 
       {!loading && !error && sorted.length === 0 ? (
-        <Text style={styles.emptyText}>Brak należności po kontrahentach</Text>
+        <Text style={styles.emptyText}>Brak zobowiązań po kontrahentach</Text>
       ) : null}
 
       {!loading && !error
         ? sorted.map((d) => {
             const overdueDue = parseAmount(d.overdue_due);
             return (
-              <Pressable key={d.id} style={styles.card} onPress={() => router.push(`/debtors/${d.id}`)}>
+              <Pressable key={d.id} style={styles.card} onPress={() => router.push(`/creditors/${d.id}` as Href)}>
                 <View style={styles.cardHeader}>
                   <Text style={styles.name}>{d.name}</Text>
                   <Text style={styles.amount}>{formatPln(d.total_due)}</Text>

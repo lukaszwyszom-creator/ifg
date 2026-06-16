@@ -1,20 +1,77 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter, Href } from 'expo-router';
+import {
+  dueLabel,
+  fetchSettlements,
+  parseAmount,
+  SettlementItem,
+  settlementContractorName,
+  settlementDisplayNumber,
+} from '@/api/mobile';
+import { isAuthFailure } from '@/api/auth';
+import { useAuth } from '@/auth/AuthContext';
 import { ScreenShell } from '@/components/ScreenShell';
-import { debtors, dueLabel, formatPln, purchaseInvoices, salesInvoices } from '@/data/mock';
+import { formatPln } from '@/data/mock';
 import { colors } from '@/theme/colors';
 
 type Tab = 'receivables' | 'payables';
 
+function uniqueContractors(items: SettlementItem[]): number {
+  const names = new Set(
+    items.map((item) => settlementContractorName(item).toLowerCase()),
+  );
+  return names.size;
+}
+
+function sumRemaining(items: SettlementItem[]): number {
+  return items.reduce((sum, item) => sum + parseAmount(item.remaining_amount), 0);
+}
+
 export default function SettlementsScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
   const [tab, setTab] = useState<Tab>('receivables');
+  const [debtors, setDebtors] = useState<SettlementItem[]>([]);
+  const [creditors, setCreditors] = useState<SettlementItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const receivables = salesInvoices.filter((i) => i.status !== 'paid');
-  const payables = purchaseInvoices.filter((i) => i.status !== 'paid');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchSettlements();
+      setDebtors(res.debtors);
+      setCreditors(res.creditors);
+    } catch (err) {
+      if (isAuthFailure(err)) {
+        logout();
+        router.replace('/login');
+        return;
+      }
+      setDebtors([]);
+      setCreditors([]);
+      setError(err instanceof Error ? err.message : 'Nie udało się pobrać rozrachunków');
+    } finally {
+      setLoading(false);
+    }
+  }, [logout, router]);
 
-  const items = tab === 'receivables' ? receivables : payables;
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const items = tab === 'receivables' ? debtors : creditors;
+
+  const summaryLabel = tab === 'receivables' ? 'Agregat dłużników' : 'Agregat wierzycieli';
+  const summaryValue = useMemo(() => {
+    const count = uniqueContractors(items);
+    const total = sumRemaining(items);
+    return `${count} kontrahentów · ${formatPln(total)}`;
+  }, [items]);
+
+  const summaryRoute = (tab === 'receivables' ? '/debtors' : '/creditors') as Href;
 
   return (
     <ScreenShell title="Rozrachunki" subtitle="Należności i zobowiązania" showBack scroll>
@@ -33,33 +90,54 @@ export default function SettlementsScreen() {
         </Pressable>
       </View>
 
-      <Pressable style={styles.summaryCard} onPress={() => router.push('/debtors')}>
-        <Text style={styles.summaryLabel}>
-          {tab === 'receivables' ? 'Agregat dłużników (demo)' : 'Wierzyciele — widok listy'}
-        </Text>
-        <Text style={styles.summaryValue}>
-          {tab === 'receivables'
-            ? `${debtors.length} kontrahentów · ${formatPln(debtors.reduce((s, d) => s + d.totalDue, 0))}`
-            : `${formatPln(payables.reduce((s, i) => s + (i.gross - i.paid), 0))} do zapłaty`}
-        </Text>
-      </Pressable>
+      {loading ? (
+        <View style={styles.stateBox}>
+          <ActivityIndicator color={colors.gold} size="large" />
+          <Text style={styles.stateText}>Ładowanie rozrachunków…</Text>
+        </View>
+      ) : null}
 
-      {items.map((inv) => {
-        const remaining = inv.gross - inv.paid;
-        return (
-          <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
-            <View style={styles.rowMain}>
-              <Text style={styles.name}>{inv.contractorName}</Text>
-              <Text style={styles.number}>{inv.number}</Text>
-              <Text style={styles.due}>{dueLabel(inv.dueDate)}</Text>
-            </View>
-            <View style={styles.rowRight}>
-              <Text style={styles.amount}>{formatPln(remaining)}</Text>
-              <Text style={styles.remaining}>pozostało</Text>
-            </View>
+      {!loading && error ? (
+        <View style={styles.stateBox}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={styles.retryBtn} onPress={load}>
+            <Text style={styles.retryText}>Spróbuj ponownie</Text>
           </Pressable>
-        );
-      })}
+        </View>
+      ) : null}
+
+      {!loading && !error ? (
+        <>
+          <Pressable style={styles.summaryCard} onPress={() => router.push(summaryRoute)}>
+            <Text style={styles.summaryLabel}>{summaryLabel}</Text>
+            <Text style={styles.summaryValue}>{summaryValue}</Text>
+          </Pressable>
+
+          {items.length === 0 ? (
+            <Text style={styles.emptyText}>
+              {tab === 'receivables' ? 'Brak otwartych należności' : 'Brak otwartych zobowiązań'}
+            </Text>
+          ) : null}
+
+          {items.map((inv) => (
+            <Pressable
+              key={inv.invoice_id}
+              style={styles.row}
+              onPress={() => router.push(`/invoice/${inv.invoice_id}`)}
+            >
+              <View style={styles.rowMain}>
+                <Text style={styles.name}>{settlementContractorName(inv)}</Text>
+                <Text style={styles.number}>{settlementDisplayNumber(inv)}</Text>
+                <Text style={styles.due}>{dueLabel(inv.due_date)}</Text>
+              </View>
+              <View style={styles.rowRight}>
+                <Text style={styles.amount}>{formatPln(inv.remaining_amount)}</Text>
+                <Text style={styles.remaining}>pozostało</Text>
+              </View>
+            </Pressable>
+          ))}
+        </>
+      ) : null}
     </ScreenShell>
   );
 }
@@ -78,6 +156,24 @@ const styles = StyleSheet.create({
   tabActive: { borderColor: colors.gold, backgroundColor: colors.goldGlow },
   tabText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
   tabTextActive: { color: colors.gold },
+  stateBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 32,
+  },
+  stateText: { color: colors.textMuted, fontSize: 16 },
+  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
+  retryBtn: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
+  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
   summaryCard: {
     backgroundColor: colors.surfaceElevated,
     borderRadius: 12,

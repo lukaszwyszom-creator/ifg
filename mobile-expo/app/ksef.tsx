@@ -1,97 +1,129 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { fetchDashboard, formatSyncLabel } from '@/api/mobile';
+import { isAuthFailure } from '@/api/auth';
+import { useAuth } from '@/auth/AuthContext';
 import { ScreenShell } from '@/components/ScreenShell';
-import { dashboardMock, formatPln } from '@/data/mock';
 import { colors } from '@/theme/colors';
 
-export default function KsefScreen() {
-  const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState(dashboardMock.ksef.lastSyncLabel);
-  const k = dashboardMock.ksef;
+function currentPeriodKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
 
-  const handleSync = () => {
-    setSyncing(true);
-    setTimeout(() => {
-      setSyncing(false);
-      setLastSync('właśnie teraz (demo)');
-    }, 1500);
-  };
+export default function KsefScreen() {
+  const router = useRouter();
+  const { logout } = useAuth();
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [newCount, setNewCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchDashboard(currentPeriodKey());
+      setLastSyncAt(data.ksef_last_sync_at);
+      setNewCount(data.ksef_new_invoices_count);
+    } catch (err) {
+      if (isAuthFailure(err)) {
+        logout();
+        router.replace('/login');
+        return;
+      }
+      setError(err instanceof Error ? err.message : 'Nie udało się pobrać danych KSeF z IFG');
+    } finally {
+      setLoading(false);
+    }
+  }, [logout, router]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
-    <ScreenShell title="Import KSeF" subtitle="Synchronizacja faktur zakupowych" showBack scroll>
-      <View style={styles.statusCard}>
-        <View style={styles.statusRow}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusLabel}>{k.statusLabel}</Text>
+    <ScreenShell title="KSeF w IFG" subtitle="Faktury zakupowe z KSeF" showBack scroll>
+      <View style={styles.infoCard}>
+        <Text style={styles.infoTitle}>Jak to działa</Text>
+        <Text style={styles.infoText}>IFGM pokazuje faktury KSeF pobrane przez IFG.</Text>
+        <Text style={styles.infoText}>Synchronizacja KSeF odbywa się po stronie IFG — nie z telefonu.</Text>
+      </View>
+
+      {loading ? (
+        <View style={styles.stateBox}>
+          <ActivityIndicator color={colors.gold} />
+          <Text style={styles.stateText}>Ładowanie danych z IFG…</Text>
         </View>
-        <Text style={styles.meta}>Sesja aktywna · NIP z ustawień IFG</Text>
-        <Text style={styles.meta}>Ostatnia synchronizacja: {lastSync}</Text>
-        <Text style={styles.meta}>Nowe dokumenty (ostatni sync): {k.newCount}</Text>
-      </View>
+      ) : null}
 
-      <Pressable
-        style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
-        onPress={handleSync}
-        disabled={syncing}
-      >
-        <Text style={styles.syncBtnText}>{syncing ? 'Pobieranie…' : 'Pobierz faktury z KSeF'}</Text>
+      {!loading && error ? (
+        <View style={styles.stateBox}>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={styles.retryBtn} onPress={load}>
+            <Text style={styles.retryText}>Spróbuj ponownie</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {!loading && !error ? (
+        <View style={styles.statusCard}>
+          <Text style={styles.statusLabel}>Ostatni import</Text>
+          <Text style={styles.statusValue}>{formatSyncLabel(lastSyncAt)}</Text>
+          <Text style={styles.meta}>Faktury z ostatniego importu: {newCount ?? 0}</Text>
+        </View>
+      ) : null}
+
+      <Pressable style={styles.backBtn} onPress={() => router.back()}>
+        <Text style={styles.backBtnText}>Wróć</Text>
       </Pressable>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Ostatnio pobrane (demo)</Text>
-        {dashboardMock.recentPurchases.map((p) => (
-          <View key={p.id} style={styles.purchaseRow}>
-            <View style={styles.purchaseMain}>
-              <Text style={styles.purchaseName}>{p.supplier}</Text>
-              <Text style={styles.purchaseMeta}>{p.number}</Text>
-            </View>
-            <Text style={styles.purchaseAmount}>{formatPln(p.gross)}</Text>
-          </View>
-        ))}
-      </View>
-
-      <Text style={styles.footer}>
-        IFGM nie łączy się bezpośrednio z KSeF. W produkcji: POST /api/v1/ksef/sync/purchases
-      </Text>
     </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  statusCard: {
+  infoCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.success,
+    borderColor: colors.border,
     padding: 16,
     gap: 8,
   },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
-  statusLabel: { color: colors.success, fontSize: 18, fontWeight: '700' },
-  meta: { color: colors.textMuted, fontSize: 12 },
-  syncBtn: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  syncBtnDisabled: { opacity: 0.6 },
-  syncBtnText: { color: colors.bg, fontSize: 16, fontWeight: '800' },
-  section: { gap: 8, marginTop: 4 },
-  sectionTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
-  purchaseRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-    padding: 12,
+  infoTitle: { color: colors.gold, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  infoText: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
+  stateBox: { alignItems: 'center', gap: 10, paddingVertical: 24 },
+  stateText: { color: colors.textMuted, fontSize: 14 },
+  errorText: { color: colors.danger, fontSize: 14, textAlign: 'center' },
+  retryBtn: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  purchaseMain: { flex: 1, gap: 2 },
-  purchaseName: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  purchaseMeta: { color: colors.textMuted, fontSize: 11 },
-  purchaseAmount: { color: colors.text, fontSize: 14, fontWeight: '700' },
-  footer: { color: colors.textDim, fontSize: 10, lineHeight: 14, marginTop: 8 },
+  retryText: { color: colors.gold, fontSize: 14, fontWeight: '600' },
+  statusCard: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 6,
+  },
+  statusLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
+  statusValue: { color: colors.text, fontSize: 18, fontWeight: '700' },
+  meta: { color: colors.textDim, fontSize: 13 },
+  backBtn: {
+    marginTop: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  backBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
 });

@@ -9,6 +9,7 @@ import AdvancedDashboard from './pages/advanced/AdvancedDashboard';
 import PaymentsPage from './pages/payments/PaymentsPage';
 import StockPage from './pages/stock/StockPage';
 import WarehousePage from './pages/warehouse/WarehousePage';
+import CompanySettingsPage from './pages/settings/CompanySettingsPage';
 
 function PrivateRoute({ children }) {
   const token = useAuthStore((s) => s.token);
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="stock" element={<StockPage />} />
           <Route path="warehouse" element={<WarehousePage />} />
+          <Route path="settings" element={<CompanySettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/invoices" replace />} />
       </Routes>

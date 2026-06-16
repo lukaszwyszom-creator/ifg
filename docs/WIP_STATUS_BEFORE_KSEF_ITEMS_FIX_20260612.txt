@@ -1,0 +1,38 @@
+ M app/integrations/ksef/xml_parser.py
+ M app/services/ksef_session_service.py
+ M mobile-expo/app.json
+ M mobile-expo/app/dashboard.tsx
+ M mobile-expo/app/debtors/[id].tsx
+ M mobile-expo/app/debtors/index.tsx
+ M mobile-expo/app/invoice/[id].tsx
+ M mobile-expo/app/ksef.tsx
+ M mobile-expo/app/payments-unassigned.tsx
+ M mobile-expo/app/purchase-invoices.tsx
+ M mobile-expo/app/sales-invoices.tsx
+ M mobile-expo/app/settlements.tsx
+ M mobile-expo/src/api/mobile.ts
+ M tests/unit/test_ksef_sync_service.py
+ M tests/unit/test_ksef_xml_parser.py
+?? docs/IFGM_P1_1_IMPLEMENTATION.md
+?? docs/IFGM_PHU_BER_INVOICE_ITEMS_DIAGNOSIS.md
+?? docs/IFGM_PILOT_DEPLOYMENT_PLAN.md
+?? docs/KSEF_PURCHASE_ITEMS_ZERO_REPAIR.md
+?? docs/WIP_DIFF_BEFORE_KSEF_ITEMS_FIX_20260612.patch
+?? docs/WIP_STATUS_BEFORE_KSEF_ITEMS_FIX_20260612.txt
+?? mobile-expo/app/creditors/
+?? mobile-expo/docs/IFGM_DASHBOARD_UX_FIX.md
+?? mobile-expo/docs/IFGM_DASHBOARD_UX_FIX_2.md
+?? mobile-expo/docs/IFGM_G2_AUDIT_P1_P3.md
+?? mobile-expo/docs/IFGM_INVOICE_DETAIL_ITEMS_FIX.md
+?? mobile-expo/docs/IFGM_LOGIN_DIAGNOSTICS.md
+?? mobile-expo/docs/IFGM_P1_2_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_P1_3_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_P1_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_P2_1_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_P2_2_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_P3_IMPLEMENTATION.md
+?? mobile-expo/docs/IFGM_PILOT_DEPLOYMENT_PLAN_FIX.md
+?? mobile-expo/docs/IFGM_PRODUCTION_READINESS_AUDIT.md
+?? mobile-expo/docs/IFGM_RC_FIXES.md
+?? mobile-expo/docs/IFGM_RELEASE_CANDIDATE_AUDIT.md
+?? mobile-expo/docs/IFGM_TILE_FRONTEND_REUSE_PLAN.md

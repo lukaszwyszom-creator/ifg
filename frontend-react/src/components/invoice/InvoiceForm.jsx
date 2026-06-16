@@ -331,11 +331,12 @@ function calcNet(it) {
 }
 
 function calcLineAmounts(it) {
-  const q = parseFloat(it.quantity) || 0;
+  const q = parseQuantity(it.quantity);
+  const qty = Number.isFinite(q) ? q : 0;
   const rate = parseVatRatePercent(it.vat_rate);
   if (it.price_mode === 'gross') {
     const unitGross = parseFloat(it.unit_price_gross) || 0;
-    const gross = roundMoney(q * unitGross);
+    const gross = roundMoney(qty * unitGross);
     const net = rate > 0 ? roundMoney(gross / (1 + rate / 100)) : gross;
     const vat = roundMoney(gross - net);
     return {
@@ -345,13 +346,43 @@ function calcLineAmounts(it) {
     };
   }
   const unitNet = parseFloat(it.unit_price_net) || 0;
-  const net = roundMoney(q * unitNet);
+  const net = roundMoney(qty * unitNet);
   const vat = roundMoney((net * rate) / 100);
   return {
     net: net.toFixed(2),
     vat: vat.toFixed(2),
     gross: roundMoney(net + vat).toFixed(2),
   };
+}
+
+function calcUnitPriceGross(it) {
+  const rate = parseVatRatePercent(it.vat_rate);
+  if (it.price_mode === 'gross') {
+    const unitGross = parseFloat(it.unit_price_gross) || 0;
+    return unitGross.toFixed(2);
+  }
+  const unitNet = parseFloat(it.unit_price_net) || 0;
+  if (rate <= 0) return unitNet.toFixed(2);
+  return roundMoney(unitNet * (1 + rate / 100)).toFixed(2);
+}
+
+function calcUnitPriceNet(it) {
+  const rate = parseVatRatePercent(it.vat_rate);
+  if (it.price_mode === 'net') {
+    const unitNet = parseFloat(it.unit_price_net) || 0;
+    return unitNet.toFixed(2);
+  }
+  const unitGross = parseFloat(it.unit_price_gross) || 0;
+  if (rate <= 0) return unitGross.toFixed(2);
+  return roundMoney(unitGross / (1 + rate / 100)).toFixed(2);
+}
+
+function formatVatRateLabel(value) {
+  if (value === 'zw' || value === 'np') return 'zw.';
+  const n = Number.parseFloat(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(n)) return `${value}%`;
+  if (n === Math.round(n)) return `${Math.round(n)}%`;
+  return `${n}%`;
 }
 
 function useBuyerLookup(initialBuyerNip) {
@@ -700,9 +731,10 @@ function ItemsSection({
         <span>Nazwa</span>
         <span>Ilość</span>
         <span>J.m.</span>
-        <span>Cena</span>
+        <span>Cena netto</span>
+        <span>Cena brutto</span>
         <span>Tryb</span>
-        <span>VAT %</span>
+        <span>VAT</span>
         <span>Kwota netto</span>
         <span>Kwota VAT</span>
         <span>Kwota brutto</span>
@@ -711,6 +743,8 @@ function ItemsSection({
 
       {items.map((it, idx) => {
         const amounts = calcLineAmounts(it);
+        const unitNetDisplay = calcUnitPriceNet(it);
+        const unitGrossDisplay = calcUnitPriceGross(it);
         return (
         <div key={idx} className={styles.itemRow}>
           <div className={styles.itemNameCell}>
@@ -752,13 +786,23 @@ function ItemsSection({
             min="0"
             step="0.01"
             placeholder="0.00"
-            value={it.price_mode === 'gross' ? it.unit_price_gross : it.unit_price_net}
-            onChange={(e) => updateItem(
-              idx,
-              it.price_mode === 'gross' ? 'unit_price_gross' : 'unit_price_net',
-              e.target.value,
-            )}
-            required
+            value={it.price_mode === 'net' ? it.unit_price_net : unitNetDisplay}
+            readOnly={it.price_mode === 'gross'}
+            onChange={(e) => updateItem(idx, 'unit_price_net', e.target.value)}
+            required={it.price_mode === 'net'}
+            aria-label="Cena netto"
+          />
+          <input
+            className={`input ${styles.itemInputCompact}`}
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            value={it.price_mode === 'gross' ? it.unit_price_gross : unitGrossDisplay}
+            readOnly={it.price_mode === 'net'}
+            onChange={(e) => updateItem(idx, 'unit_price_gross', e.target.value)}
+            required={it.price_mode === 'gross'}
+            aria-label="Cena brutto"
           />
           <select
             className={`select ${styles.itemInputCompact}`}
@@ -775,7 +819,7 @@ function ItemsSection({
             onChange={(e) => updateItem(idx, 'vat_rate', e.target.value)}
           >
             {VAT_RATES.map((r) => (
-              <option key={r} value={r}>{r === 'zw' ? 'zw.' : `${r}%`}</option>
+              <option key={r} value={r}>{formatVatRateLabel(r)}</option>
             ))}
           </select>
           <input

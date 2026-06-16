@@ -27,6 +27,7 @@ class AppSettingsORM(Base):
     seller_postal_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
     seller_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
     seller_country: Mapped[str | None] = mapped_column(String(2), nullable=True, server_default="PL")
+    seller_bank_account: Mapped[str | None] = mapped_column(String(26), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

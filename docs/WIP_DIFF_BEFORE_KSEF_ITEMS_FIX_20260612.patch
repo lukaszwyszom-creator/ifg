@@ -1,0 +1,4720 @@
+diff --git a/app/integrations/ksef/xml_parser.py b/app/integrations/ksef/xml_parser.py
+index cb4531a..71947a6 100644
+--- a/app/integrations/ksef/xml_parser.py
++++ b/app/integrations/ksef/xml_parser.py
+@@ -7,7 +7,7 @@ Namespace: http://crd.gov.pl/wzor/2025/06/25/13775/
+ from __future__ import annotations
+ 
+ import logging
+-from decimal import Decimal, InvalidOperation
++from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+ from typing import Any
+ 
+ from lxml import etree
+@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
+ 
+ _NS = "http://crd.gov.pl/wzor/2025/06/25/13775/"
+ _NS_MAP = {"fa": _NS}
++_TWO_PLACES = Decimal("0.01")
+ 
+ 
+ def _txt(el: etree._Element | None) -> str:
+@@ -61,6 +62,33 @@ def _first_text_by_local_name(el: etree._Element, *names: str) -> str:
+     return _txt(child)
+ 
+ 
++def _field_dec(row_el: etree._Element, fa_tag: str, *local_names: str) -> Decimal:
++    """Odczyt kwoty z elementu FA(3) — xpath z namespace, potem localname."""
++    value = _dec(_find(row_el, f"fa:{fa_tag}"))
++    if value != Decimal("0"):
++        return value
++    for name in local_names:
++        value = _dec(_first_child_by_local_name(row_el, name))
++        if value != Decimal("0"):
++            return value
++    return Decimal("0")
++
++
++def _field_txt(row_el: etree._Element, fa_tag: str, *local_names: str) -> str:
++    text = _txt(_find(row_el, f"fa:{fa_tag}"))
++    if text:
++        return text
++    for name in local_names:
++        text = _first_text_by_local_name(row_el, name)
++        if text:
++            return text
++    return ""
++
++
++def _quantize_money(value: Decimal) -> Decimal:
++    return value.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
++
++
+ def _parse_address(subject_el: etree._Element) -> dict[str, str]:
+     addr = _find(subject_el, "fa:Adres")
+     if addr is None:
+@@ -106,24 +134,53 @@ def _parse_subject(subject_el: etree._Element) -> dict[str, Any]:
+ 
+ def _parse_item(row_el: etree._Element, sort_order: int) -> dict[str, Any]:
+     """Parsuje FaWiersz → dict pasujący do InvoiceItem."""
+-    vat_rate_text = _txt(_find(row_el, "fa:P_12"))
++    vat_rate_text = _field_txt(row_el, "P_12", "P_12")
+     try:
+         vat_rate = Decimal(vat_rate_text)
+     except InvalidOperation:
+         # "zw", "np" itp.
+         vat_rate = Decimal("0")
+ 
+-    unit_price_net = _dec(_find(row_el, "fa:P_9A"))
+-    quantity = _dec(_find(row_el, "fa:P_8B"), Decimal("1"))
+-    net_total = _dec(_find(row_el, "fa:P_11"))
+-
+-    vat_total = (net_total * vat_rate / Decimal("100")).quantize(Decimal("0.01"))
+-    gross_total = net_total + vat_total
++    unit_price_net = _field_dec(row_el, "P_9A", "P_9A")
++    unit_price_gross = _field_dec(row_el, "P_9B", "P_9B")
++    quantity = _field_dec(row_el, "P_8B", "P_8B") or Decimal("1")
++    net_total = _field_dec(row_el, "P_11", "P_11")
++    gross_total = _field_dec(row_el, "P_11A", "P_11A")
++    vat_total = _field_dec(row_el, "P_11Vat", "P_11Vat")
++
++    if unit_price_net == Decimal("0") and unit_price_gross > Decimal("0"):
++        if vat_rate > Decimal("0"):
++            unit_price_net = _quantize_money(
++                unit_price_gross / (Decimal("1") + vat_rate / Decimal("100"))
++            )
++        else:
++            unit_price_net = unit_price_gross
++
++    if net_total == Decimal("0") and gross_total > Decimal("0") and vat_total > Decimal("0"):
++        net_total = _quantize_money(gross_total - vat_total)
++    elif net_total == Decimal("0") and gross_total > Decimal("0") and vat_rate > Decimal("0"):
++        net_total = _quantize_money(
++            gross_total / (Decimal("1") + vat_rate / Decimal("100"))
++        )
++    elif net_total == Decimal("0") and unit_price_net > Decimal("0") and quantity > Decimal("0"):
++        net_total = _quantize_money(unit_price_net * quantity)
++
++    if vat_total == Decimal("0") and net_total > Decimal("0") and vat_rate > Decimal("0"):
++        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
++    elif vat_total == Decimal("0") and gross_total > Decimal("0") and net_total > Decimal("0"):
++        vat_total = _quantize_money(gross_total - net_total)
++
++    if gross_total == Decimal("0") and net_total > Decimal("0"):
++        gross_total = _quantize_money(net_total + vat_total)
++    elif gross_total == Decimal("0") and net_total == Decimal("0") and unit_price_net > Decimal("0"):
++        net_total = _quantize_money(unit_price_net * quantity)
++        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
++        gross_total = _quantize_money(net_total + vat_total)
+ 
+     return {
+-        "name": _txt(_find(row_el, "fa:P_7")),
++        "name": _field_txt(row_el, "P_7", "P_7"),
+         "quantity": quantity,
+-        "unit": _txt(_find(row_el, "fa:P_8A")) or "szt.",
++        "unit": _field_txt(row_el, "P_8A", "P_8A") or "szt.",
+         "unit_price_net": unit_price_net,
+         "vat_rate": vat_rate,
+         "net_total": net_total,
+@@ -250,9 +307,41 @@ def _extract_invoice_type(fa_el: etree._Element) -> str:
+     return rodzaj
+ 
+ 
++def _findall_fawiersz(fa_el: etree._Element) -> list[etree._Element]:
++    rows = _findall(fa_el, "fa:FaWiersz")
++    if rows:
++        return rows
++    return [child for child in fa_el if _local_name(child) == "FaWiersz"]
++
++
++def parsed_item_has_nonzero_amounts(item: dict[str, Any]) -> bool:
++    for key in ("net_total", "vat_total", "gross_total"):
++        if Decimal(str(item.get(key, 0))) > Decimal("0"):
++            return True
++    return False
++
++
++def parsed_invoice_has_nonzero_items(parsed: dict[str, Any]) -> bool:
++    items = parsed.get("items") or []
++    return any(parsed_item_has_nonzero_amounts(item) for item in items)
++
++
++def purchase_items_validation_error(parsed: dict[str, Any]) -> str | None:
++    """Zwraca komunikat błędu gdy nagłówek ma brutto, a pozycje są puste/zerowe."""
++    total_gross = Decimal(str(parsed.get("total_gross", 0)))
++    if total_gross <= Decimal("0"):
++        return None
++    if parsed_invoice_has_nonzero_items(parsed):
++        return None
++    return (
++        f"total_gross={total_gross} bez niezerowych pozycji "
++        f"(items={len(parsed.get('items') or [])})"
++    )
++
++
+ def _parse_items(fa_el: etree._Element) -> list[dict[str, Any]]:
+     items: list[dict[str, Any]] = []
+-    for idx, row_el in enumerate(_findall(fa_el, "fa:FaWiersz"), start=1):
++    for idx, row_el in enumerate(_findall_fawiersz(fa_el), start=1):
+         try:
+             items.append(_parse_item(row_el, idx))
+         except Exception as exc:  # noqa: BLE001
+diff --git a/app/services/ksef_session_service.py b/app/services/ksef_session_service.py
+index eff6c7b..8413132 100644
+--- a/app/services/ksef_session_service.py
++++ b/app/services/ksef_session_service.py
+@@ -1,687 +1,702 @@
+-from __future__ import annotations
+-
+-import base64
+-import logging
+-import threading
+-from dataclasses import dataclass
+-from datetime import UTC, date, datetime, timedelta
+-from decimal import Decimal
+-from uuid import UUID, uuid4
+-
+-from sqlalchemy import select
+-from sqlalchemy.orm import Session
+-
+-from app.core.config import settings
+-from app.core.exceptions import AppError, ConflictError, ExternalServiceError, NotFoundError
+-from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
+-from app.domain.models.invoice import Invoice, InvoiceItem
+-from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
+-from app.integrations.ksef.client import KSeFClient, KSeFClientError
+-from app.integrations.ksef.xml_parser import parse_fa3_xml
+-from app.persistence.models.ksef_session import KSeFSessionORM
+-from app.persistence.repositories.invoice_repository import InvoiceRepository
+-from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
+-from app.services.audit_service import AuditService
+-
+-logger = logging.getLogger(__name__)
+-
+-SESSION_ACTIVE = "active"
+-SESSION_TERMINATED = "terminated"
+-SESSION_EXPIRED = "expired"
+-SESSION_FAILED = "failed"
+-_SCOPE_PURCHASE_INVOICES = "purchase_invoices"
+-_MAX_ERROR_SAMPLES = 5
+-
+-# Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
+-_TOKEN_CACHE_MARGIN = timedelta(seconds=30)
+-
+-# Klucze w token_metadata_json
+-_KEY_ACCESS_TOKEN = "access_token"
+-_KEY_REFRESH_TOKEN = "refresh_token"
+-_KEY_REFRESH_VALID = "refresh_valid_until"
+-_KEY_SYMMETRIC_KEY = "symmetric_key"
+-_KEY_IV = "initialization_vector"
+-_PROBE_ERROR_THRESHOLD = 3
+-_probe_cache_lock = threading.Lock()
+-_probe_cache: dict[str, dict[str, str | int | None]] = {}
+-
+-
+-@dataclass
+-class KSeFSessionContext:
+-    """Kontekst potrzebny do operacji na fakturach w danej sesji KSeF."""
+-
+-    access_token: str
+-    session_reference: str
+-    symmetric_key: bytes
+-    initialization_vector: bytes
+-
+-
+-class _TokenCacheEntry:
+-    __slots__ = ("token", "expires_at")
+-
+-    def __init__(self, token: str, expires_at: datetime | None) -> None:
+-        self.token = token
+-        self.expires_at = expires_at
+-
+-    def is_valid(self) -> bool:
+-        if self.expires_at is None:
+-            return True
+-        return datetime.now(UTC) < self.expires_at - _TOKEN_CACHE_MARGIN
+-
+-
+-class KSeFSessionService:
+-    def __init__(
+-        self,
+-        session: Session,
+-        auth_provider: KSeFAuthProvider,
+-        ksef_client: KSeFClient,
+-        audit_service: AuditService,
+-        invoice_repository: InvoiceRepository | None = None,
+-    ) -> None:
+-        self.session = session
+-        self.auth_provider = auth_provider
+-        self.ksef_client = ksef_client
+-        self.audit_service = audit_service
+-        self.invoice_repository = invoice_repository
+-        # cache tokenów — klucz: nip (str), wartość: _TokenCacheEntry
+-        self._token_cache: dict[str, _TokenCacheEntry] = {}
+-        self._cache_lock = threading.Lock()
+-        self._probe_cache_key = getattr(self.ksef_client, "_base_url", "default")
+-
+-    # -------------------------------------------------------------------------
+-    # PUBLIC API
+-    # -------------------------------------------------------------------------
+-
+-    def open_session(
+-        self, nip: str, actor_user_id: UUID | None = None
+-    ) -> KSeFSessionORM:
+-        auth_token = settings.ksef_auth_token
+-        if not auth_token:
+-            raise AppError("KSEF_AUTH_TOKEN nie jest skonfigurowany.")
+-
+-        active = self._get_active_db_session(nip)
+-        if active is not None:
+-            raise ConflictError(
+-                f"Istnieje już aktywna sesja KSeF dla NIP {nip}: "
+-                f"{active.session_reference}."
+-            )
+-
+-        # 1. Uwierzytelnienie → access token + refresh token
+-        try:
+-            ksef_session = self.auth_provider.get_tokens(nip, auth_token)
+-        except KSeFAuthError as exc:
+-            raise ExternalServiceError(f"Błąd uwierzytelnienia KSeF: {exc}") from exc
+-
+-        # 2. Otwarcie sesji interaktywnej → session reference + klucz symetryczny
+-        try:
+-            online_session = self.ksef_client.open_online_session(ksef_session.access_token)
+-        except KSeFClientError as exc:
+-            raise ExternalServiceError(f"Błąd otwarcia sesji KSeF: {exc}") from exc
+-
+-        now = datetime.now(UTC)
+-        expires_at = ksef_session.access_valid_until
+-
+-        orm = KSeFSessionORM(
+-            id=uuid4(),
+-            nip=nip,
+-            environment=self.auth_provider.environment,
+-            auth_method="token",
+-            session_reference=online_session.session_reference,
+-            token_metadata_json={
+-                _KEY_ACCESS_TOKEN: ksef_session.access_token,
+-                _KEY_REFRESH_TOKEN: ksef_session.refresh_token,
+-                _KEY_REFRESH_VALID: (
+-                    ksef_session.refresh_valid_until.isoformat()
+-                    if ksef_session.refresh_valid_until else None
+-                ),
+-                _KEY_SYMMETRIC_KEY: base64.b64encode(online_session.symmetric_key).decode("ascii"),
+-                _KEY_IV: base64.b64encode(online_session.initialization_vector).decode("ascii"),
+-            },
+-            status=SESSION_ACTIVE,
+-            expires_at=expires_at,
+-            created_at=now,
+-            updated_at=now,
+-        )
+-        self.session.add(orm)
+-        self.session.flush()
+-
+-        # Unieważnij cache dla tego NIP po otwarciu nowej sesji
+-        self._invalidate_cache(nip)
+-
+-        self.audit_service.record(
+-            actor_user_id=actor_user_id,
+-            actor_role="system",
+-            event_type="ksef_session.opened",
+-            entity_type="ksef_session",
+-            entity_id=str(orm.id),
+-            after={"status": SESSION_ACTIVE, "nip": nip},
+-        )
+-
+-        return orm
+-
+-    def get_active_session(self, nip: str) -> KSeFSessionORM:
+-        orm = self._get_active_db_session(nip)
+-        if orm is None:
+-            raise NotFoundError(f"Brak aktywnej sesji KSeF dla NIP {nip}.")
+-
+-        now = datetime.now(UTC)
+-        if orm.expires_at is not None and orm.expires_at <= now:
+-            orm.status = SESSION_EXPIRED
+-            self.session.flush()
+-            self._invalidate_cache(nip)
+-            raise NotFoundError(f"Sesja KSeF dla NIP {nip} wygasła.")
+-
+-        return orm
+-
+-    def get_session_context(self, nip: str) -> KSeFSessionContext:
+-        """Zwraca pełny kontekst sesji potrzebny do wysyłki faktur.
+-
+-        Wynik access tokena jest cachowany (TTL = czas ważności − margines).
+-        """
+-        with self._cache_lock:
+-            entry = self._token_cache.get(nip)
+-            if entry is not None and entry.is_valid():
+-                # Cache ma tylko access_token — pełny kontekst musi być z DB
+-                pass
+-
+-        orm = self.get_active_session(nip)
+-        metadata = orm.token_metadata_json or {}
+-        access_token = metadata.get(_KEY_ACCESS_TOKEN)
+-        symmetric_key_b64 = metadata.get(_KEY_SYMMETRIC_KEY)
+-        iv_b64 = metadata.get(_KEY_IV)
+-
+-        if not access_token or not symmetric_key_b64 or not iv_b64:
+-            raise AppError(
+-                f"Niekompletny kontekst sesji KSeF dla NIP {nip} — "
+-                "zainicjuj sesję ponownie."
+-            )
+-
+-        with self._cache_lock:
+-            self._token_cache[nip] = _TokenCacheEntry(access_token, orm.expires_at)
+-
+-        return KSeFSessionContext(
+-            access_token=access_token,
+-            session_reference=orm.session_reference or "",
+-            symmetric_key=base64.b64decode(symmetric_key_b64),
+-            initialization_vector=base64.b64decode(iv_b64),
+-        )
+-
+-    def get_session_token(self, nip: str) -> str:
+-        """Zwraca access token dla danego NIP (alias dla wstecznej zgodności)."""
+-        return self.get_session_context(nip).access_token
+-
+-    def close_session(
+-        self, nip: str, actor_user_id: UUID | None = None
+-    ) -> KSeFSessionORM:
+-        orm = self.get_active_session(nip)
+-        metadata = orm.token_metadata_json or {}
+-        access_token = metadata.get(_KEY_ACCESS_TOKEN, "")
+-        self.ksef_client.close_online_session(access_token, orm.session_reference or "")
+-
+-        now = datetime.now(UTC)
+-        orm.status = SESSION_TERMINATED
+-        orm.updated_at = now
+-        self.session.flush()
+-        self._invalidate_cache(nip)
+-
+-        self.audit_service.record(
+-            actor_user_id=actor_user_id,
+-            actor_role="system",
+-            event_type="ksef_session.closed",
+-            entity_type="ksef_session",
+-            entity_id=str(orm.id),
+-            after={"status": SESSION_TERMINATED, "nip": nip},
+-        )
+-
+-        return orm
+-
+-    def mark_session_expired(self, nip: str) -> None:
+-        """Oznacza aktywną sesję KSeF dla danego NIP jako wygasłą."""
+-        orm = self._get_active_db_session(nip)
+-        if orm is not None:
+-            orm.status = SESSION_EXPIRED
+-            orm.updated_at = datetime.now(UTC)
+-            self.session.flush()
+-        self._invalidate_cache(nip)
+-
+-    def get_session_by_id(self, session_id: UUID) -> KSeFSessionORM:
+-        orm = self.session.get(KSeFSessionORM, session_id)
+-        if orm is None:
+-            raise NotFoundError(f"Nie znaleziono sesji KSeF {session_id}.")
+-        return orm
+-
+-    def get_connection_status(self, nip: str | None) -> dict:
+-        probe_error = self._probe_connectivity_error()
+-        if probe_error is not None:
+-            return self._build_connection_status(
+-                ui_status="ERROR",
+-                reason=probe_error["reason"],
+-                has_session=False,
+-                last_error=probe_error["last_error"],
+-            )
+-
+-        if not nip:
+-            return self._build_connection_status(
+-                ui_status="DISCONNECTED",
+-                reason="NO_SESSION",
+-                has_session=False,
+-            )
+-
+-        try:
+-            orm = self._get_active_db_session(nip)
+-            if orm is None:
+-                return self._build_connection_status(
+-                    ui_status="DISCONNECTED",
+-                    reason="NO_SESSION",
+-                    has_session=False,
+-                )
+-
+-            now = datetime.now(UTC)
+-            if orm.expires_at is not None and orm.expires_at <= now:
+-                orm.status = SESSION_EXPIRED
+-                orm.updated_at = now
+-                self.session.flush()
+-                self._invalidate_cache(nip)
+-                return self._build_connection_status(
+-                    ui_status="DISCONNECTED",
+-                    reason="SESSION_EXPIRED",
+-                    has_session=False,
+-                )
+-
+-            return self._build_connection_status(
+-                ui_status="CONNECTED",
+-                reason="UNKNOWN",
+-                has_session=True,
+-                session_expires_at=orm.expires_at,
+-            )
+-        except Exception as exc:  # noqa: BLE001
+-            logger.exception("KSeF status check failed for NIP %s.", nip)
+-            return self._build_connection_status(
+-                ui_status="ERROR",
+-                reason="UNKNOWN",
+-                has_session=False,
+-                last_error=str(exc),
+-            )
+-
+-    def expire_stale_sessions(self) -> int:
+-        now = datetime.now(UTC)
+-        stmt = select(KSeFSessionORM).where(
+-            KSeFSessionORM.status == SESSION_ACTIVE,
+-            KSeFSessionORM.expires_at <= now,
+-        )
+-        rows = self.session.scalars(stmt).all()
+-        for orm in rows:
+-            orm.status = SESSION_EXPIRED
+-            self._invalidate_cache(orm.nip)
+-        if rows:
+-            self.session.flush()
+-        return len(rows)
+-
+-    # -------------------------------------------------------------------------
+-    # PURCHASE INVOICE SYNC
+-    # -------------------------------------------------------------------------
+-
+-    @staticmethod
+-    def resolve_purchase_sync_window(
+-        date_from: date | None,
+-        date_to: date | None,
+-        *,
+-        days_back: int,
+-        force_full: bool,
+-        sync_state_json: dict | None,
+-        incremental: bool = False,
+-    ) -> tuple[date, date]:
+-        """Wylicza zakres dat zapytania KSeF (manualny lub inkrementalny)."""
+-        resolved_to = date_to or datetime.now(UTC).date()
+-        if date_from is not None:
+-            return date_from, resolved_to
+-
+-        if force_full:
+-            return resolved_to - timedelta(days=settings.ksef_purchase_sync_full_days), resolved_to
+-
+-        if incremental and sync_state_json:
+-            last_date_to_raw = sync_state_json.get("last_date_to")
+-            if isinstance(last_date_to_raw, str):
+-                try:
+-                    last_date_to = date.fromisoformat(last_date_to_raw)
+-                    incremental_from = last_date_to - timedelta(
+-                        days=settings.ksef_purchase_sync_overlap_days
+-                    )
+-                    return incremental_from, resolved_to
+-                except ValueError:
+-                    pass
+-
+-        return resolved_to - timedelta(days=days_back), resolved_to
+-
+-    def sync_purchase_invoices(
+-        self,
+-        *,
+-        nip: str | None = None,
+-        date_from: date | None = None,
+-        date_to: date | None = None,
+-        days_back: int | None = None,
+-        force_full: bool = False,
+-        incremental: bool = False,
+-        actor_user_id: UUID | None = None,
+-    ) -> dict:
+-        """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
+-        resolved_nip = self._resolve_seller_nip(nip)
+-        resolved_days_back = (
+-            days_back if days_back is not None else settings.ksef_purchase_sync_days_back
+-        )
+-
+-        sync_repo = KSeFSyncStateRepository(self.session)
+-        state = sync_repo.get_or_create(_SCOPE_PURCHASE_INVOICES)
+-        resolved_from, resolved_to = self.resolve_purchase_sync_window(
+-            date_from,
+-            date_to,
+-            days_back=resolved_days_back,
+-            force_full=force_full,
+-            sync_state_json=state.state_json,
+-            incremental=incremental,
+-        )
+-
+-        sync_repo.mark_running(_SCOPE_PURCHASE_INVOICES)
+-        try:
+-            counts = self.sync_received_invoices(
+-                nip=resolved_nip,
+-                date_from=resolved_from,
+-                date_to=resolved_to,
+-                actor_user_id=actor_user_id,
+-            )
+-            report = {
+-                "status": "ok",
+-                "date_from": resolved_from.isoformat(),
+-                "date_to": resolved_to.isoformat(),
+-                "subject_type": counts.get("subject_type"),
+-                "ksef_returned": counts["received"],
+-                "created": counts["saved"],
+-                "skipped_existing": counts["skipped_existing"],
+-                "errors": counts["skipped_parse"],
+-                "error_samples": counts.get("error_samples", []),
+-            }
+-            sync_repo.mark_success(
+-                _SCOPE_PURCHASE_INVOICES,
+-                state_json={
+-                    "last_date_from": resolved_from.isoformat(),
+-                    "last_date_to": resolved_to.isoformat(),
+-                    "last_subject_type": counts.get("subject_type"),
+-                    "last_counts": report,
+-                },
+-            )
+-            logger.info(
+-                "KSeF purchases sync done: incremental=%s date_from=%s date_to=%s subjectType=%s "
+-                "ksef_returned=%d created=%d skipped_existing=%d errors=%d",
+-                incremental,
+-                resolved_from,
+-                resolved_to,
+-                report["subject_type"],
+-                report["ksef_returned"],
+-                report["created"],
+-                report["skipped_existing"],
+-                report["errors"],
+-            )
+-            return report
+-        except Exception as exc:
+-            sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, str(exc))
+-            raise
+-
+-    def sync_received_invoices(
+-        self,
+-        nip: str,
+-        date_from: date,
+-        date_to: date,
+-        actor_user_id: UUID | None = None,
+-    ) -> dict:
+-        """Pobiera faktury zakupowe z KSeF za podany zakres dat i zapisuje nowe do bazy.
+-
+-        Wymaga aktywnej sesji KSeF dla podanego NIP.
+-        Pomija faktury już istniejące w bazie (identyfikacja po ksefReferenceNumber).
+-        Zwraca słownik: {received, saved, skipped_existing, skipped_parse, subject_type, error_samples}.
+-        """
+-        if self.invoice_repository is None:
+-            raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
+-
+-        ctx = self.get_session_context(nip)
+-
+-        received = []
+-        subject_type_used: str | None = None
+-        for subject_type in ("subject2", "subject1", "subject3"):
+-            try:
+-                batch = self.ksef_client.query_received_invoices(
+-                    access_token=ctx.access_token,
+-                    session_reference=ctx.session_reference,
+-                    symmetric_key=ctx.symmetric_key,
+-                    iv=ctx.initialization_vector,
+-                    invoicing_date_from=date_from.isoformat(),
+-                    invoicing_date_to=date_to.isoformat(),
+-                    subject_type=subject_type,
+-                )
+-            except KSeFClientError as exc:
+-                raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
+-
+-            logger.info(
+-                "KSeF purchases sync subjectType=%s result_count=%d date_from=%s date_to=%s",
+-                subject_type,
+-                len(batch),
+-                date_from,
+-                date_to,
+-            )
+-            subject_type_used = subject_type
+-            if batch:
+-                received = batch
+-                break
+-
+-        saved = 0
+-        skipped_existing = 0
+-        skipped_parse = 0
+-        error_samples: list[str] = []
+-        for result in received:
+-            if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
+-                logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
+-                skipped_existing += 1
+-                continue
+-            try:
+-                parsed = parse_fa3_xml(result.xml_bytes)
+-            except (ValueError, Exception) as exc:  # noqa: BLE001
+-                logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
+-                skipped_parse += 1
+-                if len(error_samples) < _MAX_ERROR_SAMPLES:
+-                    error_samples.append(
+-                        f"{result.ksef_reference_number}: parse error: {str(exc)[:120]}"
+-                    )
+-                continue
+-
+-            try:
+-                invoice_type_str = parsed.get("invoice_type", "VAT")
+-                try:
+-                    invoice_type = InvoiceType(invoice_type_str)
+-                except ValueError:
+-                    invoice_type = InvoiceType.VAT
+-
+-                exchange_rate = parsed.get("exchange_rate")
+-                exchange_rate_date_str = parsed.get("exchange_rate_date")
+-                exchange_rate_date: date | None = None
+-                if exchange_rate_date_str:
+-                    try:
+-                        from datetime import date as _date
+-                        exchange_rate_date = _date.fromisoformat(exchange_rate_date_str)
+-                    except ValueError:
+-                        pass
+-
+-                items = [
+-                    InvoiceItem(
+-                        name=item["name"] or "",
+-                        quantity=Decimal(str(item["quantity"])),
+-                        unit=item["unit"] or "szt.",
+-                        unit_price_net=Decimal(str(item["unit_price_net"])),
+-                        vat_rate=Decimal(str(item["vat_rate"])),
+-                        net_total=Decimal(str(item["net_total"])),
+-                        vat_total=Decimal(str(item["vat_total"])),
+-                        gross_total=Decimal(str(item["gross_total"])),
+-                        sort_order=item["sort_order"],
+-                    )
+-                    for item in parsed.get("items", [])
+-                ]
+-
+-                now = datetime.now(UTC)
+-                invoice = Invoice(
+-                    id=uuid4(),
+-                    status=InvoiceStatus.ACCEPTED,
+-                    issue_date=date.fromisoformat(parsed["issue_date"]),
+-                    sale_date=date.fromisoformat(parsed["sale_date"]),
+-                    due_date=date.fromisoformat(parsed["due_date"]) if parsed.get("due_date") else None,
+-                    payment_method=PaymentMethod(parsed["payment_method"])
+-                    if parsed.get("payment_method") in {"cash", "transfer"}
+-                    else PaymentMethod.TRANSFER,
+-                    currency=parsed.get("currency", "PLN"),
+-                    seller_snapshot=parsed["seller_snapshot"],
+-                    buyer_snapshot=parsed["buyer_snapshot"],
+-                    items=items,
+-                    total_net=Decimal(str(parsed.get("total_net", 0))),
+-                    total_vat=Decimal(str(parsed.get("total_vat", 0))),
+-                    total_gross=Decimal(str(parsed.get("total_gross", 0))),
+-                    created_at=now,
+-                    updated_at=now,
+-                    number_local=parsed.get("number_local"),
+-                    ksef_reference_number=result.ksef_reference_number,
+-                    invoice_type=invoice_type,
+-                    use_split_payment=parsed.get("use_split_payment", False),
+-                    self_billing=parsed.get("self_billing", False),
+-                    reverse_charge=parsed.get("reverse_charge", False),
+-                    reverse_charge_art=parsed.get("reverse_charge_art", False),
+-                    reverse_charge_flag=parsed.get("reverse_charge_flag", False),
+-                    cash_accounting_method=parsed.get("cash_accounting_method", False),
+-                    exchange_rate=exchange_rate,
+-                    exchange_rate_date=exchange_rate_date,
+-                    direction="purchase",
+-                    created_by=actor_user_id,
+-                )
+-
+-                self.invoice_repository.add(invoice, source_system="ksef_import")
+-                saved += 1
+-                logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
+-            except Exception as exc:  # noqa: BLE001
+-                logger.warning(
+-                    "KSeF sync: błąd tworzenia faktury %s: %s",
+-                    result.ksef_reference_number,
+-                    exc,
+-                    exc_info=True,
+-                )
+-                skipped_parse += 1
+-                if len(error_samples) < _MAX_ERROR_SAMPLES:
+-                    error_samples.append(
+-                        f"{result.ksef_reference_number}: import error: {str(exc)[:120]}"
+-                    )
+-
+-        return {
+-            "received": len(received),
+-            "saved": saved,
+-            "skipped_existing": skipped_existing,
+-            "skipped_parse": skipped_parse,
+-            "subject_type": subject_type_used,
+-            "error_samples": error_samples,
+-        }
+-
+-    def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
+-        requested_nip = (requested_nip or "").strip()
+-        if requested_nip:
+-            return requested_nip
+-
+-        seller_nip = (settings.seller_nip or "").strip()
+-        if not seller_nip:
+-            raise AppError("Brak NIP właściciela aplikacji w konfiguracji.")
+-        return seller_nip
+-
+-    # -------------------------------------------------------------------------
+-    # PRIVATE HELPERS
+-    # -------------------------------------------------------------------------
+-
+-    def _get_active_db_session(self, nip: str) -> KSeFSessionORM | None:
+-        stmt = select(KSeFSessionORM).where(
+-            KSeFSessionORM.nip == nip,
+-            KSeFSessionORM.status == SESSION_ACTIVE,
+-        )
+-        return self.session.execute(stmt).scalar_one_or_none()
+-
+-    @staticmethod
+-    def _build_connection_status(
+-        ui_status: str,
+-        reason: str,
+-        has_session: bool,
+-        session_expires_at: datetime | None = None,
+-        last_error: str | None = None,
+-    ) -> dict:
+-        return {
+-            "ui_status": ui_status,
+-            "details": {
+-                "reason": reason,
+-                "has_session": has_session,
+-                "session_expires_at": session_expires_at,
+-                "last_error": last_error,
+-            },
+-        }
+-
+-    @staticmethod
+-    def _map_status_reason_from_client_error(exc: KSeFClientError) -> str:
+-        if exc.status_code in (401, 403):
+-            return "AUTH_ERROR"
+-        if exc.transient and exc.status_code is None:
+-            return "NETWORK_ERROR"
+-        if exc.transient:
+-            return "KSEF_UNAVAILABLE"
+-        return "UNKNOWN"
+-
+-    def _invalidate_cache(self, nip: str) -> None:
+-        with self._cache_lock:
+-            self._token_cache.pop(nip, None)
+-
+-    def _probe_connectivity_error(self) -> dict | None:
+-        try:
+-            self.ksef_client.check_connectivity()
+-        except KSeFClientError as exc:
+-            reason = self._map_status_reason_from_client_error(exc)
+-            with _probe_cache_lock:
+-                state = _probe_cache.setdefault(
+-                    self._probe_cache_key,
+-                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
+-                )
+-                state["failure_count"] = int(state["failure_count"] or 0) + 1
+-                state["last_error"] = str(exc)
+-                state["last_reason"] = reason
+-                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
+-                    logger.warning(
+-                        "KSeF connectivity probe failed (%s/%s): %s",
+-                        state["failure_count"],
+-                        _PROBE_ERROR_THRESHOLD,
+-                        exc,
+-                    )
+-                    return None
+-                return {
+-                    "reason": str(state["last_reason"]),
+-                    "last_error": str(state["last_error"]),
+-                }
+-        except Exception as exc:  # noqa: BLE001
+-            logger.exception("KSeF connectivity probe failed.")
+-            with _probe_cache_lock:
+-                state = _probe_cache.setdefault(
+-                    self._probe_cache_key,
+-                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
+-                )
+-                state["failure_count"] = int(state["failure_count"] or 0) + 1
+-                state["last_error"] = str(exc)
+-                state["last_reason"] = "UNKNOWN"
+-                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
+-                    return None
+-                return {
+-                    "reason": str(state["last_reason"]),
+-                    "last_error": str(state["last_error"]),
+-                }
+-
+-        with _probe_cache_lock:
+-            _probe_cache[self._probe_cache_key] = {
+-                "failure_count": 0,
+-                "last_error": None,
+-                "last_reason": "UNKNOWN",
+-            }
+-        return None
++from __future__ import annotations
++
++import base64
++import logging
++import threading
++from dataclasses import dataclass
++from datetime import UTC, date, datetime, timedelta
++from decimal import Decimal
++from uuid import UUID, uuid4
++
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from app.core.config import settings
++from app.core.exceptions import AppError, ConflictError, ExternalServiceError, NotFoundError
++from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
++from app.domain.models.invoice import Invoice, InvoiceItem
++from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
++from app.integrations.ksef.client import KSeFClient, KSeFClientError
++from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
++from app.persistence.models.ksef_session import KSeFSessionORM
++from app.persistence.repositories.invoice_repository import InvoiceRepository
++from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
++from app.services.audit_service import AuditService
++
++logger = logging.getLogger(__name__)
++
++SESSION_ACTIVE = "active"
++SESSION_TERMINATED = "terminated"
++SESSION_EXPIRED = "expired"
++SESSION_FAILED = "failed"
++_SCOPE_PURCHASE_INVOICES = "purchase_invoices"
++_MAX_ERROR_SAMPLES = 5
++
++# Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
++_TOKEN_CACHE_MARGIN = timedelta(seconds=30)
++
++# Klucze w token_metadata_json
++_KEY_ACCESS_TOKEN = "access_token"
++_KEY_REFRESH_TOKEN = "refresh_token"
++_KEY_REFRESH_VALID = "refresh_valid_until"
++_KEY_SYMMETRIC_KEY = "symmetric_key"
++_KEY_IV = "initialization_vector"
++_PROBE_ERROR_THRESHOLD = 3
++_probe_cache_lock = threading.Lock()
++_probe_cache: dict[str, dict[str, str | int | None]] = {}
++
++
++@dataclass
++class KSeFSessionContext:
++    """Kontekst potrzebny do operacji na fakturach w danej sesji KSeF."""
++
++    access_token: str
++    session_reference: str
++    symmetric_key: bytes
++    initialization_vector: bytes
++
++
++class _TokenCacheEntry:
++    __slots__ = ("token", "expires_at")
++
++    def __init__(self, token: str, expires_at: datetime | None) -> None:
++        self.token = token
++        self.expires_at = expires_at
++
++    def is_valid(self) -> bool:
++        if self.expires_at is None:
++            return True
++        return datetime.now(UTC) < self.expires_at - _TOKEN_CACHE_MARGIN
++
++
++class KSeFSessionService:
++    def __init__(
++        self,
++        session: Session,
++        auth_provider: KSeFAuthProvider,
++        ksef_client: KSeFClient,
++        audit_service: AuditService,
++        invoice_repository: InvoiceRepository | None = None,
++    ) -> None:
++        self.session = session
++        self.auth_provider = auth_provider
++        self.ksef_client = ksef_client
++        self.audit_service = audit_service
++        self.invoice_repository = invoice_repository
++        # cache tokenów — klucz: nip (str), wartość: _TokenCacheEntry
++        self._token_cache: dict[str, _TokenCacheEntry] = {}
++        self._cache_lock = threading.Lock()
++        self._probe_cache_key = getattr(self.ksef_client, "_base_url", "default")
++
++    # -------------------------------------------------------------------------
++    # PUBLIC API
++    # -------------------------------------------------------------------------
++
++    def open_session(
++        self, nip: str, actor_user_id: UUID | None = None
++    ) -> KSeFSessionORM:
++        auth_token = settings.ksef_auth_token
++        if not auth_token:
++            raise AppError("KSEF_AUTH_TOKEN nie jest skonfigurowany.")
++
++        active = self._get_active_db_session(nip)
++        if active is not None:
++            raise ConflictError(
++                f"Istnieje już aktywna sesja KSeF dla NIP {nip}: "
++                f"{active.session_reference}."
++            )
++
++        # 1. Uwierzytelnienie → access token + refresh token
++        try:
++            ksef_session = self.auth_provider.get_tokens(nip, auth_token)
++        except KSeFAuthError as exc:
++            raise ExternalServiceError(f"Błąd uwierzytelnienia KSeF: {exc}") from exc
++
++        # 2. Otwarcie sesji interaktywnej → session reference + klucz symetryczny
++        try:
++            online_session = self.ksef_client.open_online_session(ksef_session.access_token)
++        except KSeFClientError as exc:
++            raise ExternalServiceError(f"Błąd otwarcia sesji KSeF: {exc}") from exc
++
++        now = datetime.now(UTC)
++        expires_at = ksef_session.access_valid_until
++
++        orm = KSeFSessionORM(
++            id=uuid4(),
++            nip=nip,
++            environment=self.auth_provider.environment,
++            auth_method="token",
++            session_reference=online_session.session_reference,
++            token_metadata_json={
++                _KEY_ACCESS_TOKEN: ksef_session.access_token,
++                _KEY_REFRESH_TOKEN: ksef_session.refresh_token,
++                _KEY_REFRESH_VALID: (
++                    ksef_session.refresh_valid_until.isoformat()
++                    if ksef_session.refresh_valid_until else None
++                ),
++                _KEY_SYMMETRIC_KEY: base64.b64encode(online_session.symmetric_key).decode("ascii"),
++                _KEY_IV: base64.b64encode(online_session.initialization_vector).decode("ascii"),
++            },
++            status=SESSION_ACTIVE,
++            expires_at=expires_at,
++            created_at=now,
++            updated_at=now,
++        )
++        self.session.add(orm)
++        self.session.flush()
++
++        # Unieważnij cache dla tego NIP po otwarciu nowej sesji
++        self._invalidate_cache(nip)
++
++        self.audit_service.record(
++            actor_user_id=actor_user_id,
++            actor_role="system",
++            event_type="ksef_session.opened",
++            entity_type="ksef_session",
++            entity_id=str(orm.id),
++            after={"status": SESSION_ACTIVE, "nip": nip},
++        )
++
++        return orm
++
++    def get_active_session(self, nip: str) -> KSeFSessionORM:
++        orm = self._get_active_db_session(nip)
++        if orm is None:
++            raise NotFoundError(f"Brak aktywnej sesji KSeF dla NIP {nip}.")
++
++        now = datetime.now(UTC)
++        if orm.expires_at is not None and orm.expires_at <= now:
++            orm.status = SESSION_EXPIRED
++            self.session.flush()
++            self._invalidate_cache(nip)
++            raise NotFoundError(f"Sesja KSeF dla NIP {nip} wygasła.")
++
++        return orm
++
++    def get_session_context(self, nip: str) -> KSeFSessionContext:
++        """Zwraca pełny kontekst sesji potrzebny do wysyłki faktur.
++
++        Wynik access tokena jest cachowany (TTL = czas ważności − margines).
++        """
++        with self._cache_lock:
++            entry = self._token_cache.get(nip)
++            if entry is not None and entry.is_valid():
++                # Cache ma tylko access_token — pełny kontekst musi być z DB
++                pass
++
++        orm = self.get_active_session(nip)
++        metadata = orm.token_metadata_json or {}
++        access_token = metadata.get(_KEY_ACCESS_TOKEN)
++        symmetric_key_b64 = metadata.get(_KEY_SYMMETRIC_KEY)
++        iv_b64 = metadata.get(_KEY_IV)
++
++        if not access_token or not symmetric_key_b64 or not iv_b64:
++            raise AppError(
++                f"Niekompletny kontekst sesji KSeF dla NIP {nip} — "
++                "zainicjuj sesję ponownie."
++            )
++
++        with self._cache_lock:
++            self._token_cache[nip] = _TokenCacheEntry(access_token, orm.expires_at)
++
++        return KSeFSessionContext(
++            access_token=access_token,
++            session_reference=orm.session_reference or "",
++            symmetric_key=base64.b64decode(symmetric_key_b64),
++            initialization_vector=base64.b64decode(iv_b64),
++        )
++
++    def get_session_token(self, nip: str) -> str:
++        """Zwraca access token dla danego NIP (alias dla wstecznej zgodności)."""
++        return self.get_session_context(nip).access_token
++
++    def close_session(
++        self, nip: str, actor_user_id: UUID | None = None
++    ) -> KSeFSessionORM:
++        orm = self.get_active_session(nip)
++        metadata = orm.token_metadata_json or {}
++        access_token = metadata.get(_KEY_ACCESS_TOKEN, "")
++        self.ksef_client.close_online_session(access_token, orm.session_reference or "")
++
++        now = datetime.now(UTC)
++        orm.status = SESSION_TERMINATED
++        orm.updated_at = now
++        self.session.flush()
++        self._invalidate_cache(nip)
++
++        self.audit_service.record(
++            actor_user_id=actor_user_id,
++            actor_role="system",
++            event_type="ksef_session.closed",
++            entity_type="ksef_session",
++            entity_id=str(orm.id),
++            after={"status": SESSION_TERMINATED, "nip": nip},
++        )
++
++        return orm
++
++    def mark_session_expired(self, nip: str) -> None:
++        """Oznacza aktywną sesję KSeF dla danego NIP jako wygasłą."""
++        orm = self._get_active_db_session(nip)
++        if orm is not None:
++            orm.status = SESSION_EXPIRED
++            orm.updated_at = datetime.now(UTC)
++            self.session.flush()
++        self._invalidate_cache(nip)
++
++    def get_session_by_id(self, session_id: UUID) -> KSeFSessionORM:
++        orm = self.session.get(KSeFSessionORM, session_id)
++        if orm is None:
++            raise NotFoundError(f"Nie znaleziono sesji KSeF {session_id}.")
++        return orm
++
++    def get_connection_status(self, nip: str | None) -> dict:
++        probe_error = self._probe_connectivity_error()
++        if probe_error is not None:
++            return self._build_connection_status(
++                ui_status="ERROR",
++                reason=probe_error["reason"],
++                has_session=False,
++                last_error=probe_error["last_error"],
++            )
++
++        if not nip:
++            return self._build_connection_status(
++                ui_status="DISCONNECTED",
++                reason="NO_SESSION",
++                has_session=False,
++            )
++
++        try:
++            orm = self._get_active_db_session(nip)
++            if orm is None:
++                return self._build_connection_status(
++                    ui_status="DISCONNECTED",
++                    reason="NO_SESSION",
++                    has_session=False,
++                )
++
++            now = datetime.now(UTC)
++            if orm.expires_at is not None and orm.expires_at <= now:
++                orm.status = SESSION_EXPIRED
++                orm.updated_at = now
++                self.session.flush()
++                self._invalidate_cache(nip)
++                return self._build_connection_status(
++                    ui_status="DISCONNECTED",
++                    reason="SESSION_EXPIRED",
++                    has_session=False,
++                )
++
++            return self._build_connection_status(
++                ui_status="CONNECTED",
++                reason="UNKNOWN",
++                has_session=True,
++                session_expires_at=orm.expires_at,
++            )
++        except Exception as exc:  # noqa: BLE001
++            logger.exception("KSeF status check failed for NIP %s.", nip)
++            return self._build_connection_status(
++                ui_status="ERROR",
++                reason="UNKNOWN",
++                has_session=False,
++                last_error=str(exc),
++            )
++
++    def expire_stale_sessions(self) -> int:
++        now = datetime.now(UTC)
++        stmt = select(KSeFSessionORM).where(
++            KSeFSessionORM.status == SESSION_ACTIVE,
++            KSeFSessionORM.expires_at <= now,
++        )
++        rows = self.session.scalars(stmt).all()
++        for orm in rows:
++            orm.status = SESSION_EXPIRED
++            self._invalidate_cache(orm.nip)
++        if rows:
++            self.session.flush()
++        return len(rows)
++
++    # -------------------------------------------------------------------------
++    # PURCHASE INVOICE SYNC
++    # -------------------------------------------------------------------------
++
++    @staticmethod
++    def resolve_purchase_sync_window(
++        date_from: date | None,
++        date_to: date | None,
++        *,
++        days_back: int,
++        force_full: bool,
++        sync_state_json: dict | None,
++        incremental: bool = False,
++    ) -> tuple[date, date]:
++        """Wylicza zakres dat zapytania KSeF (manualny lub inkrementalny)."""
++        resolved_to = date_to or datetime.now(UTC).date()
++        if date_from is not None:
++            return date_from, resolved_to
++
++        if force_full:
++            return resolved_to - timedelta(days=settings.ksef_purchase_sync_full_days), resolved_to
++
++        if incremental and sync_state_json:
++            last_date_to_raw = sync_state_json.get("last_date_to")
++            if isinstance(last_date_to_raw, str):
++                try:
++                    last_date_to = date.fromisoformat(last_date_to_raw)
++                    incremental_from = last_date_to - timedelta(
++                        days=settings.ksef_purchase_sync_overlap_days
++                    )
++                    return incremental_from, resolved_to
++                except ValueError:
++                    pass
++
++        return resolved_to - timedelta(days=days_back), resolved_to
++
++    def sync_purchase_invoices(
++        self,
++        *,
++        nip: str | None = None,
++        date_from: date | None = None,
++        date_to: date | None = None,
++        days_back: int | None = None,
++        force_full: bool = False,
++        incremental: bool = False,
++        actor_user_id: UUID | None = None,
++    ) -> dict:
++        """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
++        resolved_nip = self._resolve_seller_nip(nip)
++        resolved_days_back = (
++            days_back if days_back is not None else settings.ksef_purchase_sync_days_back
++        )
++
++        sync_repo = KSeFSyncStateRepository(self.session)
++        state = sync_repo.get_or_create(_SCOPE_PURCHASE_INVOICES)
++        resolved_from, resolved_to = self.resolve_purchase_sync_window(
++            date_from,
++            date_to,
++            days_back=resolved_days_back,
++            force_full=force_full,
++            sync_state_json=state.state_json,
++            incremental=incremental,
++        )
++
++        sync_repo.mark_running(_SCOPE_PURCHASE_INVOICES)
++        try:
++            counts = self.sync_received_invoices(
++                nip=resolved_nip,
++                date_from=resolved_from,
++                date_to=resolved_to,
++                actor_user_id=actor_user_id,
++            )
++            report = {
++                "status": "ok",
++                "date_from": resolved_from.isoformat(),
++                "date_to": resolved_to.isoformat(),
++                "subject_type": counts.get("subject_type"),
++                "ksef_returned": counts["received"],
++                "created": counts["saved"],
++                "skipped_existing": counts["skipped_existing"],
++                "errors": counts["skipped_parse"],
++                "error_samples": counts.get("error_samples", []),
++            }
++            sync_repo.mark_success(
++                _SCOPE_PURCHASE_INVOICES,
++                state_json={
++                    "last_date_from": resolved_from.isoformat(),
++                    "last_date_to": resolved_to.isoformat(),
++                    "last_subject_type": counts.get("subject_type"),
++                    "last_counts": report,
++                },
++            )
++            logger.info(
++                "KSeF purchases sync done: incremental=%s date_from=%s date_to=%s subjectType=%s "
++                "ksef_returned=%d created=%d skipped_existing=%d errors=%d",
++                incremental,
++                resolved_from,
++                resolved_to,
++                report["subject_type"],
++                report["ksef_returned"],
++                report["created"],
++                report["skipped_existing"],
++                report["errors"],
++            )
++            return report
++        except Exception as exc:
++            sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, str(exc))
++            raise
++
++    def sync_received_invoices(
++        self,
++        nip: str,
++        date_from: date,
++        date_to: date,
++        actor_user_id: UUID | None = None,
++    ) -> dict:
++        """Pobiera faktury zakupowe z KSeF za podany zakres dat i zapisuje nowe do bazy.
++
++        Wymaga aktywnej sesji KSeF dla podanego NIP.
++        Pomija faktury już istniejące w bazie (identyfikacja po ksefReferenceNumber).
++        Zwraca słownik: {received, saved, skipped_existing, skipped_parse, subject_type, error_samples}.
++        """
++        if self.invoice_repository is None:
++            raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
++
++        ctx = self.get_session_context(nip)
++
++        received = []
++        subject_type_used: str | None = None
++        for subject_type in ("subject2", "subject1", "subject3"):
++            try:
++                batch = self.ksef_client.query_received_invoices(
++                    access_token=ctx.access_token,
++                    session_reference=ctx.session_reference,
++                    symmetric_key=ctx.symmetric_key,
++                    iv=ctx.initialization_vector,
++                    invoicing_date_from=date_from.isoformat(),
++                    invoicing_date_to=date_to.isoformat(),
++                    subject_type=subject_type,
++                )
++            except KSeFClientError as exc:
++                raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
++
++            logger.info(
++                "KSeF purchases sync subjectType=%s result_count=%d date_from=%s date_to=%s",
++                subject_type,
++                len(batch),
++                date_from,
++                date_to,
++            )
++            subject_type_used = subject_type
++            if batch:
++                received = batch
++                break
++
++        saved = 0
++        skipped_existing = 0
++        skipped_parse = 0
++        error_samples: list[str] = []
++        for result in received:
++            if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
++                logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
++                skipped_existing += 1
++                continue
++            try:
++                parsed = parse_fa3_xml(result.xml_bytes)
++            except (ValueError, Exception) as exc:  # noqa: BLE001
++                logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
++                skipped_parse += 1
++                if len(error_samples) < _MAX_ERROR_SAMPLES:
++                    error_samples.append(
++                        f"{result.ksef_reference_number}: parse error: {str(exc)[:120]}"
++                    )
++                continue
++
++            items_error = purchase_items_validation_error(parsed)
++            if items_error:
++                logger.error(
++                    "KSeF sync: faktura %s (nr=%s) — %s — pomijam zapis",
++                    result.ksef_reference_number,
++                    parsed.get("number_local"),
++                    items_error,
++                )
++                skipped_parse += 1
++                if len(error_samples) < _MAX_ERROR_SAMPLES:
++                    error_samples.append(
++                        f"{result.ksef_reference_number}: {items_error[:120]}"
++                    )
++                continue
++
++            try:
++                invoice_type_str = parsed.get("invoice_type", "VAT")
++                try:
++                    invoice_type = InvoiceType(invoice_type_str)
++                except ValueError:
++                    invoice_type = InvoiceType.VAT
++
++                exchange_rate = parsed.get("exchange_rate")
++                exchange_rate_date_str = parsed.get("exchange_rate_date")
++                exchange_rate_date: date | None = None
++                if exchange_rate_date_str:
++                    try:
++                        from datetime import date as _date
++                        exchange_rate_date = _date.fromisoformat(exchange_rate_date_str)
++                    except ValueError:
++                        pass
++
++                items = [
++                    InvoiceItem(
++                        name=item["name"] or "",
++                        quantity=Decimal(str(item["quantity"])),
++                        unit=item["unit"] or "szt.",
++                        unit_price_net=Decimal(str(item["unit_price_net"])),
++                        vat_rate=Decimal(str(item["vat_rate"])),
++                        net_total=Decimal(str(item["net_total"])),
++                        vat_total=Decimal(str(item["vat_total"])),
++                        gross_total=Decimal(str(item["gross_total"])),
++                        sort_order=item["sort_order"],
++                    )
++                    for item in parsed.get("items", [])
++                ]
++
++                now = datetime.now(UTC)
++                invoice = Invoice(
++                    id=uuid4(),
++                    status=InvoiceStatus.ACCEPTED,
++                    issue_date=date.fromisoformat(parsed["issue_date"]),
++                    sale_date=date.fromisoformat(parsed["sale_date"]),
++                    due_date=date.fromisoformat(parsed["due_date"]) if parsed.get("due_date") else None,
++                    payment_method=PaymentMethod(parsed["payment_method"])
++                    if parsed.get("payment_method") in {"cash", "transfer"}
++                    else PaymentMethod.TRANSFER,
++                    currency=parsed.get("currency", "PLN"),
++                    seller_snapshot=parsed["seller_snapshot"],
++                    buyer_snapshot=parsed["buyer_snapshot"],
++                    items=items,
++                    total_net=Decimal(str(parsed.get("total_net", 0))),
++                    total_vat=Decimal(str(parsed.get("total_vat", 0))),
++                    total_gross=Decimal(str(parsed.get("total_gross", 0))),
++                    created_at=now,
++                    updated_at=now,
++                    number_local=parsed.get("number_local"),
++                    ksef_reference_number=result.ksef_reference_number,
++                    invoice_type=invoice_type,
++                    use_split_payment=parsed.get("use_split_payment", False),
++                    self_billing=parsed.get("self_billing", False),
++                    reverse_charge=parsed.get("reverse_charge", False),
++                    reverse_charge_art=parsed.get("reverse_charge_art", False),
++                    reverse_charge_flag=parsed.get("reverse_charge_flag", False),
++                    cash_accounting_method=parsed.get("cash_accounting_method", False),
++                    exchange_rate=exchange_rate,
++                    exchange_rate_date=exchange_rate_date,
++                    direction="purchase",
++                    created_by=actor_user_id,
++                )
++
++                self.invoice_repository.add(invoice, source_system="ksef_import")
++                saved += 1
++                logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
++            except Exception as exc:  # noqa: BLE001
++                logger.warning(
++                    "KSeF sync: błąd tworzenia faktury %s: %s",
++                    result.ksef_reference_number,
++                    exc,
++                    exc_info=True,
++                )
++                skipped_parse += 1
++                if len(error_samples) < _MAX_ERROR_SAMPLES:
++                    error_samples.append(
++                        f"{result.ksef_reference_number}: import error: {str(exc)[:120]}"
++                    )
++
++        return {
++            "received": len(received),
++            "saved": saved,
++            "skipped_existing": skipped_existing,
++            "skipped_parse": skipped_parse,
++            "subject_type": subject_type_used,
++            "error_samples": error_samples,
++        }
++
++    def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
++        requested_nip = (requested_nip or "").strip()
++        if requested_nip:
++            return requested_nip
++
++        seller_nip = (settings.seller_nip or "").strip()
++        if not seller_nip:
++            raise AppError("Brak NIP właściciela aplikacji w konfiguracji.")
++        return seller_nip
++
++    # -------------------------------------------------------------------------
++    # PRIVATE HELPERS
++    # -------------------------------------------------------------------------
++
++    def _get_active_db_session(self, nip: str) -> KSeFSessionORM | None:
++        stmt = select(KSeFSessionORM).where(
++            KSeFSessionORM.nip == nip,
++            KSeFSessionORM.status == SESSION_ACTIVE,
++        )
++        return self.session.execute(stmt).scalar_one_or_none()
++
++    @staticmethod
++    def _build_connection_status(
++        ui_status: str,
++        reason: str,
++        has_session: bool,
++        session_expires_at: datetime | None = None,
++        last_error: str | None = None,
++    ) -> dict:
++        return {
++            "ui_status": ui_status,
++            "details": {
++                "reason": reason,
++                "has_session": has_session,
++                "session_expires_at": session_expires_at,
++                "last_error": last_error,
++            },
++        }
++
++    @staticmethod
++    def _map_status_reason_from_client_error(exc: KSeFClientError) -> str:
++        if exc.status_code in (401, 403):
++            return "AUTH_ERROR"
++        if exc.transient and exc.status_code is None:
++            return "NETWORK_ERROR"
++        if exc.transient:
++            return "KSEF_UNAVAILABLE"
++        return "UNKNOWN"
++
++    def _invalidate_cache(self, nip: str) -> None:
++        with self._cache_lock:
++            self._token_cache.pop(nip, None)
++
++    def _probe_connectivity_error(self) -> dict | None:
++        try:
++            self.ksef_client.check_connectivity()
++        except KSeFClientError as exc:
++            reason = self._map_status_reason_from_client_error(exc)
++            with _probe_cache_lock:
++                state = _probe_cache.setdefault(
++                    self._probe_cache_key,
++                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
++                )
++                state["failure_count"] = int(state["failure_count"] or 0) + 1
++                state["last_error"] = str(exc)
++                state["last_reason"] = reason
++                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
++                    logger.warning(
++                        "KSeF connectivity probe failed (%s/%s): %s",
++                        state["failure_count"],
++                        _PROBE_ERROR_THRESHOLD,
++                        exc,
++                    )
++                    return None
++                return {
++                    "reason": str(state["last_reason"]),
++                    "last_error": str(state["last_error"]),
++                }
++        except Exception as exc:  # noqa: BLE001
++            logger.exception("KSeF connectivity probe failed.")
++            with _probe_cache_lock:
++                state = _probe_cache.setdefault(
++                    self._probe_cache_key,
++                    {"failure_count": 0, "last_error": None, "last_reason": "UNKNOWN"},
++                )
++                state["failure_count"] = int(state["failure_count"] or 0) + 1
++                state["last_error"] = str(exc)
++                state["last_reason"] = "UNKNOWN"
++                if int(state["failure_count"]) < _PROBE_ERROR_THRESHOLD:
++                    return None
++                return {
++                    "reason": str(state["last_reason"]),
++                    "last_error": str(state["last_error"]),
++                }
++
++        with _probe_cache_lock:
++            _probe_cache[self._probe_cache_key] = {
++                "failure_count": 0,
++                "last_error": None,
++                "last_reason": "UNKNOWN",
++            }
++        return None
+diff --git a/mobile-expo/app.json b/mobile-expo/app.json
+index 19b1144..5fa4550 100644
+--- a/mobile-expo/app.json
++++ b/mobile-expo/app.json
+@@ -19,7 +19,7 @@
+       "typedRoutes": true
+     },
+     "extra": {
+-      "apiBaseUrl": "http://127.0.0.1:8000"
++      "apiBaseUrl": "http://100.87.84.118:8000"
+     }
+   }
+ }
+diff --git a/mobile-expo/app/dashboard.tsx b/mobile-expo/app/dashboard.tsx
+index 028bd49..5f0b43b 100644
+--- a/mobile-expo/app/dashboard.tsx
++++ b/mobile-expo/app/dashboard.tsx
+@@ -1,17 +1,17 @@
+ import { useCallback, useEffect, useState } from 'react';
+ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+-import { useRouter } from 'expo-router';
++import { useRouter, Href } from 'expo-router';
+ import {
+   DashboardResponse,
+   fetchDashboard,
++  fetchRecentKsefPurchaseInvoices,
+   formatIssueDate,
+   formatSyncLabel,
+-  ksefStatusLabel,
+   parseAmount,
++  RecentKsefPurchaseRow,
+ } from '@/api/mobile';
+ import { isAuthFailure } from '@/api/auth';
+ import { useAuth } from '@/auth/AuthContext';
+-import { KpiTile } from '@/components/KpiTile';
+ import { DashboardHeader } from '@/components/DashboardHeader';
+ import { ScreenShell } from '@/components/ScreenShell';
+ import { formatPln } from '@/data/mock';
+@@ -26,6 +26,59 @@ function periodKey(year: number, month: number): string {
+   return `${year}-${String(month).padStart(2, '0')}`;
+ }
+ 
++type HorizontalKpiProps = {
++  label: string;
++  labelCompact?: boolean;
++  lines?: string[];
++  primary?: string;
++  detail?: string;
++  danger?: boolean;
++  onPress?: () => void;
++};
++
++function HorizontalKpiTile({
++  label,
++  labelCompact,
++  lines,
++  primary,
++  detail,
++  danger,
++  onPress,
++}: HorizontalKpiProps) {
++  return (
++    <Pressable
++      style={({ pressed }) => [styles.kpiRow, pressed && styles.kpiRowPressed]}
++      onPress={onPress}
++      disabled={!onPress}
++    >
++      <View style={styles.kpiRowLeft}>
++        <Text style={[styles.kpiLabel, labelCompact && styles.kpiLabelCompact]} numberOfLines={1}>
++          {label}
++        </Text>
++        {lines?.map((line) => (
++          <Text
++            key={line}
++            style={[styles.kpiLine, danger && line.startsWith('Po terminie') && styles.kpiLineDanger]}
++            numberOfLines={1}
++          >
++            {line}
++          </Text>
++        ))}
++        {detail ? (
++          <Text style={[styles.kpiDetail, danger && styles.kpiDetailDanger]} numberOfLines={1}>
++            {detail}
++          </Text>
++        ) : null}
++      </View>
++      {primary ? (
++        <Text style={[styles.kpiPrimary, danger && styles.dangerText]} numberOfLines={1}>
++          {primary}
++        </Text>
++      ) : null}
++    </Pressable>
++  );
++}
++
+ export default function DashboardScreen() {
+   const router = useRouter();
+   const { logout } = useAuth();
+@@ -33,6 +86,7 @@ export default function DashboardScreen() {
+   const [periodYear, setPeriodYear] = useState(initial.year);
+   const [periodMonth, setPeriodMonth] = useState(initial.month);
+   const [data, setData] = useState<DashboardResponse | null>(null);
++  const [recentKsef, setRecentKsef] = useState<RecentKsefPurchaseRow[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+ 
+@@ -55,15 +109,39 @@ export default function DashboardScreen() {
+     }
+   }, [periodYear, periodMonth, logout, router]);
+ 
++  const loadRecentKsef = useCallback(async () => {
++    try {
++      const items = await fetchRecentKsefPurchaseInvoices(5);
++      setRecentKsef(items);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setRecentKsef([]);
++    }
++  }, [logout, router]);
++
+   useEffect(() => {
+     load();
+   }, [load]);
+ 
++  useEffect(() => {
++    loadRecentKsef();
++  }, [loadRecentKsef]);
++
+   const vatIsDue = data?.vat_label !== 'refund';
+   const vatTitle = vatIsDue ? 'VAT do zapłaty' : 'VAT do odliczenia';
+   const vatValueColor = vatIsDue ? colors.vatDue : colors.vatRefund;
+   const debtorsOverdue = data ? parseAmount(data.debtors_overdue_due) : 0;
+   const creditorsOverdue = data ? parseAmount(data.creditors_overdue_due) : 0;
++  const monthParam = periodKey(periodYear, periodMonth);
++
++  const creditorLines = [`${data?.creditors_count ?? 0} pozycji`];
++  if (data && creditorsOverdue > 0) {
++    creditorLines.push(`Po terminie: ${formatPln(data.creditors_overdue_due)}`);
++  }
+ 
+   return (
+     <ScreenShell scroll>
+@@ -118,55 +196,72 @@ export default function DashboardScreen() {
+                 {formatPln(Math.abs(parseAmount(data.vat_balance)))}
+               </Text>
+             </View>
++            <View style={styles.heroLinks}>
++              <Pressable
++                style={styles.heroLinkBtn}
++                onPress={() => router.push(`/sales-invoices?month=${monthParam}` as Href)}
++              >
++                <Text style={styles.heroLinkText} numberOfLines={1}>
++                  FV sprzedaż
++                </Text>
++              </Pressable>
++              <Pressable
++                style={styles.heroLinkBtn}
++                onPress={() => router.push(`/purchase-invoices?month=${monthParam}` as Href)}
++              >
++                <Text style={styles.heroLinkText} numberOfLines={1}>
++                  FV zakup
++                </Text>
++              </Pressable>
++            </View>
+           </View>
+ 
+-          <View style={styles.kpiGrid}>
+-            <KpiTile
+-              large
+-              compactLabel
+-              heroPrimary
+-              label="Dłużnicy"
+-              primary={formatPln(data.debtors_total_due)}
+-              secondary={`${data.debtors_count} pozycji`}
+-              overdueAmount={debtorsOverdue > 0 ? formatPln(data.debtors_overdue_due) : undefined}
+-              danger={debtorsOverdue > 0}
+-              onPress={() => router.push('/debtors')}
+-            />
+-            <KpiTile
+-              large
+-              compactLabel
+-              heroPrimary
+-              label="Wierzyciele"
+-              primary={formatPln(data.creditors_total_due)}
+-              secondary={`${data.creditors_count} pozycji`}
+-              overdueAmount={creditorsOverdue > 0 ? formatPln(data.creditors_overdue_due) : undefined}
+-              onPress={() => router.push('/settlements')}
+-            />
+-            <KpiTile
+-              large
+-              label="Płatności"
+-              labelLine2="do przypisania"
+-              primary={String(data.unassigned_payments_count)}
+-              secondary={formatPln(data.unassigned_payments_total)}
+-              onPress={() => router.push('/payments-unassigned')}
+-            />
+-            <KpiTile
+-              large
+-              label="KSeF"
+-              primary={ksefStatusLabel(data.ksef_connection_status)}
+-              secondary={`${data.ksef_new_invoices_count} nowe zakupy`}
+-              accent={formatSyncLabel(data.ksef_last_sync_at)}
+-              compactAccent
+-              onPress={() => router.push('/ksef')}
+-            />
++          <View style={styles.globalSection}>
++            <Text style={styles.globalSectionTitle}>Stan ogólny</Text>
++            <Text style={styles.globalSectionHint}>Poza wybranym miesiącem</Text>
++            <View style={styles.kpiList}>
++              <HorizontalKpiTile
++                label="Dłużnicy"
++                primary={formatPln(data.debtors_total_due)}
++                detail={
++                  debtorsOverdue > 0
++                    ? `${data.debtors_count} pozycji · Po terminie ${formatPln(data.debtors_overdue_due)}`
++                    : `${data.debtors_count} pozycji`
++                }
++                danger={debtorsOverdue > 0}
++                onPress={() => router.push('/debtors')}
++              />
++              <HorizontalKpiTile
++                label="Wierzyciele"
++                lines={creditorLines}
++                primary={formatPln(data.creditors_total_due)}
++                danger={creditorsOverdue > 0}
++                onPress={() => router.push('/creditors' as Href)}
++              />
++              <HorizontalKpiTile
++                label="Płatności do przypisania"
++                labelCompact
++                primary={String(data.unassigned_payments_count)}
++                detail={formatPln(data.unassigned_payments_total)}
++                onPress={() => router.push('/payments-unassigned')}
++              />
++              <HorizontalKpiTile
++                label="KSeF w IFG"
++                lines={[
++                  `Ostatni import: ${formatSyncLabel(data.ksef_last_sync_at)}`,
++                  `${data.ksef_new_invoices_count} faktur z KSeF`,
++                ]}
++                onPress={() => router.push('/ksef')}
++              />
++            </View>
+           </View>
+ 
+           <View style={styles.section}>
+             <Text style={styles.sectionTitle}>Ostatnie zakupy KSeF</Text>
+-            {data.recent_purchase_invoices.length === 0 ? (
+-              <Text style={styles.emptyText}>Brak faktur zakupu w wybranym okresie</Text>
++            {recentKsef.length === 0 ? (
++              <Text style={styles.emptyText}>Brak faktur zakupu z KSeF</Text>
+             ) : (
+-              data.recent_purchase_invoices.map((p) => (
++              recentKsef.map((p) => (
+                 <Pressable
+                   key={p.id}
+                   style={styles.purchaseRow}
+@@ -183,15 +278,6 @@ export default function DashboardScreen() {
+               ))
+             )}
+           </View>
+-
+-          <View style={styles.quickLinks}>
+-            <Pressable style={styles.quickLink} onPress={() => router.push('/sales-invoices')}>
+-              <Text style={styles.quickLinkText} numberOfLines={1}>FV sprzedaż</Text>
+-            </Pressable>
+-            <Pressable style={styles.quickLink} onPress={() => router.push('/purchase-invoices')}>
+-              <Text style={styles.quickLinkText} numberOfLines={1}>FV zakup</Text>
+-            </Pressable>
+-          </View>
+         </>
+       ) : null}
+     </ScreenShell>
+@@ -241,9 +327,52 @@ const styles = StyleSheet.create({
+     alignItems: 'center',
+   },
+   vatLabel: { color: colors.textMuted, fontSize: 17, fontWeight: '600', flex: 1, flexShrink: 1, minWidth: 0 },
+-  vatValue: { fontSize: 23, fontWeight: '800', flexShrink: 0 },
+-  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+-  section: { gap: 8, marginTop: 4 },
++  vatValue: { fontSize: 16, fontWeight: '700', flexShrink: 0 },
++  heroLinks: {
++    flexDirection: 'row',
++    gap: 8,
++    borderTopWidth: 1,
++    borderTopColor: colors.border,
++    paddingTop: 12,
++  },
++  heroLinkBtn: {
++    flex: 1,
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 10,
++    paddingVertical: 8,
++    borderWidth: 1,
++    borderColor: colors.border,
++    alignItems: 'center',
++  },
++  heroLinkText: { color: colors.gold, fontSize: 13, fontWeight: '600' },
++  globalSection: { gap: 4, marginTop: 4 },
++  globalSectionTitle: { color: colors.text, fontSize: 17, fontWeight: '700' },
++  globalSectionHint: { color: colors.textDim, fontSize: 12, marginBottom: 4 },
++  kpiList: { gap: 8 },
++  kpiRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++    gap: 12,
++    backgroundColor: colors.surface,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    paddingHorizontal: 14,
++    paddingVertical: 12,
++  },
++  kpiRowPressed: { opacity: 0.85, borderColor: colors.goldDim },
++  kpiRowLeft: { flex: 1, gap: 3, minWidth: 0 },
++  kpiLabel: { color: colors.textMuted, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
++  kpiLabelCompact: { fontSize: 11, letterSpacing: 0.2 },
++  kpiLine: { color: colors.textDim, fontSize: 12 },
++  kpiLineDanger: { color: colors.gold },
++  kpiDetail: { color: colors.textDim, fontSize: 12 },
++  kpiDetailDanger: { color: colors.gold },
++  kpiPrimary: { color: colors.text, fontSize: 18, fontWeight: '700', flexShrink: 0, maxWidth: '42%', textAlign: 'right' },
++  dangerText: { color: colors.danger },
++  section: { gap: 8, marginTop: 8 },
+   sectionTitle: { color: colors.text, fontSize: 19, fontWeight: '700' },
+   purchaseRow: {
+     flexDirection: 'row',
+@@ -255,19 +384,7 @@ const styles = StyleSheet.create({
+     borderColor: colors.border,
+   },
+   purchaseMain: { flex: 1, gap: 3, minWidth: 0 },
+-  purchaseName: { color: colors.text, fontSize: 19, fontWeight: '600' },
+-  purchaseMeta: { color: colors.textMuted, fontSize: 16 },
+-  purchaseAmount: { color: colors.text, fontSize: 21, fontWeight: '700' },
+-  quickLinks: { flexDirection: 'row', gap: 8, marginTop: 8 },
+-  quickLink: {
+-    flex: 1,
+-    backgroundColor: colors.surfaceElevated,
+-    borderRadius: 8,
+-    paddingHorizontal: 10,
+-    paddingVertical: 10,
+-    borderWidth: 1,
+-    borderColor: colors.border,
+-    alignItems: 'center',
+-  },
+-  quickLinkText: { color: colors.textMuted, fontSize: 15 },
++  purchaseName: { color: colors.text, fontSize: 17, fontWeight: '600' },
++  purchaseMeta: { color: colors.textMuted, fontSize: 14 },
++  purchaseAmount: { color: colors.text, fontSize: 17, fontWeight: '700', flexShrink: 0 },
+ });
+diff --git a/mobile-expo/app/debtors/[id].tsx b/mobile-expo/app/debtors/[id].tsx
+index 82a59aa..6700477 100644
+--- a/mobile-expo/app/debtors/[id].tsx
++++ b/mobile-expo/app/debtors/[id].tsx
+@@ -1,81 +1,159 @@
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
++import { useCallback, useEffect, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { useLocalSearchParams, useRouter } from 'expo-router';
++import { CounterpartyDetail, fetchDebtor, parseAmount } from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { debtors, formatPln } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
++function resolveId(raw: string | string[] | undefined): string | null {
++  if (typeof raw === 'string' && raw.trim()) {
++    return raw;
++  }
++  if (Array.isArray(raw) && raw[0]?.trim()) {
++    return raw[0];
++  }
++  return null;
++}
++
+ export default function DebtorDetailScreen() {
+-  const { id } = useLocalSearchParams<{ id: string }>();
++  const { id: rawId } = useLocalSearchParams<{ id: string }>();
++  const id = resolveId(rawId);
+   const router = useRouter();
+-  const debtor = debtors.find((d) => d.id === id) ?? debtors[0];
++  const { logout } = useAuth();
++  const [debtor, setDebtor] = useState<CounterpartyDetail | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    if (!id) {
++      setDebtor(null);
++      setError('Nie znaleziono dłużnika');
++      setLoading(false);
++      return;
++    }
++
++    setLoading(true);
++    setError(null);
++    try {
++      const payload = await fetchDebtor(id);
++      setDebtor(payload);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setDebtor(null);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać dłużnika');
++    } finally {
++      setLoading(false);
++    }
++  }, [id, logout, router]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  if (loading) {
++    return (
++      <ScreenShell title="Dłużnik" subtitle="Szczegóły dłużnika" showBack scroll>
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie szczegółów…</Text>
++        </View>
++      </ScreenShell>
++    );
++  }
++
++  if (error || !debtor) {
++    return (
++      <ScreenShell title="Dłużnik" subtitle="Szczegóły dłużnika" showBack scroll>
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error ?? 'Nie znaleziono dłużnika'}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      </ScreenShell>
++    );
++  }
++
++  const overdueDue = parseAmount(debtor.overdue_due);
+ 
+   return (
+     <ScreenShell title={debtor.name} subtitle="Szczegóły dłużnika" showBack scroll>
+       <View style={styles.summary}>
+         <View style={styles.summaryCol}>
+           <Text style={styles.summaryLabel}>Należność</Text>
+-          <Text style={styles.summaryValue}>{formatPln(debtor.totalDue)}</Text>
++          <Text style={styles.summaryValue}>{formatPln(debtor.total_due)}</Text>
+         </View>
+         <View style={styles.summaryCol}>
+           <Text style={styles.summaryLabel}>Po terminie</Text>
+-          <Text style={[styles.summaryValue, debtor.overdueDue > 0 && styles.danger]}>
+-            {formatPln(debtor.overdueDue)}
++          <Text style={[styles.summaryValue, overdueDue > 0 && styles.danger]}>
++            {formatPln(debtor.overdue_due)}
+           </Text>
+         </View>
+         <View style={styles.summaryCol}>
+           <Text style={styles.summaryLabel}>Faktury</Text>
+-          <Text style={styles.summaryValue}>{debtor.invoicesCount}</Text>
++          <Text style={styles.summaryValue}>{debtor.invoices_count}</Text>
+         </View>
+       </View>
+ 
+-      {debtor.lastNote ? (
+-        <View style={styles.latestNote}>
+-          <Text style={styles.sectionTitle}>Ostatnia notatka</Text>
+-          <Text style={styles.noteDate}>{debtor.lastNote.date} · {debtor.lastNote.time}</Text>
+-          <Text style={styles.noteBody}>{debtor.lastNote.text}</Text>
+-        </View>
+-      ) : null}
+-
+       <View style={styles.section}>
+         <Text style={styles.sectionTitle}>Faktury</Text>
+-        {debtor.invoices.map((inv) => (
+-          <Pressable
+-            key={inv.invoiceId}
+-            style={styles.invRow}
+-            onPress={() => router.push(`/invoice/${inv.invoiceId}`)}
+-          >
+-            <View style={styles.invMain}>
+-              <Text style={styles.invNumber}>{inv.number}</Text>
+-              <Text style={styles.invMeta}>Termin {inv.dueDate}</Text>
+-            </View>
+-            <View style={styles.invRight}>
+-              <Text style={styles.invAmount}>{formatPln(inv.amountDue)}</Text>
+-              {inv.overdueDays != null && inv.overdueDays > 0 ? (
+-                <Text style={styles.overdue}>{inv.overdueDays} dni po terminie</Text>
+-              ) : null}
+-            </View>
+-          </Pressable>
+-        ))}
++        {debtor.invoices.length === 0 ? (
++          <Text style={styles.empty}>Brak faktur.</Text>
++        ) : (
++          debtor.invoices.map((inv) => (
++            <Pressable
++              key={inv.invoice_id}
++              style={styles.invRow}
++              onPress={() => router.push(`/invoice/${inv.invoice_id}`)}
++            >
++              <View style={styles.invMain}>
++                <Text style={styles.invNumber}>{inv.number}</Text>
++                <Text style={styles.invMeta}>Termin {inv.due_date ?? '—'}</Text>
++              </View>
++              <View style={styles.invRight}>
++                <Text style={styles.invAmount}>{formatPln(inv.amount_due)}</Text>
++                {inv.overdue_days != null && inv.overdue_days > 0 ? (
++                  <Text style={styles.overdue}>{inv.overdue_days} dni po terminie</Text>
++                ) : null}
++              </View>
++            </Pressable>
++          ))
++        )}
+       </View>
+ 
+       <View style={styles.section}>
+         <Text style={styles.sectionTitle}>Historia notatek</Text>
+-        {debtor.notes.length === 0 ? (
+-          <Text style={styles.empty}>Brak notatek windykacyjnych.</Text>
+-        ) : (
+-          debtor.notes.map((note) => (
+-            <View key={note.id} style={styles.noteRow}>
+-              <Text style={styles.noteRowDate}>{note.date} · {note.time}</Text>
+-              <Text style={styles.noteRowText}>{note.text}</Text>
+-            </View>
+-          ))
+-        )}
++        <Text style={styles.empty}>Brak notatek windykacyjnych.</Text>
+       </View>
+     </ScreenShell>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
+   summary: {
+     flexDirection: 'row',
+     backgroundColor: colors.surface,
+@@ -89,18 +167,8 @@ const styles = StyleSheet.create({
+   summaryLabel: { color: colors.textMuted, fontSize: 10, textTransform: 'uppercase' },
+   summaryValue: { color: colors.text, fontSize: 15, fontWeight: '700' },
+   danger: { color: colors.danger },
+-  latestNote: {
+-    backgroundColor: colors.goldGlow,
+-    borderRadius: 12,
+-    borderWidth: 1,
+-    borderColor: colors.goldDim,
+-    padding: 14,
+-    gap: 6,
+-  },
+   section: { gap: 8 },
+   sectionTitle: { color: colors.gold, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+-  noteDate: { color: colors.goldDim, fontSize: 11 },
+-  noteBody: { color: colors.text, fontSize: 14, lineHeight: 20 },
+   invRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -116,15 +184,5 @@ const styles = StyleSheet.create({
+   invRight: { alignItems: 'flex-end', gap: 2 },
+   invAmount: { color: colors.text, fontSize: 14, fontWeight: '700' },
+   overdue: { color: colors.danger, fontSize: 10 },
+-  noteRow: {
+-    backgroundColor: colors.surface,
+-    borderRadius: 10,
+-    padding: 12,
+-    borderWidth: 1,
+-    borderColor: colors.border,
+-    gap: 4,
+-  },
+-  noteRowDate: { color: colors.textDim, fontSize: 11 },
+-  noteRowText: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
+   empty: { color: colors.textDim, fontSize: 12, fontStyle: 'italic' },
+ });
+diff --git a/mobile-expo/app/debtors/index.tsx b/mobile-expo/app/debtors/index.tsx
+index 5e68acc..eb34e06 100644
+--- a/mobile-expo/app/debtors/index.tsx
++++ b/mobile-expo/app/debtors/index.tsx
+@@ -1,40 +1,116 @@
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+ import { useRouter } from 'expo-router';
++import { CounterpartyListItem, fetchDebtors, parseAmount } from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { debtors, formatPln } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
+ export default function DebtorsListScreen() {
+   const router = useRouter();
+-  const sorted = [...debtors].sort((a, b) => b.overdueDue - a.overdueDue || b.totalDue - a.totalDue);
++  const { logout } = useAuth();
++  const [items, setItems] = useState<CounterpartyListItem[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const payload = await fetchDebtors();
++      setItems(payload);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setItems([]);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać dłużników');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  const sorted = useMemo(
++    () =>
++      [...items].sort(
++        (a, b) =>
++          parseAmount(b.overdue_due) - parseAmount(a.overdue_due) ||
++          parseAmount(b.total_due) - parseAmount(a.total_due),
++      ),
++    [items],
++  );
+ 
+   return (
+     <ScreenShell title="Dłużnicy" subtitle="Należności po kontrahentach" showBack scroll>
+-      {sorted.map((d) => (
+-        <Pressable key={d.id} style={styles.card} onPress={() => router.push(`/debtors/${d.id}`)}>
+-          <View style={styles.cardHeader}>
+-            <Text style={styles.name}>{d.name}</Text>
+-            <Text style={styles.amount}>{formatPln(d.totalDue)}</Text>
+-          </View>
+-          <Text style={styles.meta}>
+-            {d.invoicesCount} faktur
+-            {d.overdueDue > 0 ? ` · po terminie ${formatPln(d.overdueDue)}` : ''}
+-          </Text>
+-          {d.lastNote ? (
+-            <View style={styles.notePreview}>
+-              <Text style={styles.noteDate}>{d.lastNote.date} {d.lastNote.time}</Text>
+-              <Text style={styles.noteText} numberOfLines={2}>{d.lastNote.text}</Text>
+-            </View>
+-          ) : (
+-            <Text style={styles.noNote}>Brak notatek</Text>
+-          )}
+-        </Pressable>
+-      ))}
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie dłużników…</Text>
++        </View>
++      ) : null}
++
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error && sorted.length === 0 ? (
++        <Text style={styles.emptyText}>Brak należności po kontrahentach</Text>
++      ) : null}
++
++      {!loading && !error
++        ? sorted.map((d) => {
++            const overdueDue = parseAmount(d.overdue_due);
++            return (
++              <Pressable key={d.id} style={styles.card} onPress={() => router.push(`/debtors/${d.id}`)}>
++                <View style={styles.cardHeader}>
++                  <Text style={styles.name}>{d.name}</Text>
++                  <Text style={styles.amount}>{formatPln(d.total_due)}</Text>
++                </View>
++                <Text style={styles.meta}>
++                  {d.invoices_count} faktur
++                  {overdueDue > 0 ? ` · po terminie ${formatPln(d.overdue_due)}` : ''}
++                </Text>
++                <Text style={styles.noNote}>Brak notatek</Text>
++              </Pressable>
++            );
++          })
++        : null}
+     </ScreenShell>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
++  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
+   card: {
+     backgroundColor: colors.surface,
+     borderRadius: 14,
+@@ -47,15 +123,5 @@ const styles = StyleSheet.create({
+   name: { color: colors.text, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 8 },
+   amount: { color: colors.text, fontSize: 16, fontWeight: '700' },
+   meta: { color: colors.textMuted, fontSize: 12 },
+-  notePreview: {
+-    backgroundColor: colors.surfaceElevated,
+-    borderRadius: 8,
+-    padding: 10,
+-    borderLeftWidth: 3,
+-    borderLeftColor: colors.gold,
+-    gap: 4,
+-  },
+-  noteDate: { color: colors.goldDim, fontSize: 10, fontWeight: '600' },
+-  noteText: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+   noNote: { color: colors.textDim, fontSize: 11, fontStyle: 'italic' },
+ });
+diff --git a/mobile-expo/app/invoice/[id].tsx b/mobile-expo/app/invoice/[id].tsx
+index 2602eb1..57536ce 100644
+--- a/mobile-expo/app/invoice/[id].tsx
++++ b/mobile-expo/app/invoice/[id].tsx
+@@ -1,71 +1,255 @@
+-import { useLocalSearchParams } from 'expo-router';
+-import { StyleSheet, Text, View } from 'react-native';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import { fetchInvoice, InvoiceResponse, invoiceDisplayNumber, mapInvoiceItemForDisplay, parseAmount } from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { allInvoices, formatPln } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
+-const STATUS_LABELS = { paid: 'Opłacona', partial: 'Częściowo opłacona', unpaid: 'Nieopłacona' };
++const STATUS_LABELS: Record<string, string> = {
++  paid: 'Opłacona',
++  partial: 'Częściowo opłacona',
++  unpaid: 'Nieopłacona',
++};
++
++function resolveId(raw: string | string[] | undefined): string | null {
++  if (typeof raw === 'string' && raw.trim()) {
++    return raw;
++  }
++  if (Array.isArray(raw) && raw[0]?.trim()) {
++    return raw[0];
++  }
++  return null;
++}
++
++function snapshotField(snapshot: Record<string, unknown>, key: string): string {
++  const value = snapshot[key];
++  return typeof value === 'string' ? value.trim() : '';
++}
++
++function contractorFromInvoice(invoice: InvoiceResponse): { name: string; nip: string } {
++  const snapshot = invoice.direction === 'purchase' ? invoice.seller_snapshot : invoice.buyer_snapshot;
++  return {
++    name: snapshotField(snapshot, 'name') || 'Nieznany kontrahent',
++    nip: snapshotField(snapshot, 'nip') || '—',
++  };
++}
++
++function paidAmount(invoice: InvoiceResponse): number {
++  if (invoice.paid_amount != null) {
++    return parseAmount(invoice.paid_amount);
++  }
++  if (invoice.remaining_amount != null) {
++    return Math.max(0, parseAmount(invoice.total_gross) - parseAmount(invoice.remaining_amount));
++  }
++  return 0;
++}
++
++function remainingAmount(invoice: InvoiceResponse): number {
++  if (invoice.remaining_amount != null) {
++    return parseAmount(invoice.remaining_amount);
++  }
++  return Math.max(0, parseAmount(invoice.total_gross) - paidAmount(invoice));
++}
++
++function paymentStatusKey(invoice: InvoiceResponse): string {
++  const status = invoice.payment_status?.toLowerCase();
++  if (status === 'paid' || status === 'partial' || status === 'unpaid') {
++    return status;
++  }
++  const gross = parseAmount(invoice.total_gross);
++  const paid = paidAmount(invoice);
++  if (paid <= 0) return 'unpaid';
++  if (paid >= gross) return 'paid';
++  return 'partial';
++}
++
++function buildHistory(invoice: InvoiceResponse, paid: number, gross: number) {
++  const rows: { date: string; label: string; amount?: number }[] = [];
++  const issueDate = invoice.issue_date.slice(0, 10);
++  if (invoice.direction === 'purchase' && invoice.ksef_reference_number) {
++    rows.push({ date: issueDate, label: 'Pobrano z KSeF' });
++  } else {
++    rows.push({ date: issueDate, label: 'Wystawiono fakturę' });
++  }
++  if (paid > 0) {
++    rows.push({
++      date: issueDate,
++      label: paid >= gross ? 'Opłacono w całości' : 'Częściowa płatność',
++      amount: paid,
++    });
++  }
++  return rows;
++}
+ 
+ export default function InvoiceDetailScreen() {
+-  const { id } = useLocalSearchParams<{ id: string }>();
+-  const invoice =
+-    allInvoices.find((i) => i.id === id) ??
+-    allInvoices.find((i) => i.id === `inv-${id}`) ??
+-    allInvoices[0];
++  const { id: rawId } = useLocalSearchParams<{ id: string }>();
++  const id = resolveId(rawId);
++  const router = useRouter();
++  const { logout } = useAuth();
++  const [invoice, setInvoice] = useState<InvoiceResponse | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    if (!id) {
++      setInvoice(null);
++      setError('Nie znaleziono faktury');
++      setLoading(false);
++      return;
++    }
+ 
+-  const remaining = invoice.gross - invoice.paid;
++    setLoading(true);
++    setError(null);
++    try {
++      const payload = await fetchInvoice(id);
++      setInvoice(payload);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setInvoice(null);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać faktury');
++    } finally {
++      setLoading(false);
++    }
++  }, [id, logout, router]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  const viewModel = useMemo(() => {
++    if (!invoice) {
++      return null;
++    }
++    const contractor = contractorFromInvoice(invoice);
++    const gross = parseAmount(invoice.total_gross);
++    const paid = paidAmount(invoice);
++    const remaining = remainingAmount(invoice);
++    const statusKey = paymentStatusKey(invoice);
++    return {
++      number: invoiceDisplayNumber(invoice),
++      direction: invoice.direction,
++      contractorName: contractor.name,
++      contractorNip: contractor.nip,
++      ksefNumber: invoice.ksef_reference_number,
++      statusKey,
++      gross,
++      paid,
++      remaining,
++      issueDate: invoice.issue_date.slice(0, 10),
++      dueDate: invoice.due_date?.slice(0, 10) ?? '—',
++      items: invoice.items.map((item, idx) => mapInvoiceItemForDisplay(item, idx)),
++      history: buildHistory(invoice, paid, gross),
++    };
++  }, [invoice]);
++
++  if (loading) {
++    return (
++      <ScreenShell title="Faktura" subtitle="Szczegóły" showBack scroll>
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie faktury…</Text>
++        </View>
++      </ScreenShell>
++    );
++  }
++
++  if (error || !viewModel) {
++    return (
++      <ScreenShell title="Faktura" subtitle="Szczegóły" showBack scroll>
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error ?? 'Nie znaleziono faktury'}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      </ScreenShell>
++    );
++  }
++
++  const statusLabel = STATUS_LABELS[viewModel.statusKey] ?? STATUS_LABELS.unpaid;
+ 
+   return (
+-    <ScreenShell title={invoice.number} subtitle={invoice.direction === 'sale' ? 'Sprzedaż' : 'Zakup'} showBack scroll>
++    <ScreenShell
++      title={viewModel.number}
++      subtitle={viewModel.direction === 'sale' ? 'Sprzedaż' : 'Zakup'}
++      showBack
++      scroll
++    >
+       <View style={styles.card}>
+         <Text style={styles.sectionLabel}>Kontrahent</Text>
+-        <Text style={styles.contractorName}>{invoice.contractorName}</Text>
+-        <Text style={styles.meta}>NIP {invoice.contractorNip}</Text>
+-        {invoice.ksefNumber ? <Text style={styles.ksef}>KSeF: {invoice.ksefNumber}</Text> : null}
++        <Text style={styles.contractorName}>{viewModel.contractorName}</Text>
++        <Text style={styles.meta}>NIP {viewModel.contractorNip}</Text>
++        {viewModel.ksefNumber ? <Text style={styles.ksef}>KSeF: {viewModel.ksefNumber}</Text> : null}
+       </View>
+ 
+       <View style={styles.card}>
+         <View style={styles.rowBetween}>
+           <Text style={styles.label}>Status płatności</Text>
+-          <Text style={[styles.badge, invoice.status === 'paid' ? styles.badgeOk : styles.badgeWarn]}>
+-            {STATUS_LABELS[invoice.status]}
++          <Text style={[styles.badge, viewModel.statusKey === 'paid' ? styles.badgeOk : styles.badgeWarn]}>
++            {statusLabel}
+           </Text>
+         </View>
+         <View style={styles.amounts}>
+           <View style={styles.amountCol}>
+             <Text style={styles.amountLabel}>Brutto</Text>
+-            <Text style={styles.amountValue}>{formatPln(invoice.gross)}</Text>
++            <Text style={styles.amountValue}>{formatPln(viewModel.gross)}</Text>
+           </View>
+           <View style={styles.amountCol}>
+             <Text style={styles.amountLabel}>Zapłacono</Text>
+-            <Text style={styles.amountValue}>{formatPln(invoice.paid)}</Text>
++            <Text style={styles.amountValue}>{formatPln(viewModel.paid)}</Text>
+           </View>
+           <View style={styles.amountCol}>
+             <Text style={styles.amountLabel}>Pozostało</Text>
+-            <Text style={[styles.amountValue, remaining > 0 && styles.danger]}>{formatPln(remaining)}</Text>
++            <Text style={[styles.amountValue, viewModel.remaining > 0 && styles.danger]}>
++              {formatPln(viewModel.remaining)}
++            </Text>
+           </View>
+         </View>
+-        <Text style={styles.meta}>Wystawiono: {invoice.issueDate} · Termin: {invoice.dueDate}</Text>
++        <Text style={styles.meta}>
++          Wystawiono: {viewModel.issueDate} · Termin: {viewModel.dueDate}
++        </Text>
+       </View>
+ 
+       <View style={styles.card}>
+         <Text style={styles.sectionLabel}>Pozycje</Text>
+-        {invoice.items.map((item, idx) => (
+-          <View key={idx} style={styles.itemRow}>
+-            <View style={styles.itemMain}>
+-              <Text style={styles.itemName}>{item.name}</Text>
+-              <Text style={styles.itemMeta}>
+-                {item.qty} {item.unit} · netto {formatPln(item.net)}
++        {viewModel.items.length === 0 ? (
++          <Text style={styles.empty}>Brak pozycji.</Text>
++        ) : (
++          viewModel.items.map((item) => (
++            <View key={`${item.lineNumber}-${item.name}`} style={styles.itemRow}>
++              <Text style={styles.itemHeader}>
++                {item.lineNumber}. {item.name}
+               </Text>
++              <Text style={styles.itemQuantity}>Ilość: {item.quantityLabel}</Text>
++              <View style={styles.itemAmounts}>
++                <View style={styles.itemAmountCol}>
++                  <Text style={styles.itemAmountLabel}>Netto</Text>
++                  <Text style={styles.itemAmountValue}>{item.netLabel}</Text>
++                </View>
++                <View style={styles.itemAmountCol}>
++                  <Text style={styles.itemAmountLabel}>VAT %</Text>
++                  <Text style={styles.itemAmountValue}>{item.vatRateLabel}</Text>
++                </View>
++                <View style={styles.itemAmountCol}>
++                  <Text style={styles.itemAmountLabel}>Kwota VAT</Text>
++                  <Text style={styles.itemAmountValue}>{item.vatLabel}</Text>
++                </View>
++              </View>
+             </View>
+-            <Text style={styles.itemVat}>VAT {formatPln(item.vat)}</Text>
+-          </View>
+-        ))}
++          ))
++        )}
+       </View>
+ 
+       <View style={styles.card}>
+         <Text style={styles.sectionLabel}>Historia</Text>
+-        {invoice.history.map((h, idx) => (
++        {viewModel.history.map((h, idx) => (
+           <View key={idx} style={styles.historyRow}>
+             <Text style={styles.historyDate}>{h.date}</Text>
+             <View style={styles.historyMain}>
+@@ -80,6 +264,23 @@ export default function InvoiceDetailScreen() {
+ }
+ 
+ const styles = StyleSheet.create({
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
+   card: {
+     backgroundColor: colors.surface,
+     borderRadius: 14,
+@@ -102,17 +303,19 @@ const styles = StyleSheet.create({
+   amountLabel: { color: colors.textDim, fontSize: 10 },
+   amountValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
+   danger: { color: colors.danger },
++  empty: { color: colors.textDim, fontSize: 12, fontStyle: 'italic' },
+   itemRow: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    paddingVertical: 8,
++    paddingVertical: 10,
+     borderTopWidth: 1,
+     borderTopColor: colors.border,
++    gap: 6,
+   },
+-  itemMain: { flex: 1, gap: 2 },
+-  itemName: { color: colors.text, fontSize: 14 },
+-  itemMeta: { color: colors.textMuted, fontSize: 11 },
+-  itemVat: { color: colors.textMuted, fontSize: 12 },
++  itemHeader: { color: colors.text, fontSize: 14, fontWeight: '600' },
++  itemQuantity: { color: colors.textMuted, fontSize: 12 },
++  itemAmounts: { flexDirection: 'row', gap: 8, marginTop: 2 },
++  itemAmountCol: { flex: 1, gap: 2 },
++  itemAmountLabel: { color: colors.textDim, fontSize: 10, textTransform: 'uppercase' },
++  itemAmountValue: { color: colors.text, fontSize: 13, fontWeight: '600' },
+   historyRow: { flexDirection: 'row', gap: 10, paddingVertical: 6 },
+   historyDate: { color: colors.textDim, fontSize: 11, width: 72 },
+   historyMain: { flex: 1, gap: 2 },
+diff --git a/mobile-expo/app/ksef.tsx b/mobile-expo/app/ksef.tsx
+index 4c9c422..61c6193 100644
+--- a/mobile-expo/app/ksef.tsx
++++ b/mobile-expo/app/ksef.tsx
+@@ -1,97 +1,129 @@
+-import { useState } from 'react';
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
++import { useCallback, useEffect, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useRouter } from 'expo-router';
++import { fetchDashboard, formatSyncLabel } from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { dashboardMock, formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
++function currentPeriodKey(): string {
++  const now = new Date();
++  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
++}
++
+ export default function KsefScreen() {
+-  const [syncing, setSyncing] = useState(false);
+-  const [lastSync, setLastSync] = useState(dashboardMock.ksef.lastSyncLabel);
+-  const k = dashboardMock.ksef;
++  const router = useRouter();
++  const { logout } = useAuth();
++  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
++  const [newCount, setNewCount] = useState<number | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const data = await fetchDashboard(currentPeriodKey());
++      setLastSyncAt(data.ksef_last_sync_at);
++      setNewCount(data.ksef_new_invoices_count);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać danych KSeF z IFG');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router]);
+ 
+-  const handleSync = () => {
+-    setSyncing(true);
+-    setTimeout(() => {
+-      setSyncing(false);
+-      setLastSync('właśnie teraz (demo)');
+-    }, 1500);
+-  };
++  useEffect(() => {
++    load();
++  }, [load]);
+ 
+   return (
+-    <ScreenShell title="Import KSeF" subtitle="Synchronizacja faktur zakupowych" showBack scroll>
+-      <View style={styles.statusCard}>
+-        <View style={styles.statusRow}>
+-          <View style={styles.statusDot} />
+-          <Text style={styles.statusLabel}>{k.statusLabel}</Text>
+-        </View>
+-        <Text style={styles.meta}>Sesja aktywna · NIP z ustawień IFG</Text>
+-        <Text style={styles.meta}>Ostatnia synchronizacja: {lastSync}</Text>
+-        <Text style={styles.meta}>Nowe dokumenty (ostatni sync): {k.newCount}</Text>
++    <ScreenShell title="KSeF w IFG" subtitle="Faktury zakupowe z KSeF" showBack scroll>
++      <View style={styles.infoCard}>
++        <Text style={styles.infoTitle}>Jak to działa</Text>
++        <Text style={styles.infoText}>IFGM pokazuje faktury KSeF pobrane przez IFG.</Text>
++        <Text style={styles.infoText}>Synchronizacja KSeF odbywa się po stronie IFG — nie z telefonu.</Text>
+       </View>
+ 
+-      <Pressable
+-        style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
+-        onPress={handleSync}
+-        disabled={syncing}
+-      >
+-        <Text style={styles.syncBtnText}>{syncing ? 'Pobieranie…' : 'Pobierz faktury z KSeF'}</Text>
+-      </Pressable>
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} />
++          <Text style={styles.stateText}>Ładowanie danych z IFG…</Text>
++        </View>
++      ) : null}
+ 
+-      <View style={styles.section}>
+-        <Text style={styles.sectionTitle}>Ostatnio pobrane (demo)</Text>
+-        {dashboardMock.recentPurchases.map((p) => (
+-          <View key={p.id} style={styles.purchaseRow}>
+-            <View style={styles.purchaseMain}>
+-              <Text style={styles.purchaseName}>{p.supplier}</Text>
+-              <Text style={styles.purchaseMeta}>{p.number}</Text>
+-            </View>
+-            <Text style={styles.purchaseAmount}>{formatPln(p.gross)}</Text>
+-          </View>
+-        ))}
+-      </View>
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error ? (
++        <View style={styles.statusCard}>
++          <Text style={styles.statusLabel}>Ostatni import</Text>
++          <Text style={styles.statusValue}>{formatSyncLabel(lastSyncAt)}</Text>
++          <Text style={styles.meta}>Faktury z ostatniego importu: {newCount ?? 0}</Text>
++        </View>
++      ) : null}
+ 
+-      <Text style={styles.footer}>
+-        IFGM nie łączy się bezpośrednio z KSeF. W produkcji: POST /api/v1/ksef/sync/purchases
+-      </Text>
++      <Pressable style={styles.backBtn} onPress={() => router.back()}>
++        <Text style={styles.backBtnText}>Wróć</Text>
++      </Pressable>
+     </ScreenShell>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
+-  statusCard: {
++  infoCard: {
+     backgroundColor: colors.surface,
+     borderRadius: 14,
+     borderWidth: 1,
+-    borderColor: colors.success,
++    borderColor: colors.border,
+     padding: 16,
+     gap: 8,
+   },
+-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+-  statusDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
+-  statusLabel: { color: colors.success, fontSize: 18, fontWeight: '700' },
+-  meta: { color: colors.textMuted, fontSize: 12 },
+-  syncBtn: {
+-    backgroundColor: colors.gold,
+-    borderRadius: 12,
+-    paddingVertical: 16,
+-    alignItems: 'center',
++  infoTitle: { color: colors.gold, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
++  infoText: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
++  stateBox: { alignItems: 'center', gap: 10, paddingVertical: 24 },
++  stateText: { color: colors.textMuted, fontSize: 14 },
++  errorText: { color: colors.danger, fontSize: 14, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
+   },
+-  syncBtnDisabled: { opacity: 0.6 },
+-  syncBtnText: { color: colors.bg, fontSize: 16, fontWeight: '800' },
+-  section: { gap: 8, marginTop: 4 },
+-  sectionTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
+-  purchaseRow: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
++  retryText: { color: colors.gold, fontSize: 14, fontWeight: '600' },
++  statusCard: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 14,
++    borderWidth: 1,
++    borderColor: colors.border,
++    padding: 16,
++    gap: 6,
++  },
++  statusLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase' },
++  statusValue: { color: colors.text, fontSize: 18, fontWeight: '700' },
++  meta: { color: colors.textDim, fontSize: 13 },
++  backBtn: {
++    marginTop: 8,
+     backgroundColor: colors.surface,
+     borderRadius: 10,
+-    padding: 12,
+     borderWidth: 1,
+     borderColor: colors.border,
++    paddingVertical: 14,
++    alignItems: 'center',
+   },
+-  purchaseMain: { flex: 1, gap: 2 },
+-  purchaseName: { color: colors.text, fontSize: 14, fontWeight: '600' },
+-  purchaseMeta: { color: colors.textMuted, fontSize: 11 },
+-  purchaseAmount: { color: colors.text, fontSize: 14, fontWeight: '700' },
+-  footer: { color: colors.textDim, fontSize: 10, lineHeight: 14, marginTop: 8 },
++  backBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
+ });
+diff --git a/mobile-expo/app/payments-unassigned.tsx b/mobile-expo/app/payments-unassigned.tsx
+index f5f38dd..94172b2 100644
+--- a/mobile-expo/app/payments-unassigned.tsx
++++ b/mobile-expo/app/payments-unassigned.tsx
+@@ -1,35 +1,421 @@
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import {
++  ActivityIndicator,
++  Modal,
++  Pressable,
++  StyleSheet,
++  Text,
++  View,
++} from 'react-native';
++import { useRouter } from 'expo-router';
++import {
++  allocatePayment,
++  contractorNameFromListItem,
++  fetchInvoicePaymentHistory,
++  fetchPaymentsForAssignment,
++  formatIssueDate,
++  InvoiceListItem,
++  invoiceDisplayNumber,
++  invoiceListDisplayAmount,
++  parseAmount,
++  PaymentAllocation,
++  reversePaymentAllocation,
++  searchInvoices,
++  UnassignedPayment,
++  unassignedPaymentCounterparty,
++  unassignedPaymentDisplayAmount,
++} from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { formatPln, unassignedPayments } from '@/data/mock';
++import { SearchBar } from '@/components/SearchBar';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
++type ModalMode = 'assign' | 'reassign_old' | 'reassign_new';
++
++function canAssign(payment: UnassignedPayment): boolean {
++  return parseAmount(unassignedPaymentDisplayAmount(payment)) > 0;
++}
++
++function canReassign(payment: UnassignedPayment): boolean {
++  const status = payment.match_status?.toLowerCase();
++  return status === 'partial' || status === 'manual_review' || status === 'matched';
++}
++
+ export default function PaymentsUnassignedScreen() {
++  const router = useRouter();
++  const { logout } = useAuth();
++  const [payments, setPayments] = useState<UnassignedPayment[]>([]);
++  const [total, setTotal] = useState(0);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++  const [successMessage, setSuccessMessage] = useState<string | null>(null);
++
++  const [activePayment, setActivePayment] = useState<UnassignedPayment | null>(null);
++  const [modalMode, setModalMode] = useState<ModalMode | null>(null);
++  const [invoiceQuery, setInvoiceQuery] = useState('');
++  const [invoiceResults, setInvoiceResults] = useState<InvoiceListItem[]>([]);
++  const [invoiceSearchLoading, setInvoiceSearchLoading] = useState(false);
++  const [selectedAllocation, setSelectedAllocation] = useState<PaymentAllocation | null>(null);
++  const [actionLoading, setActionLoading] = useState(false);
++  const [modalError, setModalError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const res = await fetchPaymentsForAssignment();
++      setPayments(res.items);
++      setTotal(res.total);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setPayments([]);
++      setTotal(0);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać płatności');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  useEffect(() => {
++    if (!modalMode) {
++      return;
++    }
++    const q = invoiceQuery.trim();
++    if (q.length < 2) {
++      setInvoiceResults([]);
++      setInvoiceSearchLoading(false);
++      return;
++    }
++    let cancelled = false;
++    setInvoiceSearchLoading(true);
++    setModalError(null);
++    const timer = setTimeout(async () => {
++      try {
++        const items = await searchInvoices(q);
++        if (!cancelled) {
++          setInvoiceResults(items);
++        }
++      } catch (err) {
++        if (!cancelled) {
++          if (isAuthFailure(err)) {
++            logout();
++            router.replace('/login');
++            return;
++          }
++          setModalError(err instanceof Error ? err.message : 'Nie udało się wyszukać faktur');
++          setInvoiceResults([]);
++        }
++      } finally {
++        if (!cancelled) {
++          setInvoiceSearchLoading(false);
++        }
++      }
++    }, 350);
++    return () => {
++      cancelled = true;
++      clearTimeout(timer);
++    };
++  }, [invoiceQuery, modalMode, logout, router]);
++
++  const totalAmount = useMemo(
++    () => payments.reduce((sum, p) => sum + parseAmount(unassignedPaymentDisplayAmount(p)), 0),
++    [payments],
++  );
++
++  const subtitle =
++    !loading && !error ? `${total} transakcji · ${formatPln(totalAmount)}` : undefined;
++
++  const closeModal = () => {
++    setActivePayment(null);
++    setModalMode(null);
++    setInvoiceQuery('');
++    setInvoiceResults([]);
++    setSelectedAllocation(null);
++    setModalError(null);
++    setActionLoading(false);
++  };
++
++  const openAssignModal = (payment: UnassignedPayment) => {
++    setActivePayment(payment);
++    setModalMode('assign');
++    setInvoiceQuery('');
++    setInvoiceResults([]);
++    setSelectedAllocation(null);
++    setModalError(null);
++  };
++
++  const openReassignModal = (payment: UnassignedPayment) => {
++    setActivePayment(payment);
++    setModalMode('reassign_old');
++    setInvoiceQuery('');
++    setInvoiceResults([]);
++    setSelectedAllocation(null);
++    setModalError(null);
++  };
++
++  const handleAuthError = (err: unknown): boolean => {
++    if (isAuthFailure(err)) {
++      logout();
++      router.replace('/login');
++      return true;
++    }
++    return false;
++  };
++
++  const handleAssign = async (payment: UnassignedPayment, invoice: InvoiceListItem) => {
++    setActionLoading(true);
++    setModalError(null);
++    try {
++      const amount = unassignedPaymentDisplayAmount(payment);
++      await allocatePayment(payment.id, invoice.id, amount);
++      closeModal();
++      setSuccessMessage(`Przypisano ${formatPln(amount)} do ${invoiceDisplayNumber(invoice)}`);
++      await load();
++    } catch (err) {
++      if (handleAuthError(err)) {
++        return;
++      }
++      setModalError(err instanceof Error ? err.message : 'Nie udało się przypisać płatności');
++    } finally {
++      setActionLoading(false);
++    }
++  };
++
++  const handleReassignOldInvoice = async (payment: UnassignedPayment, invoice: InvoiceListItem) => {
++    setActionLoading(true);
++    setModalError(null);
++    try {
++      const history = await fetchInvoicePaymentHistory(invoice.id);
++      const allocation = history.find(
++        (item) => item.transaction_id === payment.id && !item.is_reversed,
++      );
++      if (!allocation) {
++        setModalError('Brak aktywnego przypisania tej płatności do wybranej faktury');
++        return;
++      }
++      setSelectedAllocation(allocation);
++      setModalMode('reassign_new');
++      setInvoiceQuery('');
++      setInvoiceResults([]);
++    } catch (err) {
++      if (handleAuthError(err)) {
++        return;
++      }
++      setModalError(err instanceof Error ? err.message : 'Nie udało się pobrać historii płatności');
++    } finally {
++      setActionLoading(false);
++    }
++  };
++
++  const handleReassignNewInvoice = async (payment: UnassignedPayment, invoice: InvoiceListItem) => {
++    if (!selectedAllocation) {
++      setModalError('Brak przypisania do zmiany');
++      return;
++    }
++    setActionLoading(true);
++    setModalError(null);
++    try {
++      await reversePaymentAllocation(selectedAllocation.id);
++      await allocatePayment(payment.id, invoice.id, selectedAllocation.allocated_amount);
++      closeModal();
++      setSuccessMessage(
++        `Zmieniono przypisanie na ${invoiceDisplayNumber(invoice)} (${formatPln(selectedAllocation.allocated_amount)})`,
++      );
++      await load();
++    } catch (err) {
++      if (handleAuthError(err)) {
++        return;
++      }
++      setModalError(err instanceof Error ? err.message : 'Nie udało się zmienić przypisania');
++    } finally {
++      setActionLoading(false);
++    }
++  };
++
++  const handleInvoicePick = async (invoice: InvoiceListItem) => {
++    if (!activePayment || actionLoading) {
++      return;
++    }
++    if (modalMode === 'assign') {
++      await handleAssign(activePayment, invoice);
++      return;
++    }
++    if (modalMode === 'reassign_old') {
++      await handleReassignOldInvoice(activePayment, invoice);
++      return;
++    }
++    if (modalMode === 'reassign_new') {
++      await handleReassignNewInvoice(activePayment, invoice);
++    }
++  };
++
++  const modalTitle =
++    modalMode === 'assign'
++      ? 'Wybierz fakturę'
++      : modalMode === 'reassign_old'
++        ? 'Faktura z błędnym przypisaniem'
++        : modalMode === 'reassign_new'
++          ? 'Nowa faktura'
++          : '';
++
+   return (
+-    <ScreenShell
+-      title="Płatności do przypisania"
+-      subtitle={`${unassignedPayments.length} transakcji · ${formatPln(unassignedPayments.reduce((s, p) => s + p.amount, 0))}`}
+-      showBack
+-      scroll
+-    >
+-      {unassignedPayments.map((p) => (
+-        <Pressable key={p.id} style={styles.card}>
+-          <View style={styles.cardTop}>
+-            <Text style={styles.counterparty}>{p.counterparty}</Text>
+-            <Text style={styles.amount}>{formatPln(p.amount)}</Text>
+-          </View>
+-          <Text style={styles.title}>{p.title}</Text>
+-          <Text style={styles.date}>{p.date}</Text>
+-          <View style={styles.actions}>
+-            <Text style={styles.actionBtn}>Przypisz do faktury →</Text>
++    <ScreenShell title="Płatności do przypisania" subtitle={subtitle} showBack scroll>
++      {successMessage ? (
++        <View style={styles.successBox}>
++          <Text style={styles.successText}>{successMessage}</Text>
++          <Pressable onPress={() => setSuccessMessage(null)}>
++            <Text style={styles.successDismiss}>Zamknij</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie płatności…</Text>
++        </View>
++      ) : null}
++
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error && payments.length === 0 ? (
++        <Text style={styles.emptyText}>Brak płatności do przypisania</Text>
++      ) : null}
++
++      {!loading && !error
++        ? payments.map((p) => (
++            <View key={p.id} style={styles.card}>
++              <View style={styles.cardTop}>
++                <Text style={styles.counterparty}>{unassignedPaymentCounterparty(p)}</Text>
++                <Text style={styles.amount}>{formatPln(unassignedPaymentDisplayAmount(p))}</Text>
++              </View>
++              <Text style={styles.title}>{p.title?.trim() || '—'}</Text>
++              <Text style={styles.date}>{formatIssueDate(p.transaction_date)}</Text>
++              {p.counterparty_account ? (
++                <Text style={styles.account}>{p.counterparty_account}</Text>
++              ) : null}
++              <View style={styles.actions}>
++                {canAssign(p) ? (
++                  <Pressable style={styles.actionBtn} onPress={() => openAssignModal(p)}>
++                    <Text style={styles.actionBtnText}>Przypisz do faktury →</Text>
++                  </Pressable>
++                ) : null}
++                {canReassign(p) ? (
++                  <Pressable style={styles.actionBtnSecondary} onPress={() => openReassignModal(p)}>
++                    <Text style={styles.actionBtnSecondaryText}>Zmień przypisanie</Text>
++                  </Pressable>
++                ) : null}
++              </View>
++            </View>
++          ))
++        : null}
++
++      <Modal visible={modalMode !== null} animationType="slide" transparent onRequestClose={closeModal}>
++        <View style={styles.modalBackdrop}>
++          <View style={styles.modalCard}>
++            <Text style={styles.modalTitle}>{modalTitle}</Text>
++            {activePayment ? (
++              <Text style={styles.modalMeta}>
++                {unassignedPaymentCounterparty(activePayment)} ·{' '}
++                {formatPln(unassignedPaymentDisplayAmount(activePayment))}
++              </Text>
++            ) : null}
++
++            <SearchBar
++              value={invoiceQuery}
++              onChangeText={setInvoiceQuery}
++              placeholder="Numer faktury lub kontrahent…"
++            />
++
++            {invoiceSearchLoading ? (
++              <ActivityIndicator color={colors.gold} style={styles.modalSpinner} />
++            ) : null}
++
++            {modalError ? <Text style={styles.modalError}>{modalError}</Text> : null}
++
++            {actionLoading ? (
++              <View style={styles.modalActionBox}>
++                <ActivityIndicator color={colors.gold} />
++                <Text style={styles.modalActionText}>Przetwarzanie…</Text>
++              </View>
++            ) : (
++              invoiceResults.map((inv) => (
++                <Pressable
++                  key={inv.id}
++                  style={styles.invoiceRow}
++                  onPress={() => handleInvoicePick(inv)}
++                >
++                  <Text style={styles.invoiceNumber}>{invoiceDisplayNumber(inv)}</Text>
++                  <Text style={styles.invoiceContractor}>{contractorNameFromListItem(inv)}</Text>
++                  <Text style={styles.invoiceAmount}>{formatPln(invoiceListDisplayAmount(inv))}</Text>
++                </Pressable>
++              ))
++            )}
++
++            {invoiceQuery.trim().length >= 2 &&
++            !invoiceSearchLoading &&
++            !actionLoading &&
++            invoiceResults.length === 0 &&
++            !modalError ? (
++              <Text style={styles.modalEmpty}>Brak faktur dla podanego wyszukiwania</Text>
++            ) : null}
++
++            <Pressable style={styles.modalCloseBtn} onPress={closeModal} disabled={actionLoading}>
++              <Text style={styles.modalCloseText}>Anuluj</Text>
++            </Pressable>
+           </View>
+-        </Pressable>
+-      ))}
+-      <Text style={styles.hint}>Prototyp — przypisanie bez akcji backendowej.</Text>
++        </View>
++      </Modal>
+     </ScreenShell>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
++  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
++  successBox: {
++    backgroundColor: colors.goldGlow,
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: colors.goldDim,
++    padding: 12,
++    gap: 6,
++  },
++  successText: { color: colors.text, fontSize: 14 },
++  successDismiss: { color: colors.gold, fontSize: 13, fontWeight: '600' },
+   card: {
+     backgroundColor: colors.surface,
+     borderRadius: 14,
+@@ -43,7 +429,49 @@ const styles = StyleSheet.create({
+   amount: { color: colors.gold, fontSize: 17, fontWeight: '800' },
+   title: { color: colors.textMuted, fontSize: 13 },
+   date: { color: colors.textDim, fontSize: 11 },
+-  actions: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
+-  actionBtn: { color: colors.gold, fontSize: 13, fontWeight: '600' },
+-  hint: { color: colors.textDim, fontSize: 11, textAlign: 'center', marginTop: 8 },
++  account: { color: colors.textDim, fontSize: 10 },
++  actions: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border, gap: 8 },
++  actionBtn: { paddingVertical: 4 },
++  actionBtnText: { color: colors.gold, fontSize: 13, fontWeight: '600' },
++  actionBtnSecondary: { paddingVertical: 2 },
++  actionBtnSecondaryText: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
++  modalBackdrop: {
++    flex: 1,
++    backgroundColor: 'rgba(0,0,0,0.65)',
++    justifyContent: 'flex-end',
++  },
++  modalCard: {
++    backgroundColor: colors.bg,
++    borderTopLeftRadius: 16,
++    borderTopRightRadius: 16,
++    padding: 16,
++    gap: 10,
++    maxHeight: '85%',
++  },
++  modalTitle: { color: colors.text, fontSize: 18, fontWeight: '700' },
++  modalMeta: { color: colors.textMuted, fontSize: 13 },
++  modalSpinner: { marginVertical: 8 },
++  modalError: { color: colors.danger, fontSize: 14 },
++  modalActionBox: { alignItems: 'center', gap: 8, paddingVertical: 12 },
++  modalActionText: { color: colors.textMuted, fontSize: 14 },
++  modalEmpty: { color: colors.textDim, fontSize: 13, fontStyle: 'italic' },
++  invoiceRow: {
++    backgroundColor: colors.surface,
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++    padding: 12,
++    gap: 3,
++  },
++  invoiceNumber: { color: colors.text, fontSize: 14, fontWeight: '600' },
++  invoiceContractor: { color: colors.textMuted, fontSize: 12 },
++  invoiceAmount: { color: colors.gold, fontSize: 13, fontWeight: '700' },
++  modalCloseBtn: {
++    marginTop: 4,
++    paddingVertical: 12,
++    alignItems: 'center',
++    borderTopWidth: 1,
++    borderTopColor: colors.border,
++  },
++  modalCloseText: { color: colors.textMuted, fontSize: 15, fontWeight: '600' },
+ });
+diff --git a/mobile-expo/app/purchase-invoices.tsx b/mobile-expo/app/purchase-invoices.tsx
+index 8eca5de..27e0944 100644
+--- a/mobile-expo/app/purchase-invoices.tsx
++++ b/mobile-expo/app/purchase-invoices.tsx
+@@ -1,32 +1,73 @@
+-import { useMemo, useState } from 'react';
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
+-import { useRouter } from 'expo-router';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import {
++  contractorNameFromListItem,
++  dueLabel,
++  fetchInvoices,
++  InvoiceListItem,
++  invoiceDisplayNumber,
++  invoiceListDisplayAmount,
++  normalizePaymentStatus,
++  parseMonthParam,
++} from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+ import { SearchBar } from '@/components/SearchBar';
+-import { dueLabel, formatPln, purchaseInvoices } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
+ type Filter = 'all' | 'ksef' | 'unpaid' | 'paid';
+ 
+ export default function PurchaseInvoicesScreen() {
+   const router = useRouter();
++  const { month: rawMonth } = useLocalSearchParams<{ month?: string }>();
++  const month = parseMonthParam(rawMonth);
++  const { logout } = useAuth();
++  const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
+   const [query, setQuery] = useState('');
+   const [filter, setFilter] = useState<Filter>('all');
+ 
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const res = await fetchInvoices({ direction: 'purchase', month });
++      setInvoices(res.items);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setInvoices([]);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać faktur zakupu');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router, month]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
+   const items = useMemo(() => {
+-    return purchaseInvoices.filter((inv) => {
+-      if (filter === 'ksef' && !inv.ksefNumber) return false;
+-      if (filter === 'unpaid' && inv.status !== 'unpaid') return false;
+-      if (filter === 'paid' && inv.status !== 'paid') return false;
++    return invoices.filter((inv) => {
++      const status = normalizePaymentStatus(inv.payment_status);
++      if (filter === 'ksef' && !inv.ksef_reference_number) return false;
++      if (filter === 'unpaid' && status !== 'unpaid') return false;
++      if (filter === 'paid' && status !== 'paid') return false;
+       const q = query.trim().toLowerCase();
+       if (!q) return true;
+-      return (
+-        inv.number.toLowerCase().includes(q) ||
+-        inv.contractorName.toLowerCase().includes(q) ||
+-        (inv.ksefNumber ?? '').toLowerCase().includes(q)
+-      );
++      const number = invoiceDisplayNumber(inv).toLowerCase();
++      const contractor = contractorNameFromListItem(inv).toLowerCase();
++      const ksef = (inv.ksef_reference_number ?? '').toLowerCase();
++      return number.includes(q) || contractor.includes(q) || ksef.includes(q);
+     });
+-  }, [query, filter]);
++  }, [invoices, query, filter]);
+ 
+   const chips: { key: Filter; label: string }[] = [
+     { key: 'all', label: 'Wszystkie' },
+@@ -36,7 +77,12 @@ export default function PurchaseInvoicesScreen() {
+   ];
+ 
+   return (
+-    <ScreenShell title="Faktury zakupu" showBack scroll>
++    <ScreenShell
++      title="Faktury zakupu"
++      subtitle={month ? `Okres: ${month}` : undefined}
++      showBack
++      scroll
++    >
+       <SearchBar value={query} onChangeText={setQuery} placeholder="Dostawca, numer, KSeF…" />
+       <View style={styles.filters}>
+         {chips.map((f) => (
+@@ -49,17 +95,45 @@ export default function PurchaseInvoicesScreen() {
+           </Pressable>
+         ))}
+       </View>
+-      {items.map((inv) => (
+-        <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
+-          <View style={styles.rowMain}>
+-            <Text style={styles.name}>{inv.contractorName}</Text>
+-            <Text style={styles.number}>{inv.number}</Text>
+-            {inv.ksefNumber ? <Text style={styles.ksef}>{inv.ksefNumber}</Text> : null}
+-            <Text style={styles.due}>{dueLabel(inv.dueDate)}</Text>
+-          </View>
+-          <Text style={styles.amount}>{formatPln(inv.gross)}</Text>
+-        </Pressable>
+-      ))}
++
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie faktur…</Text>
++        </View>
++      ) : null}
++
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error && items.length === 0 ? (
++        <Text style={styles.emptyText}>Brak faktur zakupu</Text>
++      ) : null}
++
++      {!loading && !error
++        ? items.map((inv) => {
++            const isOverdue = inv.overdue_days != null && inv.overdue_days > 0;
++            return (
++            <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
++              <View style={styles.rowMain}>
++                <Text style={styles.name}>{contractorNameFromListItem(inv)}</Text>
++                <Text style={styles.number}>{invoiceDisplayNumber(inv)}</Text>
++                {inv.ksef_reference_number ? (
++                  <Text style={styles.ksef}>{inv.ksef_reference_number}</Text>
++                ) : null}
++                <Text style={[styles.due, isOverdue && styles.dueOver]}>{dueLabel(inv.due_date)}</Text>
++              </View>
++              <Text style={styles.amount}>{formatPln(invoiceListDisplayAmount(inv))}</Text>
++            </Pressable>
++            );
++          })
++        : null}
+     </ScreenShell>
+   );
+ }
+@@ -77,6 +151,24 @@ const styles = StyleSheet.create({
+   chipActive: { borderColor: colors.gold, backgroundColor: colors.goldGlow },
+   chipText: { color: colors.textMuted, fontSize: 12 },
+   chipTextActive: { color: colors.gold, fontWeight: '600' },
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
++  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
+   row: {
+     flexDirection: 'row',
+     alignItems: 'center',
+@@ -91,5 +183,6 @@ const styles = StyleSheet.create({
+   number: { color: colors.textMuted, fontSize: 12 },
+   ksef: { color: colors.goldDim, fontSize: 10 },
+   due: { color: colors.textMuted, fontSize: 11 },
++  dueOver: { color: colors.danger },
+   amount: { color: colors.text, fontSize: 15, fontWeight: '700' },
+ });
+diff --git a/mobile-expo/app/sales-invoices.tsx b/mobile-expo/app/sales-invoices.tsx
+index e27631e..2b5bb36 100644
+--- a/mobile-expo/app/sales-invoices.tsx
++++ b/mobile-expo/app/sales-invoices.tsx
+@@ -1,9 +1,21 @@
+-import { useMemo, useState } from 'react';
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
+-import { useRouter } from 'expo-router';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useLocalSearchParams, useRouter } from 'expo-router';
++import {
++  contractorNameFromListItem,
++  dueLabel,
++  fetchInvoices,
++  InvoiceListItem,
++  invoiceDisplayNumber,
++  invoiceListDisplayAmount,
++  normalizePaymentStatus,
++  parseMonthParam,
++} from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+ import { SearchBar } from '@/components/SearchBar';
+-import { dueLabel, formatPln, salesInvoices } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
+ type Filter = 'all' | 'unpaid' | 'partial' | 'paid';
+@@ -17,20 +29,57 @@ const FILTERS: { key: Filter; label: string }[] = [
+ 
+ export default function SalesInvoicesScreen() {
+   const router = useRouter();
++  const { month: rawMonth } = useLocalSearchParams<{ month?: string }>();
++  const month = parseMonthParam(rawMonth);
++  const { logout } = useAuth();
++  const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
+   const [query, setQuery] = useState('');
+   const [filter, setFilter] = useState<Filter>('all');
+ 
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const res = await fetchInvoices({ direction: 'sale', month });
++      setInvoices(res.items);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setInvoices([]);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać faktur sprzedaży');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router, month]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
+   const items = useMemo(() => {
+-    return salesInvoices.filter((inv) => {
+-      if (filter !== 'all' && inv.status !== filter) return false;
++    return invoices.filter((inv) => {
++      const status = normalizePaymentStatus(inv.payment_status);
++      if (filter !== 'all' && status !== filter) return false;
+       const q = query.trim().toLowerCase();
+       if (!q) return true;
+-      return inv.number.toLowerCase().includes(q) || inv.contractorName.toLowerCase().includes(q);
++      const number = invoiceDisplayNumber(inv).toLowerCase();
++      const contractor = contractorNameFromListItem(inv).toLowerCase();
++      return number.includes(q) || contractor.includes(q);
+     });
+-  }, [query, filter]);
++  }, [invoices, query, filter]);
+ 
+   return (
+-    <ScreenShell title="Faktury sprzedaży" showBack scroll>
++    <ScreenShell
++      title="Faktury sprzedaży"
++      subtitle={month ? `Okres: ${month}` : undefined}
++      showBack
++      scroll
++    >
+       <SearchBar value={query} onChangeText={setQuery} placeholder="Numer lub kontrahent…" />
+       <View style={styles.filters}>
+         {FILTERS.map((f) => (
+@@ -43,16 +92,45 @@ export default function SalesInvoicesScreen() {
+           </Pressable>
+         ))}
+       </View>
+-      {items.map((inv) => (
+-        <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
+-          <View style={styles.rowMain}>
+-            <Text style={styles.name}>{inv.contractorName}</Text>
+-            <Text style={styles.number}>{inv.number}</Text>
+-            <Text style={[styles.due, inv.status === 'unpaid' && styles.dueOver]}>{dueLabel(inv.dueDate)}</Text>
+-          </View>
+-          <Text style={styles.amount}>{formatPln(inv.gross)}</Text>
+-        </Pressable>
+-      ))}
++
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie faktur…</Text>
++        </View>
++      ) : null}
++
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error && items.length === 0 ? (
++        <Text style={styles.emptyText}>Brak faktur sprzedaży</Text>
++      ) : null}
++
++      {!loading && !error
++        ? items.map((inv) => {
++            const status = normalizePaymentStatus(inv.payment_status);
++            const isOverdue = inv.overdue_days != null && inv.overdue_days > 0;
++            return (
++              <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
++                <View style={styles.rowMain}>
++                  <Text style={styles.name}>{contractorNameFromListItem(inv)}</Text>
++                  <Text style={styles.number}>{invoiceDisplayNumber(inv)}</Text>
++                  <Text style={[styles.due, (status === 'unpaid' || isOverdue) && styles.dueOver]}>
++                    {dueLabel(inv.due_date)}
++                  </Text>
++                </View>
++                <Text style={styles.amount}>{formatPln(invoiceListDisplayAmount(inv))}</Text>
++              </Pressable>
++            );
++          })
++        : null}
+     </ScreenShell>
+   );
+ }
+@@ -70,6 +148,24 @@ const styles = StyleSheet.create({
+   chipActive: { borderColor: colors.gold, backgroundColor: colors.goldGlow },
+   chipText: { color: colors.textMuted, fontSize: 12 },
+   chipTextActive: { color: colors.gold, fontWeight: '600' },
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
++  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
+   row: {
+     flexDirection: 'row',
+     alignItems: 'center',
+diff --git a/mobile-expo/app/settlements.tsx b/mobile-expo/app/settlements.tsx
+index cf4a521..f3d102f 100644
+--- a/mobile-expo/app/settlements.tsx
++++ b/mobile-expo/app/settlements.tsx
+@@ -1,20 +1,77 @@
+-import { useState } from 'react';
+-import { Pressable, StyleSheet, Text, View } from 'react-native';
+-import { useRouter } from 'expo-router';
++import { useCallback, useEffect, useMemo, useState } from 'react';
++import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
++import { useRouter, Href } from 'expo-router';
++import {
++  dueLabel,
++  fetchSettlements,
++  parseAmount,
++  SettlementItem,
++  settlementContractorName,
++  settlementDisplayNumber,
++} from '@/api/mobile';
++import { isAuthFailure } from '@/api/auth';
++import { useAuth } from '@/auth/AuthContext';
+ import { ScreenShell } from '@/components/ScreenShell';
+-import { debtors, dueLabel, formatPln, purchaseInvoices, salesInvoices } from '@/data/mock';
++import { formatPln } from '@/data/mock';
+ import { colors } from '@/theme/colors';
+ 
+ type Tab = 'receivables' | 'payables';
+ 
++function uniqueContractors(items: SettlementItem[]): number {
++  const names = new Set(
++    items.map((item) => settlementContractorName(item).toLowerCase()),
++  );
++  return names.size;
++}
++
++function sumRemaining(items: SettlementItem[]): number {
++  return items.reduce((sum, item) => sum + parseAmount(item.remaining_amount), 0);
++}
++
+ export default function SettlementsScreen() {
+   const router = useRouter();
++  const { logout } = useAuth();
+   const [tab, setTab] = useState<Tab>('receivables');
++  const [debtors, setDebtors] = useState<SettlementItem[]>([]);
++  const [creditors, setCreditors] = useState<SettlementItem[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
+ 
+-  const receivables = salesInvoices.filter((i) => i.status !== 'paid');
+-  const payables = purchaseInvoices.filter((i) => i.status !== 'paid');
++  const load = useCallback(async () => {
++    setLoading(true);
++    setError(null);
++    try {
++      const res = await fetchSettlements();
++      setDebtors(res.debtors);
++      setCreditors(res.creditors);
++    } catch (err) {
++      if (isAuthFailure(err)) {
++        logout();
++        router.replace('/login');
++        return;
++      }
++      setDebtors([]);
++      setCreditors([]);
++      setError(err instanceof Error ? err.message : 'Nie udało się pobrać rozrachunków');
++    } finally {
++      setLoading(false);
++    }
++  }, [logout, router]);
+ 
+-  const items = tab === 'receivables' ? receivables : payables;
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  const items = tab === 'receivables' ? debtors : creditors;
++
++  const summaryLabel = tab === 'receivables' ? 'Agregat dłużników' : 'Agregat wierzycieli';
++  const summaryValue = useMemo(() => {
++    const count = uniqueContractors(items);
++    const total = sumRemaining(items);
++    return `${count} kontrahentów · ${formatPln(total)}`;
++  }, [items]);
++
++  const summaryRoute = (tab === 'receivables' ? '/debtors' : '/creditors') as Href;
+ 
+   return (
+     <ScreenShell title="Rozrachunki" subtitle="Należności i zobowiązania" showBack scroll>
+@@ -33,33 +90,54 @@ export default function SettlementsScreen() {
+         </Pressable>
+       </View>
+ 
+-      <Pressable style={styles.summaryCard} onPress={() => router.push('/debtors')}>
+-        <Text style={styles.summaryLabel}>
+-          {tab === 'receivables' ? 'Agregat dłużników (demo)' : 'Wierzyciele — widok listy'}
+-        </Text>
+-        <Text style={styles.summaryValue}>
+-          {tab === 'receivables'
+-            ? `${debtors.length} kontrahentów · ${formatPln(debtors.reduce((s, d) => s + d.totalDue, 0))}`
+-            : `${formatPln(payables.reduce((s, i) => s + (i.gross - i.paid), 0))} do zapłaty`}
+-        </Text>
+-      </Pressable>
+-
+-      {items.map((inv) => {
+-        const remaining = inv.gross - inv.paid;
+-        return (
+-          <Pressable key={inv.id} style={styles.row} onPress={() => router.push(`/invoice/${inv.id}`)}>
+-            <View style={styles.rowMain}>
+-              <Text style={styles.name}>{inv.contractorName}</Text>
+-              <Text style={styles.number}>{inv.number}</Text>
+-              <Text style={styles.due}>{dueLabel(inv.dueDate)}</Text>
+-            </View>
+-            <View style={styles.rowRight}>
+-              <Text style={styles.amount}>{formatPln(remaining)}</Text>
+-              <Text style={styles.remaining}>pozostało</Text>
+-            </View>
++      {loading ? (
++        <View style={styles.stateBox}>
++          <ActivityIndicator color={colors.gold} size="large" />
++          <Text style={styles.stateText}>Ładowanie rozrachunków…</Text>
++        </View>
++      ) : null}
++
++      {!loading && error ? (
++        <View style={styles.stateBox}>
++          <Text style={styles.errorText}>{error}</Text>
++          <Pressable style={styles.retryBtn} onPress={load}>
++            <Text style={styles.retryText}>Spróbuj ponownie</Text>
++          </Pressable>
++        </View>
++      ) : null}
++
++      {!loading && !error ? (
++        <>
++          <Pressable style={styles.summaryCard} onPress={() => router.push(summaryRoute)}>
++            <Text style={styles.summaryLabel}>{summaryLabel}</Text>
++            <Text style={styles.summaryValue}>{summaryValue}</Text>
+           </Pressable>
+-        );
+-      })}
++
++          {items.length === 0 ? (
++            <Text style={styles.emptyText}>
++              {tab === 'receivables' ? 'Brak otwartych należności' : 'Brak otwartych zobowiązań'}
++            </Text>
++          ) : null}
++
++          {items.map((inv) => (
++            <Pressable
++              key={inv.invoice_id}
++              style={styles.row}
++              onPress={() => router.push(`/invoice/${inv.invoice_id}`)}
++            >
++              <View style={styles.rowMain}>
++                <Text style={styles.name}>{settlementContractorName(inv)}</Text>
++                <Text style={styles.number}>{settlementDisplayNumber(inv)}</Text>
++                <Text style={styles.due}>{dueLabel(inv.due_date)}</Text>
++              </View>
++              <View style={styles.rowRight}>
++                <Text style={styles.amount}>{formatPln(inv.remaining_amount)}</Text>
++                <Text style={styles.remaining}>pozostało</Text>
++              </View>
++            </Pressable>
++          ))}
++        </>
++      ) : null}
+     </ScreenShell>
+   );
+ }
+@@ -78,6 +156,24 @@ const styles = StyleSheet.create({
+   tabActive: { borderColor: colors.gold, backgroundColor: colors.goldGlow },
+   tabText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+   tabTextActive: { color: colors.gold },
++  stateBox: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 12,
++    paddingVertical: 32,
++  },
++  stateText: { color: colors.textMuted, fontSize: 16 },
++  errorText: { color: colors.danger, fontSize: 16, textAlign: 'center' },
++  retryBtn: {
++    backgroundColor: colors.surfaceElevated,
++    borderRadius: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 10,
++    borderWidth: 1,
++    borderColor: colors.border,
++  },
++  retryText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
++  emptyText: { color: colors.textMuted, fontSize: 15, paddingVertical: 8 },
+   summaryCard: {
+     backgroundColor: colors.surfaceElevated,
+     borderRadius: 12,
+diff --git a/mobile-expo/src/api/mobile.ts b/mobile-expo/src/api/mobile.ts
+index e31ba7b..2f1b502 100644
+--- a/mobile-expo/src/api/mobile.ts
++++ b/mobile-expo/src/api/mobile.ts
+@@ -1,5 +1,6 @@
+ import { apiClient } from './client';
+-import { ensureApiAuth } from './auth';
++import { ensureApiAuth, AuthError } from './auth';
++import { API_V1_PREFIX, getApiBaseUrl } from './config';
+ 
+ export type RecentPurchaseInvoice = {
+   id: string;
+@@ -35,6 +36,551 @@ export async function fetchDashboard(period: string): Promise<DashboardResponse>
+   return apiClient.get<DashboardResponse>(`/mobile/dashboard?period=${encodeURIComponent(period)}`);
+ }
+ 
++export type SettlementInvoiceItem = {
++  invoice_id: string;
++  number: string;
++  issue_date: string;
++  due_date: string | null;
++  amount_due: string;
++  overdue_days: number | null;
++};
++
++export type CounterpartyListItem = {
++  id: string;
++  name: string;
++  total_due: string;
++  overdue_due: string;
++  invoices_count: number;
++  overdue_invoices_count: number;
++  last_invoice_due_date: string | null;
++};
++
++export type CounterpartyDetail = CounterpartyListItem & {
++  invoices: SettlementInvoiceItem[];
++};
++
++type CounterpartiesListResponse = {
++  items: CounterpartyListItem[];
++};
++
++export async function fetchDebtors(): Promise<CounterpartyListItem[]> {
++  ensureApiAuth();
++  const res = await apiClient.get<CounterpartiesListResponse>('/mobile/debtors');
++  return res.items;
++}
++
++export async function fetchDebtor(id: string): Promise<CounterpartyDetail> {
++  ensureApiAuth();
++  return apiClient.get<CounterpartyDetail>(`/mobile/debtors/${encodeURIComponent(id)}`);
++}
++
++export async function fetchCreditors(): Promise<CounterpartyListItem[]> {
++  ensureApiAuth();
++  const res = await apiClient.get<CounterpartiesListResponse>('/mobile/creditors');
++  return res.items;
++}
++
++export async function fetchCreditor(id: string): Promise<CounterpartyDetail> {
++  ensureApiAuth();
++  return apiClient.get<CounterpartyDetail>(`/mobile/creditors/${encodeURIComponent(id)}`);
++}
++
++export type InvoiceItemResponse = {
++  id: string | null;
++  name: string;
++  quantity: string;
++  unit: string;
++  unit_price_net?: string | null;
++  vat_rate?: string | null;
++  /** API standard (InvoiceItemResponse backend). */
++  net_total?: string | null;
++  vat_total?: string | null;
++  gross_total?: string | null;
++  /** Aliasy zgodne z kolumnami DB / starszymi odpowiedziami API. */
++  net_amount?: string | null;
++  vat_amount?: string | null;
++  gross_amount?: string | null;
++  sort_order?: number;
++  isbn?: string | null;
++};
++
++export type InvoiceItemDisplay = {
++  lineNumber: number;
++  name: string;
++  quantityLabel: string;
++  netLabel: string;
++  vatRateLabel: string;
++  vatLabel: string;
++};
++
++function parseOptionalAmount(raw: string | null | undefined): number | null {
++  if (raw == null) {
++    return null;
++  }
++  const trimmed = String(raw).trim();
++  if (!trimmed) {
++    return null;
++  }
++  const n = parseFloat(trimmed);
++  return Number.isNaN(n) ? null : n;
++}
++
++function positiveAmount(raw: string | null | undefined): number | null {
++  const n = parseOptionalAmount(raw);
++  return n != null && n > 0 ? n : null;
++}
++
++const NET_FIELD_KEYS = ['net_total', 'net_amount'] as const;
++const VAT_FIELD_KEYS = ['vat_total', 'vat_amount'] as const;
++const GROSS_FIELD_KEYS = ['gross_total', 'gross_amount'] as const;
++
++function pickRawField(item: InvoiceItemResponse, keys: readonly string[]): string | undefined {
++  const row = item as Record<string, unknown>;
++  for (const key of keys) {
++    const value = row[key];
++    if (value == null) {
++      continue;
++    }
++    const trimmed = String(value).trim();
++    if (trimmed) {
++      return trimmed;
++    }
++  }
++  return undefined;
++}
++
++function pickPositiveField(item: InvoiceItemResponse, keys: readonly string[]): number | null {
++  return positiveAmount(pickRawField(item, keys));
++}
++
++function pickAmountField(item: InvoiceItemResponse, keys: readonly string[]): number | null {
++  return parseOptionalAmount(pickRawField(item, keys));
++}
++
++export function formatAmountOrDash(value: number | null): string {
++  if (value == null) {
++    return '—';
++  }
++  return `${value.toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} zł`;
++}
++
++export function formatVatRateOrDash(value: number | null): string {
++  if (value == null) {
++    return '—';
++  }
++  const normalized =
++    Math.abs(value - Math.round(value)) < 0.001
++      ? String(Math.round(value))
++      : value.toFixed(2).replace(/\.?0+$/, '');
++  return `${normalized}%`;
++}
++
++export function resolveInvoiceItemFields(item: InvoiceItemResponse): {
++  net: number | null;
++  vat: number | null;
++  vatRate: number | null;
++} {
++  const qty = parseOptionalAmount(item.quantity) ?? 1;
++  const unitPrice = positiveAmount(item.unit_price_net);
++  let net = pickPositiveField(item, NET_FIELD_KEYS);
++  let vat = pickAmountField(item, VAT_FIELD_KEYS);
++  const gross = pickPositiveField(item, GROSS_FIELD_KEYS);
++  const rateRaw = parseOptionalAmount(item.vat_rate);
++  let vatRate = rateRaw != null && rateRaw >= 0 ? rateRaw : null;
++
++  if (net == null && unitPrice != null) {
++    net = parseFloat((qty * unitPrice).toFixed(2));
++  }
++
++  if (net == null && gross != null && vatRate != null && vatRate > 0) {
++    net = parseFloat((gross / (1 + vatRate / 100)).toFixed(2));
++  }
++
++  if (net == null && gross != null && vat != null && vat > 0 && gross >= vat) {
++    net = parseFloat((gross - vat).toFixed(2));
++  }
++
++  if (net == null && gross != null && vatRate === 0) {
++    net = gross;
++    if (vat == null) {
++      vat = 0;
++    }
++  }
++
++  if (vat == null && net != null && net > 0 && vatRate != null) {
++    vat = parseFloat((net * vatRate / 100).toFixed(2));
++  }
++
++  if (vat == null && net != null && gross != null && gross > net) {
++    vat = parseFloat((gross - net).toFixed(2));
++  }
++
++  if (vatRate == null && net != null && net > 0 && vat != null && vat >= 0) {
++    vatRate = parseFloat(((vat / net) * 100).toFixed(2));
++  }
++
++  if (net != null && net <= 0) {
++    net = null;
++  }
++  if (vat != null && vat < 0) {
++    vat = null;
++  }
++
++  return { net, vat, vatRate };
++}
++
++export function mapInvoiceItemForDisplay(item: InvoiceItemResponse, index: number): InvoiceItemDisplay {
++  const { net, vat, vatRate } = resolveInvoiceItemFields(item);
++  const qty = parseOptionalAmount(item.quantity);
++  const unit = item.unit?.trim() || 'szt.';
++  const quantityLabel =
++    qty != null ? `${qty.toLocaleString('pl-PL', { maximumFractionDigits: 4 })} ${unit}` : '—';
++
++  return {
++    lineNumber: item.sort_order != null && item.sort_order > 0 ? item.sort_order : index + 1,
++    name: item.name?.trim() || 'Pozycja',
++    quantityLabel,
++    netLabel: formatAmountOrDash(net),
++    vatRateLabel: formatVatRateOrDash(vatRate),
++    vatLabel: vat != null ? formatAmountOrDash(vat) : '—',
++  };
++}
++
++export type InvoiceResponse = {
++  id: string;
++  number_local: string | null;
++  issue_date: string;
++  due_date: string | null;
++  ksef_reference_number: string | null;
++  direction: 'sale' | 'purchase';
++  seller_snapshot: Record<string, unknown>;
++  buyer_snapshot: Record<string, unknown>;
++  items: InvoiceItemResponse[];
++  total_gross: string;
++  payment_status: string;
++  remaining_amount: string | null;
++  paid_amount: string | null;
++};
++
++export async function fetchInvoice(id: string): Promise<InvoiceResponse> {
++  ensureApiAuth();
++  return apiClient.get<InvoiceResponse>(`/invoices/${encodeURIComponent(id)}`);
++}
++
++export type UnassignedPayment = {
++  id: string;
++  transaction_date: string;
++  amount: string;
++  remaining_amount: string;
++  counterparty_name: string | null;
++  counterparty_account: string | null;
++  title: string | null;
++  match_status: string;
++};
++
++type UnassignedPaymentsResponse = {
++  items: UnassignedPayment[];
++  total: number;
++  page: number;
++  size: number;
++};
++
++export async function fetchUnassignedPayments(params?: {
++  page?: number;
++  size?: number;
++}): Promise<UnassignedPaymentsResponse> {
++  ensureApiAuth();
++  const page = params?.page ?? 1;
++  const size = params?.size ?? 200;
++  const qs = new URLSearchParams({
++    match_status: 'unmatched',
++    page: String(page),
++    size: String(size),
++  });
++  return apiClient.get<UnassignedPaymentsResponse>(`/payments/transactions?${qs.toString()}`);
++}
++
++async function fetchTransactionsByStatus(
++  matchStatus: string,
++  size = 200,
++): Promise<UnassignedPayment[]> {
++  ensureApiAuth();
++  const qs = new URLSearchParams({
++    match_status: matchStatus,
++    page: '1',
++    size: String(size),
++  });
++  const res = await apiClient.get<UnassignedPaymentsResponse>(
++    `/payments/transactions?${qs.toString()}`,
++  );
++  return res.items;
++}
++
++export async function fetchPaymentsForAssignment(): Promise<{
++  items: UnassignedPayment[];
++  total: number;
++}> {
++  const [unmatchedRes, partial, manualReview] = await Promise.all([
++    fetchUnassignedPayments({ size: 200 }),
++    fetchTransactionsByStatus('partial'),
++    fetchTransactionsByStatus('manual_review'),
++  ]);
++  const merged = new Map<string, UnassignedPayment>();
++  for (const payment of [...unmatchedRes.items, ...partial, ...manualReview]) {
++    merged.set(payment.id, payment);
++  }
++  const items = Array.from(merged.values());
++  return { items, total: items.length };
++}
++
++export type PaymentAllocation = {
++  id: string;
++  transaction_id: string;
++  invoice_id: string;
++  allocated_amount: string;
++  is_reversed: boolean;
++};
++
++export async function allocatePayment(
++  transactionId: string,
++  invoiceId: string,
++  amount: string,
++): Promise<PaymentAllocation> {
++  ensureApiAuth();
++  return apiClient.post<PaymentAllocation>(
++    `/payments/transactions/${encodeURIComponent(transactionId)}/allocate`,
++    { invoice_id: invoiceId, amount },
++  );
++}
++
++export async function fetchInvoicePaymentHistory(
++  invoiceId: string,
++): Promise<PaymentAllocation[]> {
++  ensureApiAuth();
++  return apiClient.get<PaymentAllocation[]>(
++    `/payments/invoice/${encodeURIComponent(invoiceId)}/history`,
++  );
++}
++
++async function apiDelete(path: string): Promise<void> {
++  ensureApiAuth();
++  const token = apiClient.getToken();
++  const normalized = path.startsWith('/') ? path : `/${path}`;
++  const url = `${getApiBaseUrl()}${API_V1_PREFIX}${normalized}`;
++  const headers: Record<string, string> = { Accept: 'application/json' };
++  if (token) {
++    headers.Authorization = `Bearer ${token}`;
++  }
++  const response = await fetch(url, { method: 'DELETE', headers });
++  if (response.status === 401) {
++    throw new AuthError('Brak uwierzytelnienia');
++  }
++  if (!response.ok) {
++    const payload = await response.json().catch(() => null);
++    const message =
++      (payload as { error?: { message?: string }; detail?: string })?.error?.message ??
++      (payload as { detail?: string })?.detail ??
++      `HTTP ${response.status}`;
++    throw new Error(typeof message === 'string' ? message : `HTTP ${response.status}`);
++  }
++}
++
++export async function reversePaymentAllocation(allocationId: string): Promise<void> {
++  await apiDelete(`/payments/allocations/${encodeURIComponent(allocationId)}`);
++}
++
++export type SettlementItem = {
++  invoice_id: string;
++  number_local: string | null;
++  ksef_reference_number: string | null;
++  contractor_name: string | null;
++  currency: string;
++  issue_date: string;
++  due_date: string | null;
++  gross_total: string;
++  paid_amount: string;
++  remaining_amount: string;
++  payment_status: string;
++  side: string;
++};
++
++export type SettlementsResponse = {
++  debtors: SettlementItem[];
++  creditors: SettlementItem[];
++};
++
++export async function fetchSettlements(): Promise<SettlementsResponse> {
++  ensureApiAuth();
++  return apiClient.get<SettlementsResponse>('/payments/settlements?side=all');
++}
++
++export function settlementDisplayNumber(
++  item: Pick<SettlementItem, 'number_local' | 'ksef_reference_number'>,
++): string {
++  return item.number_local?.trim() || item.ksef_reference_number?.trim() || 'Brak numeru';
++}
++
++export function settlementContractorName(item: SettlementItem): string {
++  const name = item.contractor_name?.trim();
++  return name || 'Nieznany kontrahent';
++}
++
++export function unassignedPaymentDisplayAmount(payment: UnassignedPayment): string {
++  const remaining = parseAmount(payment.remaining_amount);
++  if (remaining > 0) {
++    return payment.remaining_amount;
++  }
++  return payment.amount;
++}
++
++export function unassignedPaymentCounterparty(payment: UnassignedPayment): string {
++  const name = payment.counterparty_name?.trim();
++  return name || 'Nieznany kontrahent';
++}
++
++export type InvoiceListItem = {
++  id: string;
++  number_local: string | null;
++  ksef_reference_number: string | null;
++  direction: 'sale' | 'purchase';
++  issue_date: string;
++  due_date: string | null;
++  total_gross: string;
++  payment_status: string;
++  remaining_amount: string | null;
++  seller_snapshot: Record<string, unknown>;
++  buyer_snapshot: Record<string, unknown>;
++  overdue_days: number | null;
++};
++
++type InvoiceListResponse = {
++  items: InvoiceListItem[];
++  total: number;
++  page: number;
++  size: number;
++};
++
++const MONTH_PARAM_PATTERN = /^\d{4}-\d{2}$/;
++
++export function parseMonthParam(value: string | string[] | undefined): string | undefined {
++  const raw = Array.isArray(value) ? value[0] : value;
++  if (!raw || !MONTH_PARAM_PATTERN.test(raw)) {
++    return undefined;
++  }
++  const month = Number(raw.split('-')[1]);
++  if (month < 1 || month > 12) {
++    return undefined;
++  }
++  return raw;
++}
++
++export async function fetchInvoices(params: {
++  direction: 'sale' | 'purchase';
++  page?: number;
++  size?: number;
++  month?: string;
++  number_filter?: string;
++}): Promise<InvoiceListResponse> {
++  ensureApiAuth();
++  const page = params.page ?? 1;
++  const size = params.size ?? 100;
++  const qs = new URLSearchParams({
++    direction: params.direction,
++    page: String(page),
++    size: String(size),
++  });
++  const month = params.month ? parseMonthParam(params.month) : undefined;
++  if (month) {
++    qs.set('month', month);
++  }
++  const numberFilter = params.number_filter?.trim();
++  if (numberFilter) {
++    qs.set('number_filter', numberFilter);
++  }
++  return apiClient.get<InvoiceListResponse>(`/invoices/?${qs.toString()}`);
++}
++
++export type RecentKsefPurchaseRow = {
++  id: string;
++  supplier_name: string;
++  number: string;
++  amount_gross: string;
++  issue_date: string;
++};
++
++export async function fetchRecentKsefPurchaseInvoices(limit = 5): Promise<RecentKsefPurchaseRow[]> {
++  const res = await fetchInvoices({ direction: 'purchase', size: 50 });
++  return res.items
++    .filter((inv) => Boolean(inv.ksef_reference_number?.trim()))
++    .sort((a, b) => b.issue_date.localeCompare(a.issue_date))
++    .slice(0, limit)
++    .map((inv) => ({
++      id: inv.id,
++      supplier_name: contractorNameFromListItem(inv),
++      number: invoiceDisplayNumber(inv),
++      amount_gross: inv.total_gross,
++      issue_date: inv.issue_date,
++    }));
++}
++
++export async function searchInvoices(query: string): Promise<InvoiceListItem[]> {
++  const q = query.trim();
++  if (q.length < 2) {
++    return [];
++  }
++  const [sales, purchases] = await Promise.all([
++    fetchInvoices({ direction: 'sale', size: 20, number_filter: q }),
++    fetchInvoices({ direction: 'purchase', size: 20, number_filter: q }),
++  ]);
++  return [...sales.items, ...purchases.items];
++}
++
++export function invoiceDisplayNumber(
++  inv: Pick<InvoiceListItem, 'number_local' | 'ksef_reference_number'>,
++): string {
++  return inv.number_local?.trim() || inv.ksef_reference_number?.trim() || 'Brak numeru';
++}
++
++export function invoiceListDisplayAmount(
++  inv: Pick<InvoiceListItem, 'total_gross' | 'remaining_amount'>,
++): string {
++  if (inv.remaining_amount != null) {
++    return inv.remaining_amount;
++  }
++  return inv.total_gross;
++}
++
++export function contractorNameFromListItem(inv: InvoiceListItem): string {
++  const snapshot = inv.direction === 'purchase' ? inv.seller_snapshot : inv.buyer_snapshot;
++  const name = snapshot.name;
++  return typeof name === 'string' && name.trim() ? name.trim() : 'Nieznany kontrahent';
++}
++
++export function normalizePaymentStatus(status: string | undefined): 'paid' | 'partial' | 'unpaid' {
++  const normalized = status?.toLowerCase();
++  if (normalized === 'paid' || normalized === 'unpaid') {
++    return normalized;
++  }
++  if (normalized === 'partial' || normalized === 'partially_paid') {
++    return 'partial';
++  }
++  return 'unpaid';
++}
++
++export function dueLabel(dueDate: string | null | undefined): string {
++  if (!dueDate) {
++    return 'brak terminu';
++  }
++  const due = new Date(dueDate.slice(0, 10));
++  const today = new Date();
++  today.setHours(0, 0, 0, 0);
++  due.setHours(0, 0, 0, 0);
++  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
++  if (diff > 0) return `za ${diff} dni`;
++  if (diff < 0) return `${Math.abs(diff)} dni po terminie`;
++  return 'termin dziś';
++}
++
+ export function parseAmount(value: string): number {
+   const n = parseFloat(value);
+   return Number.isNaN(n) ? 0 : n;
+diff --git a/tests/unit/test_ksef_sync_service.py b/tests/unit/test_ksef_sync_service.py
+index 7e18647..d11f9f4 100644
+--- a/tests/unit/test_ksef_sync_service.py
++++ b/tests/unit/test_ksef_sync_service.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ from datetime import date
++from decimal import Decimal
+ from types import SimpleNamespace
+ from unittest.mock import MagicMock
+ 
+@@ -96,7 +97,7 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
+     service.ksef_client.query_received_invoices.return_value = [
+         SimpleNamespace(
+             ksef_reference_number="KSEF-NEW",
+-            xml_bytes=b"""<?xml version="1.0" encoding="UTF-8"?>
++            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+ <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+   <Podmiot1>
+     <DaneIdentyfikacyjne>
+@@ -118,9 +119,16 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
+     <P_14_1>23.00</P_14_1>
+     <P_15>123.00</P_15>
+     <RodzajFaktury>VAT</RodzajFaktury>
++    <FaWiersz>
++      <P_7>Usługa testowa</P_7>
++      <P_8B>1</P_8B>
++      <P_9A>100.00</P_9A>
++      <P_11>100.00</P_11>
++      <P_12>23</P_12>
++    </FaWiersz>
+   </Fa>
+ </Faktura>
+-""",
++""".encode("utf-8"),
+         )
+     ]
+ 
+@@ -138,6 +146,114 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
+     assert saved.ksef_reference_number == "KSEF-NEW"
+ 
+ 
++def test_sync_received_invoices_skips_zero_line_items_when_totals_nonzero() -> None:
++    repo = _FakeInvoiceRepository()
++    service = _make_ksef_service_with_repo(repo)
++    service.ksef_client.query_received_invoices.return_value = [
++        SimpleNamespace(
++            ksef_reference_number="KSEF-ZERO-LINES",
++            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
++<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
++  <Podmiot1>
++    <DaneIdentyfikacyjne>
++      <NIP>1112223344</NIP>
++      <Nazwa>Sprzedawca SA</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot1>
++  <Podmiot2>
++    <DaneIdentyfikacyjne>
++      <NIP>9670402857</NIP>
++      <Nazwa>Nabywca Sp. z o.o.</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot2>
++  <Fa>
++    <KodWaluty>PLN</KodWaluty>
++    <P_1>2026-05-10</P_1>
++    <P_2>FV/ZERO/1</P_2>
++    <P_13_1>219.51</P_13_1>
++    <P_14_1>50.49</P_14_1>
++    <P_15>270.00</P_15>
++    <RodzajFaktury>VAT</RodzajFaktury>
++    <FaWiersz>
++      <P_7>Usługi księgowe</P_7>
++      <P_8B>1</P_8B>
++      <P_12>23</P_12>
++    </FaWiersz>
++  </Fa>
++</Faktura>
++""".encode("utf-8"),
++        )
++    ]
++
++    counts = service.sync_received_invoices(
++        nip="1234567890",
++        date_from=date(2026, 5, 1),
++        date_to=date(2026, 5, 10),
++    )
++
++    assert counts["saved"] == 0
++    assert counts["skipped_parse"] == 1
++    assert repo.add_calls == 0
++    assert repo.invoices == []
++
++
++def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
++    repo = _FakeInvoiceRepository()
++    service = _make_ksef_service_with_repo(repo)
++    service.ksef_client.query_received_invoices.return_value = [
++        SimpleNamespace(
++            ksef_reference_number="KSEF-P11A",
++            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
++<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
++  <Podmiot1>
++    <DaneIdentyfikacyjne>
++      <NIP>1112223344</NIP>
++      <Nazwa>Biuro Rachunkowe</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot1>
++  <Podmiot2>
++    <DaneIdentyfikacyjne>
++      <NIP>9670402857</NIP>
++      <Nazwa>Nabywca</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot2>
++  <Fa>
++    <KodWaluty>PLN</KodWaluty>
++    <P_1>2026-05-01</P_1>
++    <P_2>FV/KS/42</P_2>
++    <P_13_1>219.51</P_13_1>
++    <P_14_1>50.49</P_14_1>
++    <P_15>270.00</P_15>
++    <RodzajFaktury>VAT</RodzajFaktury>
++    <FaWiersz>
++      <P_7>Usługi księgowe</P_7>
++      <P_8A>mies</P_8A>
++      <P_8B>1</P_8B>
++      <P_11A>270.00</P_11A>
++      <P_12>23</P_12>
++    </FaWiersz>
++  </Fa>
++</Faktura>
++""".encode("utf-8"),
++        )
++    ]
++
++    counts = service.sync_received_invoices(
++        nip="1234567890",
++        date_from=date(2026, 5, 1),
++        date_to=date(2026, 5, 10),
++    )
++
++    assert counts["saved"] == 1
++    saved = repo.invoices[0]
++    assert len(saved.items) == 1
++    item = saved.items[0]
++    assert item.name == "Usługi księgowe"
++    assert item.net_total == Decimal("219.51")
++    assert item.vat_total == Decimal("50.49")
++    assert item.gross_total == Decimal("270.00")
++
++
+ def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:
+     sync_state_repo = MagicMock()
+     settings_repo = MagicMock()
+diff --git a/tests/unit/test_ksef_xml_parser.py b/tests/unit/test_ksef_xml_parser.py
+index 7e529e6..946088e 100644
+--- a/tests/unit/test_ksef_xml_parser.py
++++ b/tests/unit/test_ksef_xml_parser.py
+@@ -1,5 +1,7 @@
+ from __future__ import annotations
+ 
++from decimal import Decimal
++
+ from app.integrations.ksef.xml_parser import parse_fa3_xml
+ 
+ 
+@@ -94,3 +96,68 @@ def test_parse_fa3_xml_sale_date_uses_p6_not_p1m_place_of_issue() -> None:
+     from datetime import date
+ 
+     date.fromisoformat(parsed["sale_date"])
++
++
++def test_parse_fa3_xml_reads_gross_line_fields_p11a_p9b() -> None:
++    """FA(3) art. 106e ust. 7/8: pozycja z P_11A/P_9B zamiast P_11/P_9A."""
++    xml = """<?xml version="1.0" encoding="UTF-8"?>
++<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
++  <Podmiot1>
++    <DaneIdentyfikacyjne>
++      <NIP>1112223344</NIP>
++      <Nazwa>Biuro Rachunkowe</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot1>
++  <Podmiot2>
++    <DaneIdentyfikacyjne>
++      <NIP>9670402857</NIP>
++      <Nazwa>Nabywca</Nazwa>
++    </DaneIdentyfikacyjne>
++  </Podmiot2>
++  <Fa>
++    <KodWaluty>PLN</KodWaluty>
++    <P_1>2026-05-01</P_1>
++    <P_2>FV/KS/1</P_2>
++    <P_13_1>219.51</P_13_1>
++    <P_14_1>50.49</P_14_1>
++    <P_15>270.00</P_15>
++    <RodzajFaktury>VAT</RodzajFaktury>
++    <FaWiersz>
++      <P_7>Usługi księgowe</P_7>
++      <P_8A>mies</P_8A>
++      <P_8B>1</P_8B>
++      <P_9B>270.00</P_9B>
++      <P_11A>270.00</P_11A>
++      <P_12>23</P_12>
++    </FaWiersz>
++  </Fa>
++</Faktura>
++""".encode("utf-8")
++
++    parsed = parse_fa3_xml(xml)
++
++    assert parsed["total_gross"] == parsed["items"][0]["gross_total"]
++    item = parsed["items"][0]
++    assert item["name"] == "Usługi księgowe"
++    assert item["net_total"] == Decimal("219.51")
++    assert item["vat_total"] == Decimal("50.49")
++    assert item["gross_total"] == Decimal("270.00")
++    assert item["unit_price_net"] == Decimal("219.51")
++
++
++def test_purchase_items_validation_error_when_totals_without_line_amounts() -> None:
++    from app.integrations.ksef.xml_parser import purchase_items_validation_error
++
++    parsed = {
++        "total_gross": Decimal("270.00"),
++        "items": [
++            {
++                "name": "Usługi księgowe",
++                "net_total": Decimal("0"),
++                "vat_total": Decimal("0"),
++                "gross_total": Decimal("0"),
++            }
++        ],
++    }
++
++    assert purchase_items_validation_error(parsed) is not None

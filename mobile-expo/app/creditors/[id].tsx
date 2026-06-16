@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CounterpartyDetail, fetchDebtor, parseAmount } from '@/api/mobile';
+import { CounterpartyDetail, fetchCreditor, parseAmount } from '@/api/mobile';
 import { isAuthFailure } from '@/api/auth';
 import { useAuth } from '@/auth/AuthContext';
 import { ScreenShell } from '@/components/ScreenShell';
@@ -18,19 +18,19 @@ function resolveId(raw: string | string[] | undefined): string | null {
   return null;
 }
 
-export default function DebtorDetailScreen() {
+export default function CreditorDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = resolveId(rawId);
   const router = useRouter();
   const { logout } = useAuth();
-  const [debtor, setDebtor] = useState<CounterpartyDetail | null>(null);
+  const [creditor, setCreditor] = useState<CounterpartyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) {
-      setDebtor(null);
-      setError('Nie znaleziono dłużnika');
+      setCreditor(null);
+      setError('Nie znaleziono wierzyciela');
       setLoading(false);
       return;
     }
@@ -38,16 +38,16 @@ export default function DebtorDetailScreen() {
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchDebtor(id);
-      setDebtor(payload);
+      const payload = await fetchCreditor(id);
+      setCreditor(payload);
     } catch (err) {
       if (isAuthFailure(err)) {
         logout();
         router.replace('/login');
         return;
       }
-      setDebtor(null);
-      setError(err instanceof Error ? err.message : 'Nie udało się pobrać dłużnika');
+      setCreditor(null);
+      setError(err instanceof Error ? err.message : 'Nie udało się pobrać wierzyciela');
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,7 @@ export default function DebtorDetailScreen() {
 
   if (loading) {
     return (
-      <ScreenShell title="Dłużnik" subtitle="Szczegóły dłużnika" showBack scroll>
+      <ScreenShell title="Wierzyciel" subtitle="Szczegóły wierzyciela" showBack scroll>
         <View style={styles.stateBox}>
           <ActivityIndicator color={colors.gold} size="large" />
           <Text style={styles.stateText}>Ładowanie szczegółów…</Text>
@@ -68,11 +68,11 @@ export default function DebtorDetailScreen() {
     );
   }
 
-  if (error || !debtor) {
+  if (error || !creditor) {
     return (
-      <ScreenShell title="Dłużnik" subtitle="Szczegóły dłużnika" showBack scroll>
+      <ScreenShell title="Wierzyciel" subtitle="Szczegóły wierzyciela" showBack scroll>
         <View style={styles.stateBox}>
-          <Text style={styles.errorText}>{error ?? 'Nie znaleziono dłużnika'}</Text>
+          <Text style={styles.errorText}>{error ?? 'Nie znaleziono wierzyciela'}</Text>
           <Pressable style={styles.retryBtn} onPress={load}>
             <Text style={styles.retryText}>Spróbuj ponownie</Text>
           </Pressable>
@@ -81,33 +81,33 @@ export default function DebtorDetailScreen() {
     );
   }
 
-  const overdueDue = parseAmount(debtor.overdue_due);
+  const overdueDue = parseAmount(creditor.overdue_due);
 
   return (
-    <ScreenShell title={debtor.name} subtitle="Szczegóły dłużnika" showBack scroll>
+    <ScreenShell title={creditor.name} subtitle="Szczegóły wierzyciela" showBack scroll>
       <View style={styles.summary}>
         <View style={styles.summaryCol}>
-          <Text style={styles.summaryLabel}>Należność</Text>
-          <Text style={styles.summaryValue}>{formatPln(debtor.total_due)}</Text>
+          <Text style={styles.summaryLabel}>Zobowiązanie</Text>
+          <Text style={styles.summaryValue}>{formatPln(creditor.total_due)}</Text>
         </View>
         <View style={styles.summaryCol}>
           <Text style={styles.summaryLabel}>Po terminie</Text>
           <Text style={[styles.summaryValue, overdueDue > 0 && styles.danger]}>
-            {formatPln(debtor.overdue_due)}
+            {formatPln(creditor.overdue_due)}
           </Text>
         </View>
         <View style={styles.summaryCol}>
           <Text style={styles.summaryLabel}>Faktury</Text>
-          <Text style={styles.summaryValue}>{debtor.invoices_count}</Text>
+          <Text style={styles.summaryValue}>{creditor.invoices_count}</Text>
         </View>
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Faktury</Text>
-        {debtor.invoices.length === 0 ? (
+        {creditor.invoices.length === 0 ? (
           <Text style={styles.empty}>Brak faktur.</Text>
         ) : (
-          debtor.invoices.map((inv) => (
+          creditor.invoices.map((inv) => (
             <Pressable
               key={inv.invoice_id}
               style={styles.invRow}

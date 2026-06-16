@@ -8,6 +8,7 @@ from app.core.config import settings as env_settings
 from app.core.exceptions import ValidationError
 from app.persistence.models.app_settings import AppSettingsORM
 from app.persistence.repositories.app_settings_repository import AppSettingsRepository
+from app.services.bank_account import validate_bank_account
 
 _NIP_RE = re.compile(r"^\d{10}$")
 
@@ -22,6 +23,7 @@ _ALLOWED_FIELDS = frozenset(
         "seller_postal_code",
         "seller_city",
         "seller_country",
+        "seller_bank_account",
     }
 )
 
@@ -57,6 +59,14 @@ class SettingsService:
                 raise ValidationError(
                     f"seller_nip musi składać się dokładnie z 10 cyfr, otrzymano: {nip!r}"
                 )
+
+        if "seller_bank_account" in filtered:
+            try:
+                filtered["seller_bank_account"] = validate_bank_account(
+                    filtered["seller_bank_account"]
+                )
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
 
         row = self.repository.upsert(filtered)
         return self._merge(row)
@@ -137,6 +147,11 @@ class SettingsService:
                 env.seller_city, row.seller_city if row else None
             ),
             "seller_country": fixed_or_db(env.seller_country or "PL", row.seller_country if row else None),
+            "seller_bank_account": (
+                str(row.seller_bank_account).strip()
+                if row and row.seller_bank_account
+                else None
+            ),
             # źródło: tylko env (nie edytowalne przez API)
             "ksef_environment": env.ksef_environment,
             "app_env": env.app_env,

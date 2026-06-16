@@ -232,7 +232,7 @@
   box-shadow: var(--shadow-gold);
 }
 
-/* Items — kolumny: nazwa | ilość | j.m. | cena | tryb | VAT | netto | VAT kw | brutto | ✕ */
+/* Items — kolumny: nazwa | ilość | j.m. | cena netto | cena brutto | tryb | VAT | netto | VAT kw | brutto | ✕ */
 .itemsHeader,
 .itemRow {
   display: grid;
@@ -240,6 +240,7 @@
     minmax(100px, 1.6fr)
     0.35fr
     0.42fr
+    0.5fr
     0.5fr
     0.45fr
     0.49fr

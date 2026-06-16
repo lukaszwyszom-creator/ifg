@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from app.services.invoice_totals import InvoiceTotalsCalculator
 
 
@@ -72,3 +74,48 @@ def test_calculate_totals_sums_line_amounts() -> None:
     assert total_net == Decimal("6857.14")
     assert total_vat == Decimal("342.86")
     assert total_gross == Decimal("7200.00")
+
+
+@pytest.mark.parametrize("quantity", ["1", "2", "60", "1000"])
+def test_build_items_accepts_integer_quantities(quantity: str) -> None:
+    items = InvoiceTotalsCalculator.build_items([
+        {
+            "name": "Towar",
+            "quantity": quantity,
+            "unit": "szt.",
+            "price_mode": "net",
+            "unit_price_net": "10.00",
+            "vat_rate": "23",
+        }
+    ])
+    assert items[0].quantity == Decimal(quantity)
+
+
+@pytest.mark.parametrize("quantity", ["1.5", "2.25", "10.75"])
+def test_build_items_rejects_fractional_quantities(quantity: str) -> None:
+    from app.domain.exceptions import InvalidInvoiceError
+
+    with pytest.raises(InvalidInvoiceError, match="liczbą całkowitą"):
+        InvoiceTotalsCalculator.build_items([
+            {
+                "name": "Towar",
+                "quantity": quantity,
+                "unit": "szt.",
+                "price_mode": "net",
+                "unit_price_net": "10.00",
+                "vat_rate": "23",
+            }
+        ])
+
+
+def test_gross_mode_unit_gross_persisted_on_line() -> None:
+    unit_net, net, vat, gross = InvoiceTotalsCalculator.calculate_line_amounts(
+        quantity=Decimal("60"),
+        vat_rate=Decimal("5"),
+        price_mode="gross",
+        unit_price_gross=Decimal("120.00"),
+    )
+    assert gross == Decimal("7200.00")
+    assert net == Decimal("6857.14")
+    assert vat == Decimal("342.86")
+    assert unit_net == Decimal("114.29")

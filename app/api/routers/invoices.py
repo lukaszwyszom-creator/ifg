@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db_session, get_idempotency_service, get_invoice_service, get_payment_service
+from app.api.deps import get_current_user, get_db_session, get_idempotency_service, get_invoice_service, get_payment_service, get_settings_service
 from app.core.exceptions import ConflictError
 from app.core.security import AuthenticatedUser
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
@@ -25,6 +25,7 @@ from app.services.idempotency_service import DuplicateRequestError, IdempotencyS
 from app.services.invoice_service import InvoiceService
 from app.services.payment_service import PaymentService
 from app.services.pdf_service import render_invoice_html, render_invoice_pdf
+from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -248,13 +249,15 @@ def update_invoice(
 def get_invoice_preview(
     invoice_id: UUID,
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
+    settings_service: Annotated[SettingsService, Depends(get_settings_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> HTMLResponse:
     """Podgląd HTML faktury — otwierany w nowej karcie, gotowy do druku (Ctrl+P)."""
     invoice = invoice_service.get_invoice(invoice_id)
     remaining_map = invoice_service.compute_remaining_amounts([invoice])
     schema = InvoiceResponse.from_domain(invoice, remaining_amount=remaining_map.get(invoice.id))
-    html = render_invoice_html(schema)
+    bank_account = settings_service.get_settings().get("seller_bank_account")
+    html = render_invoice_html(schema, seller_bank_account=bank_account)
     return HTMLResponse(content=html)
 
 
@@ -262,13 +265,15 @@ def get_invoice_preview(
 def get_invoice_pdf(
     invoice_id: UUID,
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
+    settings_service: Annotated[SettingsService, Depends(get_settings_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> Response:
     """Pobierz fakturę jako plik PDF (application/pdf)."""
     invoice = invoice_service.get_invoice(invoice_id)
     remaining_map = invoice_service.compute_remaining_amounts([invoice])
     schema = InvoiceResponse.from_domain(invoice, remaining_amount=remaining_map.get(invoice.id))
-    pdf_bytes = render_invoice_pdf(schema)
+    bank_account = settings_service.get_settings().get("seller_bank_account")
+    pdf_bytes = render_invoice_pdf(schema, seller_bank_account=bank_account)
     filename = f"faktura-{schema.number_local or schema.id}.pdf"
     return Response(
         content=pdf_bytes,

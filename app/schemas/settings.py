@@ -20,6 +20,7 @@ class SettingsResponse(BaseModel):
     seller_postal_code: str | None = None
     seller_city: str | None = None
     seller_country: str | None = "PL"
+    seller_bank_account: str | None = None
 
     # Dane tylko do odczytu (środowisko aplikacji)
     ksef_environment: str = "test"
@@ -42,6 +43,7 @@ class SettingsUpdateRequest(BaseModel):
     seller_postal_code: str | None = Field(default=None, max_length=16)
     seller_city: str | None = Field(default=None, max_length=128)
     seller_country: str | None = Field(default=None, max_length=2)
+    seller_bank_account: str | None = Field(default=None, max_length=32)
 
     @field_validator("seller_nip")
     @classmethod
@@ -49,3 +51,15 @@ class SettingsUpdateRequest(BaseModel):
         if v is not None and not _NIP_RE.match(v):
             raise ValueError("seller_nip musi składać się dokładnie z 10 cyfr")
         return v
+
+    @field_validator("seller_bank_account")
+    @classmethod
+    def bank_account_must_be_26_digits(cls, v: str | None) -> str | None:
+        from app.services.bank_account import validate_bank_account
+
+        if v is None:
+            return None
+        try:
+            return validate_bank_account(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc

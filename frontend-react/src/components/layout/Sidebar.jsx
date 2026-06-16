@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Sprzedaż / Zakup', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
   { to: '/warehouse', label: 'Magazyn', icon: '📦' },
+  { to: '/settings', label: 'Ustawienia firmy', icon: '⚙️' },
 ];
 
 export default function Sidebar({ open = false, onClose }) {

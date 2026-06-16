@@ -8,10 +8,11 @@ Dwa publiczne wywołania:
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html import escape
 
-from app.schemas.invoice import InvoiceResponse
+from app.schemas.invoice import InvoiceItemResponse, InvoiceResponse
+from app.services.bank_account import format_bank_account_display
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,52 @@ def _as_decimal(value: object) -> Decimal | None:
 def _money(value: Decimal | None, currency: str) -> str:
     if value is None:
         return "—"
-    return f"{value.quantize(Decimal('0.01'))} {currency}"
+    return f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)} {currency}"
+
+
+def _amount(value: Decimal | None) -> str:
+    if value is None:
+        return "—"
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _format_quantity(value: Decimal | object) -> str:
+    dec = _as_decimal(value)
+    if dec is None:
+        return "—"
+    return str(int(dec.to_integral_value()))
+
+
+def _format_vat_rate(value: Decimal | object) -> str:
+    dec = _as_decimal(value)
+    if dec is None:
+        return "—"
+    if dec == dec.to_integral_value():
+        return f"{int(dec)}%"
+    return f"{dec.normalize()}%"
+
+
+def _unit_price_gross(item: InvoiceItemResponse) -> Decimal | None:
+    qty = _as_decimal(item.quantity)
+    gross = _as_decimal(item.gross_total)
+    unit_net = _as_decimal(item.unit_price_net)
+    vat = _as_decimal(item.vat_rate)
+    if qty is None or qty <= 0:
+        return None
+    if gross is not None:
+        return (gross / qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if unit_net is not None and vat is not None:
+        return (unit_net * (Decimal("1") + vat / Decimal("100"))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    return None
+
+
+def _seller_bank_line(seller_bank_account: str | None) -> str:
+    formatted = format_bank_account_display(seller_bank_account)
+    if not formatted:
+        return ""
+    return f"<p>Rachunek bankowy: {_esc(formatted)}</p>"
 
 
 def _payment_section(invoice: InvoiceResponse) -> str:
@@ -104,7 +150,11 @@ def _payment_section(invoice: InvoiceResponse) -> str:
 </div>"""
 
 
-def render_invoice_html(invoice: InvoiceResponse) -> str:
+def render_invoice_html(
+    invoice: InvoiceResponse,
+    *,
+    seller_bank_account: str | None = None,
+) -> str:
     seller = invoice.seller_snapshot
     buyer = invoice.buyer_snapshot
     status_label = _STATUS_LABELS.get(invoice.status, invoice.status)
@@ -117,16 +167,18 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
             if item.isbn
             else ""
         )
+        unit_gross = _unit_price_gross(item)
         rows += f"""
         <tr>
           <td>{_esc(item.name)}{isbn_line}</td>
-          <td class="num">{_esc(item.quantity)}</td>
+          <td class="num">{_esc(_format_quantity(item.quantity))}</td>
           <td>{_esc(item.unit)}</td>
-          <td class="num">{_esc(item.unit_price_net)}</td>
-          <td class="num">{_esc(item.vat_rate)}%</td>
-          <td class="num">{_esc(item.net_total)}</td>
-          <td class="num">{_esc(item.vat_total)}</td>
-          <td class="num bold">{_esc(item.gross_total)}</td>
+          <td class="num">{_esc(_amount(_as_decimal(item.unit_price_net)))}</td>
+          <td class="num">{_esc(_amount(unit_gross))}</td>
+          <td class="num">{_esc(_format_vat_rate(item.vat_rate))}</td>
+          <td class="num">{_esc(_amount(_as_decimal(item.net_total)))}</td>
+          <td class="num">{_esc(_amount(_as_decimal(item.vat_total)))}</td>
+          <td class="num bold">{_esc(_amount(_as_decimal(item.gross_total)))}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -218,6 +270,7 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
     <p>NIP: {_esc(seller.get("nip", ""))}</p>
     <p>{_esc(seller.get("address", ""))}</p>
     <p>{_esc(seller.get("city", ""))}</p>
+    {_seller_bank_line(seller_bank_account)}
   </div>
   <div class="party">
     <h3>Nabywca</h3>
@@ -235,6 +288,7 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
       <th>Ilość</th>
       <th>J.m.</th>
       <th class="num">Cena netto</th>
+      <th class="num">Cena brutto</th>
       <th class="num">VAT %</th>
       <th class="num">Netto</th>
       <th class="num">VAT</th>
@@ -260,7 +314,11 @@ def render_invoice_html(invoice: InvoiceResponse) -> str:
 </html>"""
 
 
-def render_invoice_pdf(invoice: InvoiceResponse) -> bytes:
+def render_invoice_pdf(
+    invoice: InvoiceResponse,
+    *,
+    seller_bank_account: str | None = None,
+) -> bytes:
     """Generuje binarny PDF z WeasyPrint na podstawie szablonu HTML.
 
     Przy pierwszym wywołaniu importuje WeasyPrint (lazy import — biblioteka
@@ -275,7 +333,10 @@ def render_invoice_pdf(invoice: InvoiceResponse) -> bytes:
             "i upewnij się, że systemowe biblioteki (libpango, libcairo) są dostępne."
         ) from exc
 
-    html_content = render_invoice_html(invoice)
+    html_content = render_invoice_html(
+        invoice,
+        seller_bank_account=seller_bank_account,
+    )
     logger.debug("Generowanie PDF dla faktury %s przez WeasyPrint", invoice.id)
     pdf_bytes: bytes = HTML(string=html_content, base_url=None).write_pdf()
     return pdf_bytes
