@@ -244,3 +244,33 @@ def test_parse_fa3_xml_header_totals_not_overwritten_by_item_fallback() -> None:
     assert parsed["total_net"] == Decimal("100.00")
     assert parsed["total_vat"] == Decimal("23.00")
     assert parsed["total_gross"] == Decimal("123.00")
+
+
+def test_parse_fa3_xml_gross_unit_price_uses_line_gross_as_source() -> None:
+    """P_9B + ilość: brutto pozycji liczone z ceny brutto × qty, nie z zaokr. netto × qty."""
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Podmiot1><DaneIdentyfikacyjne><NIP>1112223344</NIP><Nazwa>S</Nazwa></DaneIdentyfikacyjne></Podmiot1>
+  <Podmiot2><DaneIdentyfikacyjne><NIP>9670402857</NIP><Nazwa>B</Nazwa></DaneIdentyfikacyjne></Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-05-01</P_1>
+    <P_2>FV/G/1</P_2>
+    <P_15>7200.00</P_15>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <P_7>Towar</P_7>
+      <P_8B>60</P_8B>
+      <P_9B>120.00</P_9B>
+      <P_12>5</P_12>
+    </FaWiersz>
+  </Fa>
+</Faktura>
+""".encode("utf-8")
+
+    parsed = parse_fa3_xml(xml)
+    item = parsed["items"][0]
+
+    assert item["gross_total"] == Decimal("7200.00")
+    assert item["net_total"] == Decimal("6857.14")
+    assert item["vat_total"] == Decimal("342.86")

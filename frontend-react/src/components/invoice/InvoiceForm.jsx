@@ -84,7 +84,16 @@ function formatPaidAmountInput(value) {
   return value.toFixed(2);
 }
 
-const EMPTY_ITEM = { name: '', isbn: '', quantity: '1', unit: 'szt.', unit_price_net: '', vat_rate: '23' };
+const EMPTY_ITEM = {
+  name: '',
+  isbn: '',
+  quantity: '1',
+  unit: 'szt.',
+  price_mode: 'net',
+  unit_price_net: '',
+  unit_price_gross: '',
+  vat_rate: '23',
+};
 const INVOICE_CURRENCY = 'PLN';
 
 // ISBN format: 123-45-678912-3-4
@@ -305,25 +314,43 @@ function normalizeInitialItems(initialItems) {
     isbn: i.isbn ?? '',
     quantity: String(Math.max(1, Math.round(Number(i.quantity)) || 1)),
     unit: i.unit,
+    price_mode: i.price_mode ?? 'net',
     unit_price_net: String(i.unit_price_net),
+    unit_price_gross: i.unit_price_gross != null ? String(i.unit_price_gross) : '',
     vat_rate: normalizeVatRateForSelect(i.vat_rate),
   }));
 }
 
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 function calcNet(it) {
-  const q = parseFloat(it.quantity) || 0;
-  const p = parseFloat(it.unit_price_net) || 0;
-  return (q * p).toFixed(2);
+  const amounts = calcLineAmounts(it);
+  return amounts.net;
 }
 
 function calcLineAmounts(it) {
-  const net = parseFloat(calcNet(it)) || 0;
+  const q = parseFloat(it.quantity) || 0;
   const rate = parseVatRatePercent(it.vat_rate);
-  const vat = (net * rate) / 100;
+  if (it.price_mode === 'gross') {
+    const unitGross = parseFloat(it.unit_price_gross) || 0;
+    const gross = roundMoney(q * unitGross);
+    const net = rate > 0 ? roundMoney(gross / (1 + rate / 100)) : gross;
+    const vat = roundMoney(gross - net);
+    return {
+      net: net.toFixed(2),
+      vat: vat.toFixed(2),
+      gross: gross.toFixed(2),
+    };
+  }
+  const unitNet = parseFloat(it.unit_price_net) || 0;
+  const net = roundMoney(q * unitNet);
+  const vat = roundMoney((net * rate) / 100);
   return {
     net: net.toFixed(2),
     vat: vat.toFixed(2),
-    gross: (net + vat).toFixed(2),
+    gross: roundMoney(net + vat).toFixed(2),
   };
 }
 
@@ -419,13 +446,10 @@ function useInvoiceItems(initialItems, invoiceId) {
   };
 
   const totals = useMemo(() => {
-    const totalNet = items.reduce((sum, item) => sum + parseFloat(calcNet(item)), 0);
-    const totalVat = items.reduce((sum, item) => {
-      const net = parseFloat(calcNet(item));
-      const rate = parseVatRatePercent(item.vat_rate);
-      return sum + (net * rate) / 100;
-    }, 0);
-    return { totalNet, totalVat, totalGross: totalNet + totalVat };
+    const totalNet = items.reduce((sum, item) => sum + parseFloat(calcLineAmounts(item).net), 0);
+    const totalVat = items.reduce((sum, item) => sum + parseFloat(calcLineAmounts(item).vat), 0);
+    const totalGross = items.reduce((sum, item) => sum + parseFloat(calcLineAmounts(item).gross), 0);
+    return { totalNet, totalVat, totalGross };
   }, [items]);
 
   return {
@@ -444,7 +468,9 @@ function mapItemsToPayload(items) {
     isbn: it.isbn || null,
     quantity: parseQuantity(it.quantity),
     unit: it.unit || 'szt.',
-    unit_price_net: parseFloat(it.unit_price_net),
+    price_mode: it.price_mode === 'gross' ? 'gross' : 'net',
+    unit_price_net: it.price_mode === 'gross' ? 0 : parseFloat(it.unit_price_net),
+    unit_price_gross: it.price_mode === 'gross' ? parseFloat(it.unit_price_gross) : null,
     vat_rate: parseVatRatePercent(it.vat_rate),
   }));
 }
@@ -674,7 +700,8 @@ function ItemsSection({
         <span>Nazwa</span>
         <span>Ilość</span>
         <span>J.m.</span>
-        <span>Cena netto</span>
+        <span>Cena</span>
+        <span>Tryb</span>
         <span>VAT %</span>
         <span>Kwota netto</span>
         <span>Kwota VAT</span>
@@ -725,10 +752,23 @@ function ItemsSection({
             min="0"
             step="0.01"
             placeholder="0.00"
-            value={it.unit_price_net}
-            onChange={(e) => updateItem(idx, 'unit_price_net', e.target.value)}
+            value={it.price_mode === 'gross' ? it.unit_price_gross : it.unit_price_net}
+            onChange={(e) => updateItem(
+              idx,
+              it.price_mode === 'gross' ? 'unit_price_gross' : 'unit_price_net',
+              e.target.value,
+            )}
             required
           />
+          <select
+            className={`select ${styles.itemInputCompact}`}
+            value={it.price_mode ?? 'net'}
+            onChange={(e) => updateItem(idx, 'price_mode', e.target.value)}
+            aria-label="Tryb ceny"
+          >
+            <option value="net">Netto</option>
+            <option value="gross">Brutto</option>
+          </select>
           <select
             className={`select ${styles.itemInputCompact}`}
             value={it.vat_rate}
@@ -891,7 +931,11 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
       return;
     }
 
-    if (parsedItems.some((i) => isNaN(i.unit_price_net) || isNaN(i.vat_rate))) {
+    if (parsedItems.some((i) => {
+      if (isNaN(i.vat_rate)) return true;
+      if (i.price_mode === 'gross') return isNaN(i.unit_price_gross);
+      return isNaN(i.unit_price_net);
+    })) {
       setError('Sprawdź ceny i stawki VAT');
       return;
     }

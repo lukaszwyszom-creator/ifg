@@ -176,6 +176,9 @@ class FA3Mapper:
             _el(row, "P_8B", _fmt(item.quantity))
             _el(row, "P_9A", _fmt(item.unit_price_net))
             _el(row, "P_11", _fmt(item.net_total))
+            if item.vat_total > Decimal("0"):
+                _el(row, "P_11Vat", _fmt(item.vat_total))
+            _el(row, "P_11A", _fmt(item.gross_total))
             _el(row, "P_12", _fmt_line_vat_rate(item.vat_rate))
 
         FA3Mapper._build_platnosc(fa, invoice)

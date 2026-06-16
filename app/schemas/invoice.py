@@ -14,6 +14,8 @@ class InvoiceItemInput(BaseModel):
     unit: str
     unit_price_net: Decimal
     vat_rate: Decimal
+    price_mode: str = "net"
+    unit_price_gross: Decimal | None = None
     isbn: str | None = None
 
 

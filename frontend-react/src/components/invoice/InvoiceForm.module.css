@@ -232,7 +232,7 @@
   box-shadow: var(--shadow-gold);
 }
 
-/* Items — kolumny: nazwa | ilość(-50%) | j.m.(-30%) | cena(-50%) | VAT(-30%) | netto | VAT kw | brutto | ✕ */
+/* Items — kolumny: nazwa | ilość | j.m. | cena | tryb | VAT | netto | VAT kw | brutto | ✕ */
 .itemsHeader,
 .itemRow {
   display: grid;
@@ -241,6 +241,7 @@
     0.35fr
     0.42fr
     0.5fr
+    0.45fr
     0.49fr
     0.62fr
     0.62fr

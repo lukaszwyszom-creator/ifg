@@ -134,6 +134,8 @@ def _parse_subject(subject_el: etree._Element) -> dict[str, Any]:
 
 def _parse_item(row_el: etree._Element, sort_order: int) -> dict[str, Any]:
     """Parsuje FaWiersz → dict pasujący do InvoiceItem."""
+    from app.services.invoice_totals import InvoiceTotalsCalculator
+
     vat_rate_text = _field_txt(row_el, "P_12", "P_12")
     try:
         vat_rate = Decimal(vat_rate_text)
@@ -144,38 +146,47 @@ def _parse_item(row_el: etree._Element, sort_order: int) -> dict[str, Any]:
     unit_price_net = _field_dec(row_el, "P_9A", "P_9A")
     unit_price_gross = _field_dec(row_el, "P_9B", "P_9B")
     quantity = _field_dec(row_el, "P_8B", "P_8B") or Decimal("1")
-    net_total = _field_dec(row_el, "P_11", "P_11")
-    gross_total = _field_dec(row_el, "P_11A", "P_11A")
-    vat_total = _field_dec(row_el, "P_11Vat", "P_11Vat")
+    net_total_xml = _field_dec(row_el, "P_11", "P_11")
+    gross_total_xml = _field_dec(row_el, "P_11A", "P_11A")
+    vat_total_xml = _field_dec(row_el, "P_11Vat", "P_11Vat")
 
-    if unit_price_net == Decimal("0") and unit_price_gross > Decimal("0"):
-        if vat_rate > Decimal("0"):
-            unit_price_net = _quantize_money(
-                unit_price_gross / (Decimal("1") + vat_rate / Decimal("100"))
-            )
-        else:
-            unit_price_net = unit_price_gross
+    gross_first = (
+        gross_total_xml > Decimal("0")
+        or (unit_price_gross > Decimal("0") and unit_price_net == Decimal("0"))
+    )
 
-    if net_total == Decimal("0") and gross_total > Decimal("0") and vat_total > Decimal("0"):
-        net_total = _quantize_money(gross_total - vat_total)
-    elif net_total == Decimal("0") and gross_total > Decimal("0") and vat_rate > Decimal("0"):
-        net_total = _quantize_money(
-            gross_total / (Decimal("1") + vat_rate / Decimal("100"))
+    if gross_first:
+        _, net_total, vat_total, gross_total = InvoiceTotalsCalculator.calculate_line_amounts(
+            quantity=quantity,
+            vat_rate=vat_rate,
+            price_mode="gross",
+            unit_price_gross=unit_price_gross,
+            line_gross_total=gross_total_xml,
         )
-    elif net_total == Decimal("0") and unit_price_net > Decimal("0") and quantity > Decimal("0"):
-        net_total = _quantize_money(unit_price_net * quantity)
+    else:
+        if net_total_xml > Decimal("0"):
+            unit_for_calc = _quantize_money(net_total_xml / quantity) if quantity > Decimal("0") else unit_price_net
+        else:
+            unit_for_calc = unit_price_net
+        _, net_total, vat_total, gross_total = InvoiceTotalsCalculator.calculate_line_amounts(
+            quantity=quantity,
+            vat_rate=vat_rate,
+            price_mode="net",
+            unit_price_net=unit_for_calc,
+        )
+        if net_total_xml > Decimal("0"):
+            net_total = _quantize_money(net_total_xml)
+            if vat_total_xml > Decimal("0"):
+                vat_total = _quantize_money(vat_total_xml)
+                gross_total = _quantize_money(net_total + vat_total)
+            elif gross_total_xml > Decimal("0"):
+                gross_total = _quantize_money(gross_total_xml)
+                vat_total = _quantize_money(gross_total - net_total)
+            elif vat_rate > Decimal("0"):
+                vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
+                gross_total = _quantize_money(net_total + vat_total)
 
-    if vat_total == Decimal("0") and net_total > Decimal("0") and vat_rate > Decimal("0"):
-        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
-    elif vat_total == Decimal("0") and gross_total > Decimal("0") and net_total > Decimal("0"):
-        vat_total = _quantize_money(gross_total - net_total)
-
-    if gross_total == Decimal("0") and net_total > Decimal("0"):
-        gross_total = _quantize_money(net_total + vat_total)
-    elif gross_total == Decimal("0") and net_total == Decimal("0") and unit_price_net > Decimal("0"):
-        net_total = _quantize_money(unit_price_net * quantity)
-        vat_total = _quantize_money(net_total * vat_rate / Decimal("100"))
-        gross_total = _quantize_money(net_total + vat_total)
+    unit_price_net = _quantize_money(net_total / quantity) if quantity > Decimal("0") else Decimal("0")
 
     return {
         "name": _field_txt(row_el, "P_7", "P_7"),
