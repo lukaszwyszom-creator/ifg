@@ -319,9 +319,33 @@ def _compose_services_healthy(states: dict[str, str]) -> tuple[bool, list[str]]:
         raw = states.get(svc)
         if raw is None:
             problems.append(f"{svc}: brak w docker compose ps")
-        elif not _container_state_ok(raw):
+        elif not service_state_is_running(raw):
             problems.append(f"{svc}: {raw}")
     return not problems, problems
+
+
+def parse_compose_service_states(ps_output: str) -> dict[str, str]:
+    """Publiczny parser `docker compose ps` dla api/worker/db."""
+    return _parse_compose_service_states(ps_output)
+
+
+def service_state_is_running(state_line: str | None) -> bool:
+    if not state_line:
+        return False
+    return _container_state_ok(state_line)
+
+
+def service_state_is_restarting(state_line: str | None) -> bool:
+    if not state_line:
+        return False
+    return "restarting" in state_line.lower()
+
+
+def service_state_is_healthy(state_line: str | None) -> bool:
+    if not state_line:
+        return False
+    normalized = state_line.lower()
+    return "healthy" in normalized and "unhealthy" not in normalized
 
 
 def _remote_compose_ps(host: str, repo_path: str) -> str:
