@@ -76,7 +76,7 @@ Wynik: **31 passed**
 
 ## Commit
 
-_(uzupełnione po commicie)_
+`62b652c` — Fix poll_ksef_status not finding active KSeF session.
 
 ## Wdrożenie
 
