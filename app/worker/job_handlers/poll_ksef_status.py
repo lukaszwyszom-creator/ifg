@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.domain.enums import TransmissionStatus
 from app.integrations.ksef.client import KSeFClient, KSeFClientError
 from app.persistence.models.background_job import BackgroundJob
@@ -70,9 +71,12 @@ class PollKSeFStatusJobHandler:
             return
 
         try:
-            # Pobierz NIP sprzedawcy z faktury powiązanej z transmisją
             invoice = self._invoice_repo.get_by_id(transmission.invoice_id)
-            seller_nip = (invoice.seller_snapshot if invoice else {}).get("nip", "") if invoice else ""
+            seller_nip = self._ksef_session_service.resolve_invoice_seller_nip(invoice)
+            if not seller_nip:
+                raise NotFoundError(
+                    "Brak NIP sprzedawcy na fakturze — nie można odpytać statusu KSeF."
+                )
             ctx = self._ksef_session_service.get_session_context(seller_nip)
             status_result = self._ksef_client.get_invoice_status(
                 ctx.access_token, ctx.session_reference, reference_number

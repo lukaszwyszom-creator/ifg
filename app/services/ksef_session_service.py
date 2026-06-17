@@ -35,6 +35,22 @@ _RATE_LIMIT_WARNING = (
     "KSeF ograniczył tempo pobierania faktur (HTTP 429). Część faktur nie została pobrana."
 )
 
+
+def _normalize_session_nip(nip: str | None) -> str:
+    """Jeden format NIP (10 cyfr) dla lookup w ksef_sessions i seller_snapshot."""
+    raw = (nip or "").strip().upper()
+    if raw.startswith("PL"):
+        raw = raw[2:].strip()
+    return raw.replace("-", "").replace(" ", "")
+
+
+def _as_utc_aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
 # Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
 _TOKEN_CACHE_MARGIN = timedelta(seconds=30)
 
@@ -98,6 +114,9 @@ class KSeFSessionService:
     def open_session(
         self, nip: str, actor_user_id: UUID | None = None
     ) -> KSeFSessionORM:
+        nip = _normalize_session_nip(nip)
+        if not nip:
+            raise AppError("NIP sesji KSeF jest wymagany.")
         auth_token = settings.ksef_auth_token
         if not auth_token:
             raise AppError("KSEF_AUTH_TOKEN nie jest skonfigurowany.")
@@ -163,12 +182,14 @@ class KSeFSessionService:
         return orm
 
     def get_active_session(self, nip: str) -> KSeFSessionORM:
+        nip = _normalize_session_nip(nip)
         orm = self._get_active_db_session(nip)
         if orm is None:
             raise NotFoundError(f"Brak aktywnej sesji KSeF dla NIP {nip}.")
 
         now = datetime.now(UTC)
-        if orm.expires_at is not None and orm.expires_at <= now:
+        expires_at = _as_utc_aware(orm.expires_at)
+        if expires_at is not None and expires_at <= now:
             orm.status = SESSION_EXPIRED
             self.session.flush()
             self._invalidate_cache(nip)
@@ -181,6 +202,7 @@ class KSeFSessionService:
 
         Wynik access tokena jest cachowany (TTL = czas ważności − margines).
         """
+        nip = _normalize_session_nip(nip)
         with self._cache_lock:
             entry = self._token_cache.get(nip)
             if entry is not None and entry.is_valid():
@@ -216,6 +238,7 @@ class KSeFSessionService:
     def close_session(
         self, nip: str, actor_user_id: UUID | None = None
     ) -> KSeFSessionORM:
+        nip = _normalize_session_nip(nip)
         orm = self.get_active_session(nip)
         metadata = orm.token_metadata_json or {}
         access_token = metadata.get(_KEY_ACCESS_TOKEN, "")
@@ -240,6 +263,7 @@ class KSeFSessionService:
 
     def mark_session_expired(self, nip: str) -> None:
         """Oznacza aktywną sesję KSeF dla danego NIP jako wygasłą."""
+        nip = _normalize_session_nip(nip)
         orm = self._get_active_db_session(nip)
         if orm is not None:
             orm.status = SESSION_EXPIRED
@@ -270,6 +294,14 @@ class KSeFSessionService:
                 has_session=False,
             )
 
+        nip = _normalize_session_nip(nip)
+        if not nip:
+            return self._build_connection_status(
+                ui_status="DISCONNECTED",
+                reason="NO_SESSION",
+                has_session=False,
+            )
+
         try:
             orm = self._get_active_db_session(nip)
             if orm is None:
@@ -280,7 +312,8 @@ class KSeFSessionService:
                 )
 
             now = datetime.now(UTC)
-            if orm.expires_at is not None and orm.expires_at <= now:
+            expires_at = _as_utc_aware(orm.expires_at)
+            if expires_at is not None and expires_at <= now:
                 orm.status = SESSION_EXPIRED
                 orm.updated_at = now
                 self.session.flush()
@@ -295,7 +328,7 @@ class KSeFSessionService:
                 ui_status="CONNECTED",
                 reason="UNKNOWN",
                 has_session=True,
-                session_expires_at=orm.expires_at,
+                session_expires_at=expires_at,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("KSeF status check failed for NIP %s.", nip)
@@ -624,25 +657,56 @@ class KSeFSessionService:
         }
 
     def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
-        requested_nip = (requested_nip or "").strip()
+        requested_nip = _normalize_session_nip(requested_nip)
         if requested_nip:
             return requested_nip
 
-        seller_nip = (settings.seller_nip or "").strip()
+        seller_nip = _normalize_session_nip(settings.seller_nip)
         if not seller_nip:
             raise AppError("Brak NIP właściciela aplikacji w konfiguracji.")
         return seller_nip
+
+    @staticmethod
+    def resolve_invoice_seller_nip(invoice: Invoice | None) -> str:
+        """NIP sprzedawcy do operacji KSeF (poll/submit) — snapshot lub settings."""
+        snap = (getattr(invoice, "seller_snapshot", None) or {}) if invoice else {}
+        nip = _normalize_session_nip(str(snap.get("nip") or ""))
+        if nip:
+            return nip
+        return _normalize_session_nip(settings.seller_nip)
 
     # -------------------------------------------------------------------------
     # PRIVATE HELPERS
     # -------------------------------------------------------------------------
 
     def _get_active_db_session(self, nip: str) -> KSeFSessionORM | None:
-        stmt = select(KSeFSessionORM).where(
-            KSeFSessionORM.nip == nip,
-            KSeFSessionORM.status == SESSION_ACTIVE,
+        normalized = _normalize_session_nip(nip)
+        if not normalized:
+            return None
+        stmt = (
+            select(KSeFSessionORM)
+            .where(
+                KSeFSessionORM.nip == normalized,
+                KSeFSessionORM.status == SESSION_ACTIVE,
+                KSeFSessionORM.environment == self.auth_provider.environment,
+            )
+            .order_by(KSeFSessionORM.created_at.desc())
+            .limit(1)
         )
-        return self.session.execute(stmt).scalar_one_or_none()
+        orm = self.session.execute(stmt).scalar_one_or_none()
+        if orm is not None:
+            return orm
+        # Fallback: starsze sesje bez dopasowanego environment w DB
+        fallback = (
+            select(KSeFSessionORM)
+            .where(
+                KSeFSessionORM.nip == normalized,
+                KSeFSessionORM.status == SESSION_ACTIVE,
+            )
+            .order_by(KSeFSessionORM.created_at.desc())
+            .limit(1)
+        )
+        return self.session.execute(fallback).scalar_one_or_none()
 
     @staticmethod
     def _build_connection_status(
