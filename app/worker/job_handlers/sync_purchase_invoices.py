@@ -5,12 +5,23 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.persistence.models.background_job import BackgroundJob
+from app.core.exceptions import ExternalServiceError
+from app.integrations.ksef.client import KSeFRateLimitDeferredError
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
 from app.services.ksef_session_service import KSeFSessionService
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_RATE_LIMIT_DEFER_SECONDS = 120.0
+
+
+class JobRateLimitDeferredError(Exception):
+    """Sync zakupów odroczony — worker ustawia available_at bez sleep."""
+
+    def __init__(self, message: str, retry_after_seconds: float) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class SyncPurchaseInvoicesJobHandler:
@@ -39,6 +50,8 @@ class SyncPurchaseInvoicesJobHandler:
         actor_id = UUID(actor_user_id) if actor_user_id else None
 
         logger.info("KSEF_ASYNC_SYNC_WORKER_START job_id=%s nip=%s", job_id, nip)
+        ksef_client = self._ksef_session_service.ksef_client
+        ksef_client.defer_purchase_rate_limit = True
         try:
             report = self._ksef_session_service.sync_purchase_invoices(
                 nip=nip,
@@ -56,6 +69,12 @@ class SyncPurchaseInvoicesJobHandler:
                 "warning": report.get("warning"),
             }
 
+            if counts["rate_limited"]:
+                raise JobRateLimitDeferredError(
+                    f"KSeF rate limit podczas sync zakupów (job_id={job_id})",
+                    _DEFAULT_RATE_LIMIT_DEFER_SECONDS,
+                )
+
             logger.info(
                 "KSEF_ASYNC_SYNC_WORKER_DONE job_id=%s saved=%s received=%s rate_limited=%s",
                 job_id,
@@ -64,6 +83,21 @@ class SyncPurchaseInvoicesJobHandler:
                 counts["rate_limited"],
             )
             return counts
+        except JobRateLimitDeferredError:
+            raise
+        except ExternalServiceError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, KSeFRateLimitDeferredError):
+                raise JobRateLimitDeferredError(
+                    str(exc),
+                    cause.retry_after_seconds,
+                ) from exc
+            logger.error(
+                "KSEF_ASYNC_SYNC_WORKER_ERROR job_id=%s error=%s",
+                job_id,
+                exc,
+            )
+            raise
         except Exception as exc:
             logger.error(
                 "KSEF_ASYNC_SYNC_WORKER_ERROR job_id=%s error=%s",
@@ -71,3 +105,5 @@ class SyncPurchaseInvoicesJobHandler:
                 exc,
             )
             raise
+        finally:
+            ksef_client.defer_purchase_rate_limit = False

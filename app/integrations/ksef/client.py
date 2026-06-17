@@ -54,6 +54,14 @@ class KSeFSessionExpiredError(KSeFClientError):
         super().__init__(message, status_code=status_code, transient=False)
 
 
+class KSeFRateLimitDeferredError(KSeFClientError):
+    """HTTP 429 — odroczenie bez sleep w workerze (retry_after w job.available_at)."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float) -> None:
+        super().__init__(message, status_code=429, transient=True)
+        self.retry_after_seconds = retry_after_seconds
+
+
 @dataclass
 class KSeFOnlineSession:
     """Dane otwartej sesji interaktywnej z kluczem symetrycznym."""
@@ -163,6 +171,7 @@ class KSeFClient:
         self._timeout = timeout_seconds
         self._retry = retry_config or RetryConfig()
         self._last_purchase_request_monotonic: float | None = None
+        self.defer_purchase_rate_limit = False
 
     # -------------------------------------------------------------------------
     # SESSION MANAGEMENT
@@ -716,6 +725,8 @@ class KSeFClient:
                     ksef_reference_number=ref,
                     xml_bytes=xml_bytes,
                 ))
+            except KSeFRateLimitDeferredError:
+                raise
             except KSeFClientError as exc:
                 if exc.status_code == 429:
                     rate_limited = True
@@ -936,6 +947,16 @@ class KSeFClient:
 
             if response.status_code == 429:
                 sleep_seconds = self._rate_limit_sleep_seconds(response, attempt)
+                if self.defer_purchase_rate_limit:
+                    logger.warning(
+                        "KSEF_RATE_LIMIT_DEFER ksef_reference_number=%s retry_after_seconds=%.2f",
+                        ksef_reference_number,
+                        sleep_seconds,
+                    )
+                    raise KSeFRateLimitDeferredError(
+                        f"KSeF rate limit (429) dla {ksef_reference_number}",
+                        retry_after_seconds=sleep_seconds,
+                    )
                 logger.warning(
                     "KSEF_RATE_LIMIT_RETRY ksef_reference_number=%s attempt=%s sleep_seconds=%.2f",
                     ksef_reference_number,

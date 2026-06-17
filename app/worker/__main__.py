@@ -9,11 +9,16 @@ from __future__ import annotations
 import logging
 import signal
 import time
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import case, or_, select
+
 from app.core.config import settings
 from app.integrations.ksef.auth import KSeFAuthProvider
 from app.integrations.ksef.client import KSeFClient, RetryConfig
 from app.persistence.db import SessionLocal
-from app.persistence.models.background_job import claim_and_lock_jobs, prepare_job_queue
+from app.persistence.models.background_job import BackgroundJob, prepare_job_queue
+from app.persistence.models.background_job import _utcnow
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
@@ -22,14 +27,59 @@ from app.persistence.repositories.audit_repository import AuditRepository
 from app.services.ksef_session_service import KSeFSessionService
 from app.worker.job_handlers.submit_invoice import SubmitInvoiceJobHandler
 from app.worker.job_handlers.poll_ksef_status import PollKSeFStatusJobHandler
-from app.worker.job_handlers.sync_purchase_invoices import SyncPurchaseInvoicesJobHandler
+from app.worker.job_handlers.sync_purchase_invoices import (
+    JobRateLimitDeferredError,
+    SyncPurchaseInvoicesJobHandler,
+)
 
 logger = logging.getLogger("app.worker")
 
 POLL_INTERVAL_SECONDS = int(getattr(settings, "worker_poll_interval_seconds", 5))
-BATCH_SIZE = 10
+BATCH_SIZE = 1
+
+_JOB_TYPE_PRIORITY = case(
+    (BackgroundJob.job_type == "submit_invoice", 0),
+    (BackgroundJob.job_type == "poll_ksef_status", 1),
+    (BackgroundJob.job_type == "sync_purchase_invoices", 2),
+    else_=99,
+)
 
 _running = True
+
+
+def claim_priority_jobs(
+    session,
+    batch_size: int = BATCH_SIZE,
+    *,
+    locked_by: str = "worker",
+) -> list[BackgroundJob]:
+    """Pobiera joby z priorytetem: submit_invoice > poll_ksef_status > sync zakupów."""
+    stmt = (
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.status == "pending",
+            BackgroundJob.attempts < BackgroundJob.max_attempts,
+            or_(
+                BackgroundJob.available_at.is_(None),
+                BackgroundJob.available_at <= _utcnow(),
+            ),
+        )
+        .order_by(_JOB_TYPE_PRIORITY.asc(), BackgroundJob.available_at.asc())
+        .limit(batch_size)
+        .with_for_update(skip_locked=True)
+    )
+    jobs = list(session.execute(stmt).scalars())
+    if not jobs:
+        return []
+
+    now = datetime.now(UTC)
+    for job in jobs:
+        job.status = "processing"
+        job.locked_at = now
+        job.locked_by = locked_by
+        job.attempts += 1
+    session.flush()
+    return jobs
 
 
 def _build_handlers(session, ksef_client, ksef_session_service):
@@ -107,13 +157,20 @@ def _log_poll_tick(queue_stats: dict[str, int]) -> None:
         )
 
 
+def _release_job_to_pending(job: BackgroundJob, *, error: str) -> None:
+    job.last_error = error[:1024]
+    job.status = "pending"
+    job.locked_at = None
+    job.locked_by = None
+
+
 def _process_batch() -> int:
     session = SessionLocal()
     try:
         queue_stats = prepare_job_queue(session)
         _log_poll_tick(queue_stats)
 
-        jobs = claim_and_lock_jobs(session, BATCH_SIZE)
+        jobs = claim_priority_jobs(session, BATCH_SIZE)
         if not jobs:
             session.commit()
             return 0
@@ -166,6 +223,19 @@ def _process_batch() -> int:
                 job.locked_at = None
                 job.locked_by = None
                 logger.info("Job %s (%s) zakończony.", job.id, job.job_type)
+            except JobRateLimitDeferredError as exc:
+                logger.warning(
+                    "WORKER_JOB_DEFERRED job_id=%s job_type=%s retry_after_seconds=%.2f",
+                    job.id,
+                    job.job_type,
+                    exc.retry_after_seconds,
+                )
+                _release_job_to_pending(job, error=str(exc))
+                job.available_at = datetime.now(UTC) + timedelta(
+                    seconds=exc.retry_after_seconds
+                )
+                if job.attempts > 0:
+                    job.attempts -= 1
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Job %s (%s) BŁĄD: %s", job.id, job.job_type, exc)
                 job.last_error = str(exc)[:1024]
