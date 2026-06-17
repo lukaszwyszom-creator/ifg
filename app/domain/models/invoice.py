@@ -176,7 +176,8 @@ class Invoice:
             number_local = (self.number_local or "").strip()
             if not number_local:
                 raise InvalidInvoiceError(
-                    "Dla faktury sale wymagane jest number_local przed wysyłką lub statusem końcowym (status końcowy wymaga number_local)."
+                    "Faktura sprzedaży nie ma numeru lokalnego. "
+                    "Zapisz fakturę ponownie przed wysyłką do KSeF."
                 )
 
         self._validate_party_snapshot(self.seller_snapshot, label="sprzedawcy")

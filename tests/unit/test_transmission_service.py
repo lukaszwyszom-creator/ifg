@@ -372,11 +372,12 @@ class TestRetryTransmission:
         service._settings_service.build_company_snapshot.return_value = invoice.seller_snapshot
         service._settings_service.validate_company_snapshot.return_value = None
         service._invoice_service.ensure_number_local.side_effect = InvalidInvoiceError(
-            "Nie udało się nadać numeru faktury. Uzupełnij dane faktury i spróbuj ponownie."
+            "Faktura sprzedaży nie ma numeru lokalnego. "
+            "Zapisz fakturę ponownie przed wysyłką do KSeF."
         )
         service._transmission_repo.get_active_for_invoice.return_value = None
 
-        with pytest.raises(InvalidInvoiceError, match="Nie udało się nadać numeru"):
+        with pytest.raises(InvalidInvoiceError, match="numeru lokalnego"):
             service.retry_transmission(t.id, actor)
 
         service._job_repo.add.assert_not_called()

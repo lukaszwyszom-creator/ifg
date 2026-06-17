@@ -145,9 +145,13 @@ class InvoiceService:
 
         now = datetime.now(UTC)
 
+        number_local: str | None = None
+        if direction == "sale":
+            number_local = self._allocate_number_local(issue_date)
+
         invoice = Invoice(
             id=uuid4(),
-            number_local=None,
+            number_local=number_local,
             status=InvoiceStatus.READY_FOR_SUBMISSION,
             direction=direction,
             issue_date=issue_date,
@@ -171,6 +175,14 @@ class InvoiceService:
 
         saved = self.invoice_repository.add(invoice)
         self.session.flush()
+
+        if direction == "sale" and not (saved.number_local or "").strip():
+            preallocated = (invoice.number_local or "").strip()
+            if preallocated:
+                self.invoice_repository.update_number_local(saved.id, preallocated)
+                saved = self.get_invoice(saved.id)
+            else:
+                saved = self.ensure_number_local(saved.id, saved, actor)
 
         self.audit_service.record(
             actor_user_id=actor.user_id,
@@ -294,6 +306,13 @@ class InvoiceService:
 
         updated = self.invoice_repository.update(invoice_id, invoice)
         self.session.flush()
+
+        if (
+            direction == "sale"
+            and updated.status == InvoiceStatus.READY_FOR_SUBMISSION
+            and not (updated.number_local or "").strip()
+        ):
+            updated = self.ensure_number_local(invoice_id, updated, actor)
 
         self.audit_service.record(
             actor_user_id=actor.user_id,
@@ -517,22 +536,27 @@ class InvoiceService:
         invoice.validate_sale_formal_requirements(require_number_local=False)
         return self._assign_number_local(invoice_id, invoice, actor)
 
+    def _allocate_number_local(self, issue_date: date) -> str:
+        """Rezerwuje kolejny trwały numer faktury sale dla miesiąca wystawienia."""
+        year = issue_date.year
+        month = issue_date.month
+        for _ in range(self.MAX_RETRIES):
+            seq = self.invoice_repository.get_next_sequence_number(year, month)
+            number = InvoiceNumberPolicy.generate(year, month, seq)
+            if not self.invoice_repository.exists_by_number(number):
+                return number
+        raise IntegrityError(
+            statement=None,
+            params=None,
+            orig=Exception(
+                f"Nie udało się nadać unikalnego numeru faktury dla {year}-{month:02d}."
+            ),
+        )
+
     def _assign_number_local(
         self, invoice_id: UUID, invoice: Invoice, actor: AuthenticatedUser
     ) -> Invoice:
-        year = invoice.issue_date.year
-        month = invoice.issue_date.month
-
-        seq = self.invoice_repository.get_next_sequence_number(year, month)
-        number = InvoiceNumberPolicy.generate(year, month, seq)
-
-        if self.invoice_repository.exists_by_number(number):
-            raise IntegrityError(
-                statement=None,
-                params=None,
-                orig=Exception(f"Duplikat numeru faktury: {number}"),
-            )
-
+        number = self._allocate_number_local(invoice.issue_date)
         invoice.number_local = number
         invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
         invoice.updated_at = datetime.now(UTC)
@@ -559,6 +583,77 @@ class InvoiceService:
         )
 
         return updated
+
+    def delete_sale_invoice(self, invoice_id: UUID, actor: AuthenticatedUser) -> None:
+        """Usuwa niewysłaną fakturę sale i renumeruje pozostałe drafty w miesiącu."""
+        from app.persistence.repositories.transmission_repository import TransmissionRepository
+
+        invoice = self.invoice_repository.lock_for_update(invoice_id)
+        if invoice is None:
+            raise NotFoundError(f"Nie znaleziono faktury {invoice_id}.")
+
+        tx_repo = TransmissionRepository(self.session)
+        has_transmission = invoice_id in tx_repo.get_invoice_ids_with_transmissions(
+            [invoice_id]
+        )
+        if not InvoiceNumberPolicy.can_delete_sale_draft(
+            invoice,
+            has_transmission=has_transmission,
+        ):
+            raise InvalidStatusTransitionError(
+                "Nie można usunąć faktury — numer zablokowany lub status nie pozwala "
+                "na usunięcie."
+            )
+
+        issue_year = invoice.issue_date.year
+        issue_month = invoice.issue_date.month
+        deleted_number = invoice.number_local
+
+        self.invoice_repository.delete_by_id(invoice_id)
+
+        self.audit_service.record(
+            actor_user_id=actor.user_id,
+            actor_role=actor.role,
+            event_type="invoice.deleted",
+            entity_type="invoice",
+            entity_id=str(invoice_id),
+            before={
+                "number_local": deleted_number,
+                "status": invoice.status.value,
+            },
+        )
+
+        self._renumber_draft_invoices_in_month(issue_year, issue_month, actor)
+
+    def _renumber_draft_invoices_in_month(
+        self, year: int, month: int, actor: AuthenticatedUser
+    ) -> None:
+        from app.persistence.repositories.transmission_repository import TransmissionRepository
+
+        invoices = self.invoice_repository.list_sale_in_month(year, month)
+        if not invoices:
+            return
+
+        tx_repo = TransmissionRepository(self.session)
+        transmission_ids = tx_repo.get_invoice_ids_with_transmissions(
+            [invoice.id for invoice in invoices]
+        )
+        updates = InvoiceNumberPolicy.compute_draft_renumbering(
+            invoices,
+            year=year,
+            month=month,
+            transmission_invoice_ids=transmission_ids,
+        )
+        for inv_id, new_number in updates.items():
+            self.invoice_repository.update_number_local(inv_id, new_number)
+            self.audit_service.record(
+                actor_user_id=actor.user_id,
+                actor_role=actor.role,
+                event_type="invoice.number_reassigned",
+                entity_type="invoice",
+                entity_id=str(inv_id),
+                after={"number_local": new_number},
+            )
 
     # -------------------------------------------------------------------------
     # PRIVATE HELPERS

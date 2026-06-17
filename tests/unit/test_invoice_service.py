@@ -19,9 +19,12 @@ from app.services.invoice_totals import InvoiceTotalsCalculator
 
 @pytest.fixture()
 def service(mock_session: MagicMock) -> InvoiceService:
+    invoice_repository = MagicMock()
+    invoice_repository.exists_by_number.return_value = False
+    invoice_repository.get_next_sequence_number.return_value = 1
     return InvoiceService(
         session=mock_session,
-        invoice_repository=MagicMock(),
+        invoice_repository=invoice_repository,
         contractor_repository=MagicMock(),
         contractor_override_repository=MagicMock(),
         audit_service=MagicMock(),
@@ -100,29 +103,16 @@ class TestCreateInvoice:
         contractor_mock.name = "Nabywca"
         service.contractor_repository.get_by_id.return_value = contractor_mock
         service.contractor_override_repository.get_active_by_contractor_id.return_value = None
-
-        # Mock invoice repo
-        now = datetime.now(UTC)
-        expected = Invoice(
-            id=uuid4(),
-            status=InvoiceStatus.READY_FOR_SUBMISSION,
-            issue_date=data["issue_date"],
-            sale_date=data["sale_date"],
-            currency="PLN",
-            seller_snapshot={},
-            buyer_snapshot={},
-            items=[],
-            total_net=Decimal("2000.00"),
-            total_vat=Decimal("460.00"),
-            total_gross=Decimal("2460.00"),
-            created_at=now,
-            updated_at=now,
-        )
-        service.invoice_repository.add.return_value = expected
+        service.invoice_repository.get_next_sequence_number.return_value = 1
+        service.invoice_repository.exists_by_number.return_value = False
+        service.invoice_repository.add.side_effect = lambda inv: inv
 
         result = service.create_invoice(data, actor)
 
-        assert result == expected
+        assert result.number_local == "FV/1/04/2026"
+        created_invoice = service.invoice_repository.add.call_args.args[0]
+        assert created_invoice.number_local == "FV/1/04/2026"
+        service.invoice_repository.get_next_sequence_number.assert_called_once()
         service.invoice_repository.add.assert_called_once()
         service.audit_service.record.assert_called_once()
 
@@ -160,6 +150,8 @@ class TestCreateInvoice:
         contractor_mock.regon = None
         service.contractor_repository.get_by_id.return_value = contractor_mock
         service.contractor_override_repository.get_active_by_contractor_id.return_value = None
+        service.invoice_repository.get_next_sequence_number.return_value = 1
+        service.invoice_repository.exists_by_number.return_value = False
 
         expected = MagicMock()
         service.invoice_repository.add.return_value = expected
@@ -168,6 +160,7 @@ class TestCreateInvoice:
 
         created_invoice = service.invoice_repository.add.call_args.args[0]
         assert created_invoice.direction == "sale"
+        assert created_invoice.number_local == "FV/1/04/2026"
         assert created_invoice.seller_snapshot["name"] == "Nasza Firma"
         assert created_invoice.seller_snapshot["nip"] == "1234567890"
         assert created_invoice.buyer_snapshot["name"] == "Kontrahent"
@@ -215,6 +208,7 @@ class TestCreateInvoice:
 
         created_invoice = service.invoice_repository.add.call_args.args[0]
         assert created_invoice.direction == "purchase"
+        assert created_invoice.number_local is None
         assert created_invoice.seller_snapshot["name"] == "Dostawca"
         assert created_invoice.seller_snapshot["nip"] == "0987654321"
         assert created_invoice.buyer_snapshot["name"] == "Nasza Firma"
@@ -331,25 +325,7 @@ class TestCreateInvoiceFA3Fields:
 
         service.contractor_repository.get_by_id.return_value = MagicMock()
         service.contractor_override_repository.get_active_by_contractor_id.return_value = None
-
-        now = datetime.now(UTC)
-        captured = Invoice(
-            id=uuid4(),
-            status=InvoiceStatus.READY_FOR_SUBMISSION,
-            issue_date=data["issue_date"],
-            sale_date=data["sale_date"],
-            delivery_date=date(2026, 4, 3),
-            currency="PLN",
-            seller_snapshot={},
-            buyer_snapshot={},
-            items=[],
-            total_net=Decimal("0"),
-            total_vat=Decimal("0"),
-            total_gross=Decimal("0"),
-            created_at=now,
-            updated_at=now,
-        )
-        service.invoice_repository.add.return_value = captured
+        service.invoice_repository.add.side_effect = lambda inv: inv
 
         result = service.create_invoice(data, actor)
 
@@ -370,25 +346,7 @@ class TestCreateInvoiceFA3Fields:
 
         service.contractor_repository.get_by_id.return_value = MagicMock()
         service.contractor_override_repository.get_active_by_contractor_id.return_value = None
-
-        now = datetime.now(UTC)
-        returned = Invoice(
-            id=uuid4(),
-            status=InvoiceStatus.READY_FOR_SUBMISSION,
-            issue_date=data["issue_date"],
-            sale_date=data["sale_date"],
-            delivery_date=None,
-            currency="PLN",
-            seller_snapshot={},
-            buyer_snapshot={},
-            items=[],
-            total_net=Decimal("0"),
-            total_vat=Decimal("0"),
-            total_gross=Decimal("0"),
-            created_at=now,
-            updated_at=now,
-        )
-        service.invoice_repository.add.return_value = returned
+        service.invoice_repository.add.side_effect = lambda inv: inv
 
         result = service.create_invoice(data, actor)
 

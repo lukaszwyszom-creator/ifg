@@ -235,8 +235,11 @@ class TransmissionService:
             return SettingsService.COMPANY_SETTINGS_MSG
         if "Niekompletny snapshot nabywcy" in message:
             return "Uzupełnij dane nabywcy na fakturze przed wysyłką do KSeF."
-        if "number_local" in message:
-            return "Nie udało się nadać numeru faktury. Uzupełnij dane faktury i spróbuj ponownie."
+        if "numeru lokalnego" in message or "number_local" in message:
+            return (
+                "Faktura sprzedaży nie ma numeru lokalnego. "
+                "Zapisz fakturę ponownie przed wysyłką do KSeF."
+            )
         return message
 
     @staticmethod
@@ -256,6 +259,12 @@ class TransmissionService:
 
     def _validate_invoice_before_enqueue(self, invoice) -> None:
         try:
+            direction = str(getattr(invoice, "direction", "") or "").strip().lower()
+            if direction == "sale" and not (invoice.number_local or "").strip():
+                raise InvalidInvoiceError(
+                    "Faktura sprzedaży nie ma numeru lokalnego. "
+                    "Zapisz fakturę ponownie przed wysyłką do KSeF."
+                )
             if invoice.status == InvoiceStatus.REJECTED:
                 self._validate_rejected_sale_resubmit(invoice)
             else:
