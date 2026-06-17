@@ -352,6 +352,36 @@ class TestInvoiceItems:
         row = fa.find(f"{{{_NS_FA}}}FaWiersz")
         assert row.find(f"{{{_NS_FA}}}NrWierszaFa").text == "42"
 
+    def test_standard_vat_5_line_has_p11_p12_without_p11a(self):
+        """Regresja: krajowa FV VAT 5% — netto + stawka, bez P_11A (art. 106e ust. 7/8)."""
+        item = _make_item(
+            vat_rate="5",
+            unit_price_net="100.00",
+            net_total="200.00",
+            vat_total="10.00",
+            gross_total="210.00",
+        )
+        xml = KSeFMapper.invoice_to_xml(
+            _make_invoice(
+                items=[item],
+                total_net="200.00",
+                total_vat="10.00",
+                total_gross="210.00",
+            )
+        )
+        root = _parse_xml(xml)
+        fa = _find(root, "Fa")
+        row = fa.find(f"{{{_NS_FA}}}FaWiersz")
+        assert row.find(f"{{{_NS_FA}}}P_11").text == "200.00"
+        assert row.find(f"{{{_NS_FA}}}P_12").text == "5"
+        assert row.find(f"{{{_NS_FA}}}P_11A") is None
+
+        child_tags = [el.tag.split("}")[-1] for el in row]
+        assert child_tags.index("P_11") < child_tags.index("P_12")
+        assert "P_11A" not in child_tags
+
+        KSeFMapper.validate_xml_against_xsd(xml)
+
 
 class TestValidateXml:
     def test_valid_xml_returns_true(self):
