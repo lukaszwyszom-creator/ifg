@@ -165,6 +165,11 @@ class SubmitInvoiceJobHandler:
         transmission.error_code = error_code
         transmission.error_message = error_message[:512]
         transmission.finished_at = now
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            self._invoice_repo,
+            invoice_id=transmission.invoice_id,
+            transmission_status=TransmissionStatus.FAILED_RETRYABLE,
+        )
         self.session.flush()
 
     def _mark_permanent_failure(
@@ -249,7 +254,6 @@ class SubmitInvoiceJobHandler:
             (invoice.seller_snapshot or {}).get("nip", "?") if invoice else "?",
             exc,
         )
-        self._return_invoice_to_ready_for_submission(invoice)
         self._mark_retryable_failure(transmission, "NO_KSEF_SESSION", str(exc))
 
     def _handle_not_connected_error(
@@ -264,7 +268,6 @@ class SubmitInvoiceJobHandler:
             transmission_id,
             exc,
         )
-        self._return_invoice_to_ready_for_submission(invoice)
         self._mark_retryable_failure(transmission, "KSEF_NOT_CONNECTED", str(exc))
 
     def _handle_session_expired_error(
@@ -281,7 +284,6 @@ class SubmitInvoiceJobHandler:
             seller_nip,
             exc,
         )
-        self._return_invoice_to_ready_for_submission(invoice)
         if seller_nip:
             try:
                 self._ksef_session_service.mark_session_expired(seller_nip)

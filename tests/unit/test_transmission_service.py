@@ -637,3 +637,99 @@ class TestSyncInvoiceTerminalStatus:
         assert invoice.status == InvoiceStatus.ACCEPTED
         assert invoice.ksef_reference_number == "KSeF/001/2026/04"
         repo.update.assert_called_once()
+
+    def test_failed_retryable_returns_sending_invoice_to_ready_for_submission(self):
+        from datetime import date
+        from decimal import Decimal
+        from app.domain.models.invoice import Invoice, InvoiceItem
+
+        invoice_id = uuid4()
+        now = datetime.now(UTC)
+        invoice = Invoice(
+            id=invoice_id,
+            number_local="FV/1/06/2026",
+            status=InvoiceStatus.SENDING,
+            issue_date=date(2026, 6, 17),
+            sale_date=date(2026, 6, 17),
+            currency="PLN",
+            seller_snapshot={"nip": "9670402857", "name": "Sprzedawca"},
+            buyer_snapshot={"name": "Nabywca", "nip": "1234563218"},
+            items=[
+                InvoiceItem(
+                    name="Usluga",
+                    quantity=Decimal("1"),
+                    unit="szt.",
+                    unit_price_net=Decimal("100"),
+                    vat_rate=Decimal("23"),
+                    net_total=Decimal("100"),
+                    vat_total=Decimal("23"),
+                    gross_total=Decimal("123"),
+                    sort_order=1,
+                )
+            ],
+            total_net=Decimal("100"),
+            total_vat=Decimal("23"),
+            total_gross=Decimal("123"),
+            created_at=now,
+            updated_at=now,
+        )
+        repo = MagicMock()
+        repo.lock_for_update.return_value = invoice
+        repo.update.return_value = invoice
+
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            repo,
+            invoice_id=invoice_id,
+            transmission_status=TransmissionStatus.FAILED_RETRYABLE,
+        )
+
+        assert invoice.status == InvoiceStatus.READY_FOR_SUBMISSION
+        repo.update.assert_called_once()
+
+    def test_failed_retryable_does_not_change_accepted_invoice(self):
+        from datetime import date
+        from decimal import Decimal
+        from app.domain.models.invoice import Invoice, InvoiceItem
+
+        invoice_id = uuid4()
+        now = datetime.now(UTC)
+        invoice = Invoice(
+            id=invoice_id,
+            number_local="FV/1/06/2026",
+            status=InvoiceStatus.ACCEPTED,
+            issue_date=date(2026, 6, 17),
+            sale_date=date(2026, 6, 17),
+            currency="PLN",
+            seller_snapshot={"nip": "9670402857", "name": "Sprzedawca"},
+            buyer_snapshot={"name": "Nabywca", "nip": "1234563218"},
+            items=[
+                InvoiceItem(
+                    name="Usluga",
+                    quantity=Decimal("1"),
+                    unit="szt.",
+                    unit_price_net=Decimal("100"),
+                    vat_rate=Decimal("23"),
+                    net_total=Decimal("100"),
+                    vat_total=Decimal("23"),
+                    gross_total=Decimal("123"),
+                    sort_order=1,
+                )
+            ],
+            total_net=Decimal("100"),
+            total_vat=Decimal("23"),
+            total_gross=Decimal("123"),
+            ksef_reference_number="KSeF/001",
+            created_at=now,
+            updated_at=now,
+        )
+        repo = MagicMock()
+        repo.lock_for_update.return_value = invoice
+
+        TransmissionService.sync_invoice_from_terminal_transmission(
+            repo,
+            invoice_id=invoice_id,
+            transmission_status=TransmissionStatus.FAILED_RETRYABLE,
+        )
+
+        assert invoice.status == InvoiceStatus.ACCEPTED
+        repo.update.assert_not_called()

@@ -80,11 +80,20 @@ class TransmissionService:
             target = InvoiceStatus.ACCEPTED
         elif transmission_status == TransmissionStatus.FAILED_PERMANENT:
             target = InvoiceStatus.REJECTED
+        elif transmission_status == TransmissionStatus.FAILED_RETRYABLE:
+            target = InvoiceStatus.READY_FOR_SUBMISSION
         else:
             return
 
         invoice = invoice_repository.lock_for_update(invoice_id)
         if invoice is None:
+            return
+
+        if transmission_status == TransmissionStatus.FAILED_RETRYABLE:
+            if invoice.status != InvoiceStatus.SENDING:
+                return
+            invoice.status = InvoiceStatus.READY_FOR_SUBMISSION
+            invoice_repository.update(invoice.id, invoice)
             return
 
         if invoice.status == target:

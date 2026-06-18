@@ -114,6 +114,8 @@ def _make_handler(
 
     invoice_repo = MagicMock()
     invoice_repo.get_by_id.return_value = inv
+    invoice_repo.lock_for_update.return_value = inv
+    invoice_repo.update.return_value = inv
 
     ksef_session_svc = MagicMock(spec=KSeFSessionService)
     session_ctx = MagicMock(
@@ -208,6 +210,8 @@ class TestNoKSeFSession:
         handler.handle(payload)
 
         assert inv.status == InvoiceStatus.READY_FOR_SUBMISSION
+        handler._invoice_repo.lock_for_update.assert_called_once_with(inv.id)
+        handler._invoice_repo.update.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
