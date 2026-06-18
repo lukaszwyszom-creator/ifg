@@ -55,7 +55,7 @@ pytest tests/unit/test_transmission_service.py::TestSyncInvoiceTerminalStatus \
 
 ## Commit
 
-_(uzupełnione po commicie)_
+`f859223` — Fix invoice stuck in sending after failed_retryable transmission.
 
 ## Istniejące dane produkcyjne
 
