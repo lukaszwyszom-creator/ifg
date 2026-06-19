@@ -39,11 +39,12 @@ def _row(
     source_document_posted_at=None,
     doc_item_vat_rate="23",
 ):
+    price_val = None if purchase_unit_price is None else Decimal(purchase_unit_price)
     return SimpleNamespace(
         layer_id=layer_id or uuid4(),
         item_id=item_id or ITEM_ID,
         remaining_quantity=Decimal(remaining_quantity),
-        purchase_unit_price=Decimal(purchase_unit_price),
+        purchase_unit_price=price_val,
         received_date=received_date or date(2026, 5, 22),
         name=name,
         isbn=isbn,
@@ -72,6 +73,15 @@ class TestBalanceLayerMapping:
         row = _row(doc_item_vat_rate=None, item_vat_rate="5")
         entry = _balance_entry_from_row(row)
         assert entry.vat_rate == Decimal("5")
+
+    def test_null_price_sets_cost_pending(self):
+        row = _row(purchase_unit_price=None, remaining_quantity="4")
+        row.purchase_unit_price = None
+        entry = _balance_entry_from_row(row)
+        assert entry.cost_pending is True
+        assert entry.unit_price_net is None
+        assert entry.value_net is None
+        assert entry.quantity_available == Decimal("4")
 
 
 class TestBalanceLayersService:
@@ -104,6 +114,14 @@ class TestBalanceLayersFifo:
         active = [l for l in layer_repo._layers if l.remaining_quantity != 0]
         assert len(active) == 2
         assert {l.purchase_unit_price for l in active} == {Decimal("10.00"), Decimal("15.00")}
+
+    def test_draft_pz_layer_visible_before_post(self):
+        svc, _, layer_repo = _make_service()
+        svc.create_document(_pz_body(qty="4", price="10.00"))
+        active = [l for l in layer_repo._layers if l.remaining_quantity != 0]
+        assert len(active) == 1
+        assert active[0].purchase_unit_price is None
+        assert active[0].remaining_quantity == Decimal("4")
 
     def test_wz_fifo_reduces_first_layer_leaves_second(self):
         svc, _, layer_repo = _make_service()

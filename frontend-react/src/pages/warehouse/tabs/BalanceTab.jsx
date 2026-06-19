@@ -51,13 +51,14 @@ function fmtAmountZl(v) {
 }
 
 function layerValueNet(entry) {
+  if (entry.cost_pending) return null;
   if (entry.value_net != null && entry.value_net !== '') {
     const v = parseFloat(entry.value_net);
     if (!Number.isNaN(v)) return v;
   }
   const qty = parseFloat(entry.quantity_available);
   const price = parseFloat(entry.unit_price_net);
-  if (Number.isNaN(qty) || Number.isNaN(price)) return 0;
+  if (Number.isNaN(qty) || Number.isNaN(price)) return null;
   return qty * price;
 }
 
@@ -82,7 +83,7 @@ function aggregateBalanceByItem(entries) {
     const qty = parseFloat(e.quantity_available) || 0;
     const val = layerValueNet(e);
     agg.quantity_available += qty;
-    agg.value_net += val;
+    if (val != null && !Number.isNaN(val)) agg.value_net += val;
     if (agg.vat_rate == null && e.vat_rate != null) agg.vat_rate = e.vat_rate;
     agg.layers.push({
       layer_id: e.layer_id,
@@ -91,13 +92,16 @@ function aggregateBalanceByItem(entries) {
       quantity_available: qty,
       unit_price_net: e.unit_price_net,
       value_net: val,
+      cost_pending: e.cost_pending,
     });
   }
   const rows = Array.from(map.values())
     .map((agg) => ({
       ...agg,
       unit_price_net:
-        agg.quantity_available > 0 ? agg.value_net / agg.quantity_available : 0,
+        agg.quantity_available > 0 && agg.value_net > 0
+          ? agg.value_net / agg.quantity_available
+          : null,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
   return { error: null, rows };
@@ -109,7 +113,10 @@ function layerSourcesTooltip(layers) {
     .map((l) => {
       const doc = l.source_document_number ?? '—';
       const dt = l.source_document_date ? fmtDate(l.source_document_date) : '—';
-      return `${doc} (${dt}): ${fmtQty(l.quantity_available)} szt. @ ${fmtAmount(l.unit_price_net)} zł netto`;
+      const priceLabel = l.cost_pending
+        ? 'koszt nieustalony'
+        : `${fmtAmount(l.unit_price_net)} zł netto`;
+      return `${doc} (${dt}): ${fmtQty(l.quantity_available)} szt. @ ${priceLabel}`;
     })
     .join('\n');
 }
@@ -418,11 +425,15 @@ export default function BalanceTab({ onAddItem }) {
                 {e.isbn ?? '—'}
               </td>
               <td style={{ textAlign: 'center' }}>{fmtQty(e.quantity_available)}</td>
-              <td style={{ textAlign: 'center' }}>{fmtAmount(e.unit_price_net)} zł</td>
+              <td style={{ textAlign: 'center' }}>
+                {e.unit_price_net != null ? `${fmtAmount(e.unit_price_net)} zł` : '—'}
+              </td>
               <td style={{ textAlign: 'center' }}>
                 {e.vat_rate != null ? `${e.vat_rate}%` : '—'}
               </td>
-              <td className={styles.right}>{fmtAmount(e.value_net)} zł</td>
+              <td className={styles.right}>
+                {e.value_net != null ? `${fmtAmount(e.value_net)} zł` : '—'}
+              </td>
             </tr>
             );
           })}

@@ -1,10 +1,12 @@
 """Serwis dokumentów magazynowych — FIFO.
 
 Przepływ:
-  create_document() → status=DRAFT (nie zmienia stanu)
-  post_document()   → status=POSTED (zmienia stany, tworzy warstwy FIFO)
+  create_document(PZ) → status=DRAFT (tworzy warstwę ilościową, koszt NULL)
+  post_document(PZ)   → status=POSTED (uzupełnia koszt na istniejącej warstwie)
+  post_document(WZ/KK) → zmienia stany rozchodu
 
-PZ  → tworzy warstwę InventoryLayer; zwiększa WarehouseBalance
+PZ draft → tworzy warstwę InventoryLayer (qty, price=NULL); zwiększa WarehouseBalance
+PZ post  → aktualizuje purchase_unit_price warstwy; nie tworzy duplikatu
 WZ  → zdejmuje FIFO z warstw; zmniejsza WarehouseBalance
       Tryb A (z FV): source_invoice_id ustawione; FV jest source of truth cen/ilości.
       Tryb B (bez FV): source_invoice_id=null; wymaga issue_reason; unit_price_net może być null.
@@ -140,7 +142,7 @@ class WarehouseDocumentService:
     # ── Tworzenie draftu ──────────────────────────────────────────────────────
 
     def create_document(self, body: dict, created_by: UUID | None = None) -> WarehouseDocumentORM:
-        """Tworzy dokument w stanie DRAFT. Nie zmienia stanów magazynowych."""
+        """Tworzy dokument w stanie DRAFT. PZ draft tworzy warstwę ilościową FIFO."""
         doc_type = body.get("doc_type", "")
         if doc_type not in (t.value for t in WarehouseDocumentType):
             raise InvalidWarehouseDocumentError(f"Nieznany typ dokumentu: {doc_type!r}")
@@ -168,6 +170,8 @@ class WarehouseDocumentService:
 
         self.doc_repo.add(doc_orm)
         self.session.flush()
+        if doc_type == WarehouseDocumentType.PZ.value:
+            self._create_pz_draft_layers(doc_orm, date.today())
         logger.info("warehouse_document.created id=%s type=%s", doc_orm.id, doc_type)
         return doc_orm
 
@@ -224,15 +228,15 @@ class WarehouseDocumentService:
 
     # ── PZ ────────────────────────────────────────────────────────────────────
 
-    def _post_pz(self, doc: WarehouseDocumentORM, today: date) -> None:
-        for item in doc.doc_items:
-            if item.purchase_unit_price is None:
-                raise InvalidWarehouseDocumentError(
-                    f"PZ: pozycja {item.id} nie ma ceny zakupu (purchase_unit_price)."
-                )
-            qty = _to_dec(item.quantity)
-            price = _to_dec(item.purchase_unit_price)
+    # ── PZ draft warstwy ─────────────────────────────────────────────────────
 
+    def _create_pz_draft_layers(self, doc: WarehouseDocumentORM, today: date) -> None:
+        for item in doc.doc_items:
+            qty = _to_dec(item.quantity)
+            if self.layer_repo.get_by_source_document_item_id(item.id) is not None:
+                raise InvalidWarehouseDocumentError(
+                    f"PZ: warstwa dla pozycji {item.id} już istnieje."
+                )
             layer = InventoryLayerORM(
                 id=uuid4(),
                 item_id=item.item_id,
@@ -240,14 +244,47 @@ class WarehouseDocumentService:
                 source_document_type=WarehouseDocumentType.PZ.value,
                 received_quantity=qty,
                 remaining_quantity=qty,
-                purchase_unit_price=price,
+                purchase_unit_price=None,
                 received_date=today,
                 is_correction=False,
             )
             self.layer_repo.add_layer(layer)
             self.doc_repo.upsert_balance(item.item_id, qty)
 
-            # Zaktualizuj kartotekę towaru danymi z PZ (ostatnia cena zakupu, VAT, cena sugerowana)
+    def _revert_pz_draft_layers(self, doc: WarehouseDocumentORM) -> None:
+        for item in doc.doc_items:
+            layer = self.layer_repo.get_by_source_document_item_id(item.id)
+            if layer is None:
+                continue
+            recv = _to_dec(layer.received_quantity)
+            rem = _to_dec(layer.remaining_quantity)
+            if rem < recv:
+                raise InvalidWarehouseDocumentError(
+                    f"PZ draft: pozycja {item.id} ma częściowy rozchód — operacja zablokowana."
+                )
+            self.doc_repo.upsert_balance(item.item_id, -rem)
+            self.layer_repo.delete_layer(layer)
+
+    def _sync_pz_draft_layers_before_replace(self, doc: WarehouseDocumentORM) -> None:
+        self._revert_pz_draft_layers(doc)
+
+    # ── PZ post ─────────────────────────────────────────────────────────────
+
+    def _post_pz(self, doc: WarehouseDocumentORM, today: date) -> None:
+        for item in doc.doc_items:
+            if item.purchase_unit_price is None:
+                raise InvalidWarehouseDocumentError(
+                    f"PZ: pozycja {item.id} nie ma ceny zakupu (purchase_unit_price)."
+                )
+            price = _to_dec(item.purchase_unit_price)
+            layer = self.layer_repo.get_by_source_document_item_id(item.id)
+            if layer is None:
+                raise InvalidWarehouseDocumentError(
+                    f"PZ: brak warstwy FIFO dla pozycji {item.id}."
+                )
+            layer.purchase_unit_price = price
+            self.layer_repo.save(layer)
+
             catalog_item = self.session.get(WarehouseItemORM, item.item_id)
             if catalog_item is not None:
                 catalog_item.default_price_net = price
@@ -346,12 +383,17 @@ class WarehouseDocumentService:
             layer_avail = _to_dec(layer.remaining_quantity)
             take = min(layer_avail, remaining)
 
+            snapshot = (
+                _to_dec(layer.purchase_unit_price)
+                if layer.purchase_unit_price is not None
+                else None
+            )
             movement = InventoryLayerMovementORM(
                 id=uuid4(),
                 layer_id=layer.id,
                 warehouse_document_item_id=doc_item_id,
                 quantity_consumed=take,
-                purchase_unit_price_snapshot=_to_dec(layer.purchase_unit_price),
+                purchase_unit_price_snapshot=snapshot,
             )
             self.layer_repo.add_movement(movement)
 
@@ -379,6 +421,9 @@ class WarehouseDocumentService:
         doc.correction_reason = body.get("correction_reason")
         doc.issue_reason = body.get("issue_reason")
 
+        if doc.doc_type == WarehouseDocumentType.PZ.value:
+            self._sync_pz_draft_layers_before_replace(doc)
+
         # Zastąp pozycje — usuń stare, dodaj nowe
         for old_item in list(doc.doc_items):
             self.session.delete(old_item)
@@ -387,19 +432,25 @@ class WarehouseDocumentService:
         for raw in raw_items:
             doc.doc_items.append(_build_item_orm(raw, doc.id))
 
+        if doc.doc_type == WarehouseDocumentType.PZ.value:
+            self._create_pz_draft_layers(doc, date.today())
+
         self.doc_repo.save(doc)
         self.session.commit()
         logger.info("warehouse_document.updated id=%s", doc.id)
         return doc
 
     def cancel_document(self, doc_id: UUID) -> WarehouseDocumentORM:
-        """Anuluje dokument DRAFT. POSTED jest chroniony. Idempotentny dla CANCELLED."""
-        doc = self.doc_repo.get_by_id(doc_id)
+        """Anuluje dokument DRAFT. PZ draft cofa warstwy ilościowe."""
+        doc = self.doc_repo.get_by_id_with_items(doc_id)
         if doc is None:
             raise NotFoundError(f"Dokument {doc_id} nie istnieje.")
         if doc.status == WarehouseDocumentStatus.CANCELLED.value:
             return doc  # idempotentny
         _assert_mutable(doc)  # blokuje POSTED
+
+        if doc.doc_type == WarehouseDocumentType.PZ.value:
+            self._revert_pz_draft_layers(doc)
 
         doc.status = WarehouseDocumentStatus.CANCELLED.value
         self.doc_repo.save(doc)
@@ -475,10 +526,6 @@ class WarehouseDocumentService:
 
         if doc_type == WarehouseDocumentType.PZ.value:
             for i, raw in enumerate(raw_items, 1):
-                if raw.get("purchase_unit_price") is None:
-                    raise InvalidWarehouseDocumentError(
-                        f"PZ: pozycja {i} wymaga purchase_unit_price."
-                    )
                 if Decimal(str(raw.get("quantity", 0))) <= 0:
                     raise InvalidWarehouseDocumentError(
                         f"PZ: pozycja {i} — ilość musi być dodatnia."

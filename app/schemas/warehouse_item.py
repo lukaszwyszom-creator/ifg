@@ -89,9 +89,10 @@ class WarehouseBalanceEntryResponse(BaseModel):
     source_document_number: str | None
     source_document_date: date | None
     quantity_available: Decimal
-    unit_price_net: Decimal
+    unit_price_net: Decimal | None
     vat_rate: Decimal | None
-    value_net: Decimal
+    value_net: Decimal | None
+    cost_pending: bool = False
 
 
 class WarehouseBalanceListResponse(BaseModel):

@@ -1,9 +1,8 @@
 """Warstwy magazynowe FIFO.
 
-Każde zaksięgowane PZ (i dodatnia KK) tworzy warstwę.
+PZ draft tworzy warstwę ilościową (purchase_unit_price=NULL); post PZ uzupełnia koszt.
+Dodatnia KK tworzy warstwę z ceną przy księgowaniu.
 WZ i ujemna KK schodzą z warstw w kolejności FIFO (najstarsza pierwsza).
-InventoryLayerMovement rejestruje, z której warstwy i ile zdjęto — umożliwia
-pełne odtworzenie kosztu własnego sprzedaży.
 """
 from __future__ import annotations
 
@@ -40,8 +39,8 @@ class InventoryLayerORM(Base):
     received_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     # remaining_quantity — ile jeszcze dostępne; maleje przy WZ/ujemnej KK
     remaining_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
-    # purchase_unit_price — cena zakupu; NIEZMIENNA po zaksięgowaniu
-    purchase_unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    # purchase_unit_price — NULL do post PZ; uzupełniane przy księgowaniu
+    purchase_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     received_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     is_correction: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
@@ -78,7 +77,9 @@ class InventoryLayerMovementORM(Base):
     )
     quantity_consumed: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     # snapshot ceny zakupu z warstwy w momencie wydania — immutable
-    purchase_unit_price_snapshot: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    purchase_unit_price_snapshot: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 4), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

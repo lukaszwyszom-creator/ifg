@@ -16,6 +16,18 @@ class InventoryLayerRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def get_by_source_document_item_id(
+        self, source_document_item_id: UUID
+    ) -> InventoryLayerORM | None:
+        stmt = select(InventoryLayerORM).where(
+            InventoryLayerORM.source_document_item_id == source_document_item_id
+        )
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def delete_layer(self, layer: InventoryLayerORM) -> None:
+        self.session.delete(layer)
+        self.session.flush()
+
     def get_available_fifo(self, item_id: UUID) -> list[InventoryLayerORM]:
         """Zwraca warstwy z remaining_quantity > 0 posortowane FIFO (najstarsza najpierw)."""
         stmt = (

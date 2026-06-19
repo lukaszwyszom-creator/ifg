@@ -99,6 +99,17 @@ class FakeLayerRepository:
         self._layers: list[InventoryLayerORM] = []
         self._movements: list[InventoryLayerMovementORM] = []
 
+    def get_by_source_document_item_id(
+        self, source_document_item_id: UUID
+    ) -> InventoryLayerORM | None:
+        for layer in self._layers:
+            if layer.source_document_item_id == source_document_item_id:
+                return layer
+        return None
+
+    def delete_layer(self, layer: InventoryLayerORM) -> None:
+        self._layers.remove(layer)
+
     def get_available_fifo(self, item_id: UUID) -> list[InventoryLayerORM]:
         return sorted(
             [l for l in self._layers if l.item_id == item_id and l.remaining_quantity > 0],
@@ -156,10 +167,12 @@ ITEM_ID = uuid4()
 def _pz_body(
     item_id: UUID = ITEM_ID,
     qty: str = "10",
-    price: str = "20.00",
+    price: str | None = "20.00",
     vat_rate: str | None = None,
 ) -> dict:
-    item: dict = {"item_id": str(item_id), "quantity": qty, "purchase_unit_price": price}
+    item: dict = {"item_id": str(item_id), "quantity": qty}
+    if price is not None:
+        item["purchase_unit_price"] = price
     if vat_rate is not None:
         item["vat_rate"] = vat_rate
     return {
@@ -225,35 +238,57 @@ def _post_pz_then_get(svc, doc_repo, qty="10", price="20.00"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestPZ:
-    def test_create_draft_does_not_change_balance(self):
+    def test_create_pz_draft_increases_balance(self):
         svc, doc_repo, layer_repo = _make_service()
-        svc.create_document(_pz_body())
-        # Draft — brak warstw i saldo nadal nieistniejące
-        assert len(layer_repo._layers) == 0
-        assert doc_repo.get_balance(ITEM_ID) is None
+        svc.create_document(_pz_body(price=None))
+        balance = doc_repo.get_balance(ITEM_ID)
+        assert balance is not None
+        assert balance.quantity_available == Decimal("10")
 
-    def test_post_pz_increases_balance(self):
+    def test_create_pz_draft_creates_layer_without_price(self):
+        svc, doc_repo, layer_repo = _make_service()
+        svc.create_document(_pz_body(qty="10", price=None))
+        assert len(layer_repo._layers) == 1
+        layer = layer_repo._layers[0]
+        assert layer.purchase_unit_price is None
+        assert layer.remaining_quantity == Decimal("10")
+
+    def test_post_pz_does_not_increase_balance(self):
+        svc, doc_repo, layer_repo = _make_service()
+        doc = svc.create_document(_pz_body(qty="10", price="20.00"))
+        balance_before = doc_repo.get_balance(ITEM_ID).quantity_available
+        svc.post_document(doc.id)
+        assert doc_repo.get_balance(ITEM_ID).quantity_available == balance_before
+
+    def test_post_pz_updates_layer_price_not_quantity(self):
         svc, doc_repo, layer_repo = _make_service()
         doc = svc.create_document(_pz_body(qty="10", price="20.00"))
         svc.post_document(doc.id)
+        assert len(layer_repo._layers) == 1
+        layer = layer_repo._layers[0]
+        assert layer.remaining_quantity == Decimal("10")
+        assert layer.purchase_unit_price == Decimal("20.00")
+        assert layer.source_document_type == "PZ"
+        assert layer.is_correction is False
 
+    def test_post_pz_increases_balance(self):
+        """Legacy name: balance comes from draft create, not post."""
+        svc, doc_repo, _ = _make_service()
+        doc = svc.create_document(_pz_body(qty="10", price="20.00"))
+        svc.post_document(doc.id)
         balance = doc_repo.get_balance(ITEM_ID)
         assert balance is not None
         assert balance.quantity_available == Decimal("10")
 
     def test_post_pz_creates_inventory_layer(self):
-        svc, doc_repo, layer_repo = _make_service()
+        """Warstwa powstaje przy create; post tylko uzupełnia cenę."""
+        svc, _, layer_repo = _make_service()
         doc = svc.create_document(_pz_body(qty="10", price="20.00"))
-        svc.post_document(doc.id)
-
         assert len(layer_repo._layers) == 1
-        layer = layer_repo._layers[0]
-        assert layer.item_id == ITEM_ID
-        assert layer.received_quantity == Decimal("10")
-        assert layer.remaining_quantity == Decimal("10")
-        assert layer.purchase_unit_price == Decimal("20.00")
-        assert layer.source_document_type == "PZ"
-        assert layer.is_correction is False
+        assert layer_repo._layers[0].purchase_unit_price is None
+        svc.post_document(doc.id)
+        assert len(layer_repo._layers) == 1
+        assert layer_repo._layers[0].purchase_unit_price == Decimal("20.00")
 
     def test_post_pz_sets_catalog_vat_rate(self):
         svc, doc_repo, _ = _make_service()
@@ -305,11 +340,11 @@ class TestPZ:
         with pytest.raises(InvalidWarehouseDocumentError, match="purchase_unit_price"):
             svc.post_document(doc.id)
 
-    def test_pz_create_validates_purchase_price_required(self):
+    def test_pz_create_allows_missing_purchase_price(self):
         svc, _, _ = _make_service()
         body = {"doc_type": "PZ", "items": [{"item_id": str(ITEM_ID), "quantity": "5"}]}
-        with pytest.raises(InvalidWarehouseDocumentError, match="purchase_unit_price"):
-            svc.create_document(body)
+        doc = svc.create_document(body)
+        assert doc.doc_items[0].purchase_unit_price is None
 
     def test_pz_number_sequential(self):
         svc, doc_repo, layer_repo = _make_service()
@@ -322,6 +357,33 @@ class TestPZ:
         assert f"PZ/{year}/0001" in numbers
         assert f"PZ/{year}/0002" in numbers
         assert f"PZ/{year}/0003" in numbers
+
+    def test_post_pz_does_not_duplicate_layer(self):
+        svc, _, layer_repo = _make_service()
+        doc = svc.create_document(_pz_body(qty="5", price="12.00"))
+        svc.post_document(doc.id)
+        svc.post_document(doc.id)
+        assert len(layer_repo._layers) == 1
+
+    def test_wz_consumes_draft_pz_layer_before_post(self):
+        svc, _, layer_repo = _make_service()
+        pz = svc.create_document(_pz_body(qty="10", price="20.00"))
+        wz = svc.create_document(_wz_body(qty="4"))
+        svc.post_document(wz.id)
+        layer = layer_repo._layers[0]
+        assert layer.remaining_quantity == Decimal("6")
+        assert layer.purchase_unit_price is None
+        assert layer_repo._movements[0].purchase_unit_price_snapshot is None
+        svc.post_document(pz.id)
+        assert layer.purchase_unit_price == Decimal("20.00")
+
+    def test_cancel_pz_draft_blocked_after_partial_wz(self):
+        svc, _, layer_repo = _make_service()
+        pz = svc.create_document(_pz_body(qty="10", price="20.00"))
+        wz = svc.create_document(_wz_body(qty="3"))
+        svc.post_document(wz.id)
+        with pytest.raises(InvalidWarehouseDocumentError, match="częściowy rozchód"):
+            svc.cancel_document(pz.id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -488,10 +550,10 @@ class TestKK:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestDocumentStatuses:
-    def test_draft_does_not_change_balance(self):
+    def test_draft_pz_changes_balance(self):
         svc, doc_repo, _ = _make_service()
         svc.create_document(_pz_body())
-        assert doc_repo.get_balance(ITEM_ID) is None
+        assert doc_repo.get_balance(ITEM_ID).quantity_available == Decimal("10")
 
     def test_cannot_post_cancelled_document(self):
         svc, doc_repo, _ = _make_service()
@@ -730,15 +792,14 @@ class TestDraftEditAndCancel:
         updated = doc_repo.get_by_id_with_items(doc.id)
         assert updated.doc_items[0].quantity == Decimal("5.0000")
 
-    def test_update_draft_does_not_touch_inventory_layers(self):
-        """Update draftu nie tworzy ani nie modyfikuje warstw FIFO — to zadanie post_document."""
+    def test_update_draft_syncs_inventory_layers(self):
         svc, doc_repo, layer_repo = _make_service()
         doc = svc.create_document(_pz_body(qty="10"))
+        assert len(layer_repo._layers) == 1
         svc.update_document(doc.id, _update_body(qty="7"))
-
-        assert len(layer_repo._layers) == 0
-        assert len(layer_repo._movements) == 0
-        assert doc_repo.get_balance(ITEM_ID) is None
+        assert len(layer_repo._layers) == 1
+        assert layer_repo._layers[0].remaining_quantity == Decimal("7")
+        assert doc_repo.get_balance(ITEM_ID).quantity_available == Decimal("7")
 
     def test_update_draft_replaces_all_items(self):
         """Po update stare pozycje są zastąpione nowymi — brak duplikatów."""
@@ -786,13 +847,11 @@ class TestDraftEditAndCancel:
         cancelled = doc_repo.get_by_id(doc.id)
         assert cancelled.status == "cancelled"
 
-    def test_cancel_draft_does_not_change_balance(self):
-        """Anulowanie draftu nie dotyka stanów — draft nigdy ich nie zmienia."""
+    def test_cancel_draft_reverts_balance_and_layers(self):
         svc, doc_repo, layer_repo = _make_service()
         doc = svc.create_document(_pz_body())
         svc.cancel_document(doc.id)
-
-        assert doc_repo.get_balance(ITEM_ID) is None
+        assert doc_repo.get_balance(ITEM_ID).quantity_available == Decimal("0")
         assert len(layer_repo._layers) == 0
 
     def test_cancel_posted_raises(self):

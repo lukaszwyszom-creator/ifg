@@ -312,9 +312,11 @@ function DocForm({ onSaved, onCancel, initial }) {
       if (row.quantity === '' || isNaN(qty) || qty === 0 || !Number.isInteger(qty))
         return `Pozycja ${nr}: ilość musi być liczbą całkowitą różną od zera.`;
       if (docType === 'PZ') {
-        const price = Number(row.purchase_unit_price);
-        if (row.purchase_unit_price === '' || isNaN(price) || price < 0)
-          return `Pozycja ${nr}: cena zakupu jest wymagana i musi być >= 0.`;
+        if (row.purchase_unit_price !== '') {
+          const price = Number(row.purchase_unit_price);
+          if (isNaN(price) || price < 0)
+            return `Pozycja ${nr}: cena zakupu musi być >= 0 (lub pusta w draft).`;
+        }
         if (row.vat_rate === '' || row.vat_rate == null)
           return `Pozycja ${nr}: stawka VAT jest wymagana.`;
         if (row.suggested_sale_price !== '') {
@@ -731,6 +733,16 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
   }, [docId]);
 
   const handlePost = async () => {
+    if (doc.doc_type === 'PZ') {
+      for (let i = 0; i < doc.items.length; i++) {
+        const it = doc.items[i];
+        const price = Number(it.purchase_unit_price);
+        if (it.purchase_unit_price == null || it.purchase_unit_price === '' || isNaN(price) || price < 0) {
+          setError(`Pozycja ${i + 1}: cena zakupu wymagana do zaksięgowania PZ.`);
+          return;
+        }
+      }
+    }
     setPosting(true);
     setError('');
     try {

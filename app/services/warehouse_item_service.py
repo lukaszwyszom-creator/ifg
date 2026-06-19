@@ -122,13 +122,15 @@ class WarehouseItemService:
 
 def _balance_entry_from_row(row) -> WarehouseBalanceEntryResponse:
     qty = Decimal(str(row.remaining_quantity))
-    price = Decimal(str(row.purchase_unit_price))
+    price_raw = row.purchase_unit_price
+    price = Decimal(str(price_raw)) if price_raw is not None else None
     vat = row.doc_item_vat_rate if row.doc_item_vat_rate is not None else row.item_vat_rate
     doc_date: date | None = None
     if row.source_document_posted_at is not None:
         doc_date = row.source_document_posted_at.date()
     elif row.received_date is not None:
         doc_date = row.received_date
+    value_net = qty * price if price is not None else None
     return WarehouseBalanceEntryResponse(
         layer_id=row.layer_id,
         item_id=row.item_id,
@@ -140,5 +142,6 @@ def _balance_entry_from_row(row) -> WarehouseBalanceEntryResponse:
         quantity_available=qty,
         unit_price_net=price,
         vat_rate=vat,
-        value_net=qty * price,
+        value_net=value_net,
+        cost_pending=price is None,
     )
