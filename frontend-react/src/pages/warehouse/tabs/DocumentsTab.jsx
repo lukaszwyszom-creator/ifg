@@ -103,6 +103,26 @@ function detailItemColSpan(docType) {
   return 4;
 }
 
+function sumDocItemQuantities(items) {
+  if (!items?.length) return null;
+  return items.reduce((acc, it) => {
+    const n = Number(it.quantity);
+    return Number.isFinite(n) ? acc + n : acc;
+  }, 0);
+}
+
+function fmtDocListQtyImpact(docType, items) {
+  if (!items?.length) return '—';
+  const sum = sumDocItemQuantities(items);
+  if (!Number.isFinite(sum)) return '—';
+  const qty = Math.trunc(sum);
+  if (docType === 'PZ') return `+${Math.abs(qty)}`;
+  if (docType === 'WZ') return `-${Math.abs(qty)}`;
+  if (qty > 0) return `+${qty}`;
+  if (qty < 0) return String(qty);
+  return '0';
+}
+
 // ── DocList ───────────────────────────────────────────────────────────────────
 
 function DocList({ onNew, onOpen, refreshKey }) {
@@ -147,6 +167,7 @@ function DocList({ onNew, onOpen, refreshKey }) {
               <th>Typ</th>
               <th>Data</th>
               <th>Opis / Powód</th>
+              <th className={styles.right}>ILOŚĆ</th>
               <th className={styles.right}>Pozycji</th>
               <th>Status</th>
             </tr>
@@ -172,6 +193,7 @@ function DocList({ onNew, onOpen, refreshKey }) {
                 <td style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
                   {d.correction_reason || d.issue_reason || d.notes || '—'}
                 </td>
+                <td className={styles.right}>{fmtDocListQtyImpact(d.doc_type, d.items)}</td>
                 <td className={styles.right}>{d.items?.length ?? '?'}</td>
                 <td>
                   <StatusBadge status={d.status} />
