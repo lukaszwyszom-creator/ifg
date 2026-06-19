@@ -3,7 +3,6 @@ import { warehouseItemsApi } from '../../../api/warehouseItems';
 import styles from '../WarehousePage.module.css';
 import logoIfg from '../../../assets/logo-ifg.png';
 
-const DELIVERY_ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 const LS_VALUE_2025 = 'ifg.warehouse.balance.manual_value_2025';
 const LS_INVENTORY_SEQ = 'ifg.warehouse.inventory_pdf_seq';
 
@@ -62,6 +61,59 @@ function layerValueNet(entry) {
   return qty * price;
 }
 
+function aggregateBalanceByItem(entries) {
+  const map = new Map();
+  for (const e of entries) {
+    if (!e.item_id) return { error: 'Brak item_id w odpowiedzi API — agregacja po towarze niemożliwa.', rows: [] };
+    const key = String(e.item_id);
+    let agg = map.get(key);
+    if (!agg) {
+      agg = {
+        item_id: e.item_id,
+        name: e.name,
+        isbn: e.isbn ?? null,
+        quantity_available: 0,
+        value_net: 0,
+        vat_rate: e.vat_rate ?? null,
+        layers: [],
+      };
+      map.set(key, agg);
+    }
+    const qty = parseFloat(e.quantity_available) || 0;
+    const val = layerValueNet(e);
+    agg.quantity_available += qty;
+    agg.value_net += val;
+    if (agg.vat_rate == null && e.vat_rate != null) agg.vat_rate = e.vat_rate;
+    agg.layers.push({
+      layer_id: e.layer_id,
+      source_document_number: e.source_document_number,
+      source_document_date: e.source_document_date,
+      quantity_available: qty,
+      unit_price_net: e.unit_price_net,
+      value_net: val,
+    });
+  }
+  const rows = Array.from(map.values())
+    .map((agg) => ({
+      ...agg,
+      unit_price_net:
+        agg.quantity_available > 0 ? agg.value_net / agg.quantity_available : 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+  return { error: null, rows };
+}
+
+function layerSourcesTooltip(layers) {
+  if (!layers?.length) return '';
+  return layers
+    .map((l) => {
+      const doc = l.source_document_number ?? '—';
+      const dt = l.source_document_date ? fmtDate(l.source_document_date) : '—';
+      return `${doc} (${dt}): ${fmtQty(l.quantity_available)} szt. @ ${fmtAmount(l.unit_price_net)} zł netto`;
+    })
+    .join('\n');
+}
+
 function fmtQty(v) {
   if (v == null) return '—';
   return Math.round(parseFloat(v)).toLocaleString('pl-PL');
@@ -70,10 +122,6 @@ function fmtQty(v) {
 function fmtDate(v) {
   if (!v) return '—';
   return new Date(v).toLocaleDateString('pl-PL');
-}
-
-function deliveryLabel(n) {
-  return DELIVERY_ROMAN[n - 1] ?? String(n);
 }
 
 function fmtDatePl(d = new Date()) {
@@ -111,10 +159,9 @@ function buildInventoryHtml(rows, totalNet, logoUrl) {
       const qty = Math.round(parseFloat(e.quantity_available) || 0);
       const price = parseFloat(e.unit_price_net) || 0;
       const lineNet = layerValueNet(e);
-      const name = e.deliveryLabel ? `${e.name} (${e.deliveryLabel})` : e.name;
       return `<tr>
         <td style="text-align:center">${idx + 1}</td>
-        <td>${escHtml(name)}</td>
+        <td>${escHtml(e.name)}</td>
         <td style="text-align:center">${qty.toLocaleString('pl-PL')}</td>
         <td style="text-align:right">${fmtAmount(price)} zł</td>
         <td style="text-align:right">${fmtAmount(lineNet)} zł</td>
@@ -174,29 +221,6 @@ function saveInventoryPdf(_html, _filename) {
   );
 }
 
-function enrichEntries(entries) {
-  const indicesByIsbn = new Map();
-  entries.forEach((e, idx) => {
-    if (!e.isbn) return;
-    if (!indicesByIsbn.has(e.isbn)) indicesByIsbn.set(e.isbn, []);
-    indicesByIsbn.get(e.isbn).push(idx);
-  });
-
-  return entries.map((e, idx) => {
-    const group = e.isbn ? indicesByIsbn.get(e.isbn) : null;
-    const isbnGrouped = group && group.length > 1;
-    const posInGroup = isbnGrouped ? group.indexOf(idx) : -1;
-    return {
-      ...e,
-      deliveryLabel:
-        isbnGrouped && posInGroup >= 0
-          ? `dostawa ${deliveryLabel(posInGroup + 1)}`
-          : null,
-      isbnGrouped: !!isbnGrouped,
-    };
-  });
-}
-
 export default function BalanceTab({ onAddItem }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -208,10 +232,13 @@ export default function BalanceTab({ onAddItem }) {
   const [pdfFilename, setPdfFilename] = useState('');
   const pdfIframeRef = useRef(null);
 
-  const rows = useMemo(() => enrichEntries(entries), [entries]);
-  const total2026 = useMemo(
-    () => entries.reduce((sum, e) => sum + layerValueNet(e), 0),
+  const { error: aggregateError, rows } = useMemo(
+    () => aggregateBalanceByItem(entries),
     [entries]
+  );
+  const total2026 = useMemo(
+    () => rows.reduce((sum, e) => sum + layerValueNet(e), 0),
+    [rows]
   );
   const manual2025 = parseFloat(value2025) || 0;
   const valueDiff = total2026 - manual2025;
@@ -261,6 +288,9 @@ export default function BalanceTab({ onAddItem }) {
   if (error)
     return <p style={{ color: 'var(--color-error)', padding: 16 }}>{error}</p>;
 
+  if (aggregateError)
+    return <p style={{ color: 'var(--color-error)', padding: 16 }}>{aggregateError}</p>;
+
   if (entries.length === 0) {
     return (
       <div className={styles.emptyState}>
@@ -280,7 +310,7 @@ export default function BalanceTab({ onAddItem }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <span className={styles.sectionTitle} style={{ margin: 0 }}>
-            Stan magazynowy: {entries.length} pozycji,{' '}
+            Stan magazynowy: {rows.length} towarów,{' '}
             <span style={{ color: 'var(--color-warning, #f59e0b)' }}>{fmtAmountZl(total2026)}</span>
           </span>
           <button
@@ -337,11 +367,9 @@ export default function BalanceTab({ onAddItem }) {
           <col style={{ width: 40 }} />
           <col />
           <col style={{ width: 148 }} />
-          <col style={{ width: 112 }} />
+          <col style={{ width: 96 }} />
           <col style={{ width: 96 }} />
           <col style={{ width: 72 }} />
-          <col style={{ width: 88 }} />
-          <col style={{ width: 52 }} />
           <col style={{ width: 96 }} />
         </colgroup>
         <thead>
@@ -349,8 +377,6 @@ export default function BalanceTab({ onAddItem }) {
             <th style={{ textAlign: 'center' }}>LP</th>
             <th style={{ textAlign: 'left' }}>Towar</th>
             <th style={{ textAlign: 'left' }}>ISBN</th>
-            <th style={{ textAlign: 'left' }}>Dokument źródłowy</th>
-            <th style={{ textAlign: 'left' }}>Data dokumentu</th>
             <th style={{ textAlign: 'center' }}>Liczba dostępna</th>
             <th style={{ textAlign: 'center' }}>Cena netto</th>
             <th style={{ textAlign: 'center' }}>VAT</th>
@@ -358,23 +384,26 @@ export default function BalanceTab({ onAddItem }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((e, idx) => (
-            <tr key={e.layer_id}>
+          {rows.map((e, idx) => {
+            const sourcesHint = layerSourcesTooltip(e.layers);
+            return (
+            <tr key={e.item_id} title={sourcesHint || undefined}>
               <td style={{ textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
                 {idx + 1}
               </td>
               <td style={{ textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {e.name}
-                {e.deliveryLabel && (
+                {sourcesHint && e.layers.length > 1 && (
                   <div
                     style={{
-                      fontSize: '0.75rem',
+                      fontSize: '0.72rem',
                       color: 'var(--color-text-secondary)',
                       marginTop: 2,
                       fontWeight: 400,
                     }}
+                    title={sourcesHint}
                   >
-                    {e.deliveryLabel}
+                    {e.layers.length} warstw FIFO — szczegóły w podpowiedzi
                   </div>
                 )}
               </td>
@@ -383,24 +412,10 @@ export default function BalanceTab({ onAddItem }) {
                   textAlign: 'left',
                   whiteSpace: 'nowrap',
                   fontSize: '0.85rem',
-                  color: e.isbnGrouped
-                    ? 'var(--color-text-primary)'
-                    : 'var(--color-text-secondary)',
+                  color: 'var(--color-text-secondary)',
                 }}
               >
                 {e.isbn ?? '—'}
-              </td>
-              <td style={{ textAlign: 'left', fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                {e.source_document_number ?? '—'}
-              </td>
-              <td
-                style={{
-                  textAlign: 'left',
-                  color: 'var(--color-text-secondary)',
-                  fontSize: '0.85rem',
-                }}
-              >
-                {fmtDate(e.source_document_date)}
               </td>
               <td style={{ textAlign: 'center' }}>{fmtQty(e.quantity_available)}</td>
               <td style={{ textAlign: 'center' }}>{fmtAmount(e.unit_price_net)} zł</td>
@@ -409,7 +424,8 @@ export default function BalanceTab({ onAddItem }) {
               </td>
               <td className={styles.right}>{fmtAmount(e.value_net)} zł</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
 
