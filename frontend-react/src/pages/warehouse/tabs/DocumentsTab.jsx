@@ -202,7 +202,7 @@ const emptyRow = () => ({
 });
 
 function DocForm({ onSaved, onCancel, initial }) {
-  const isEdit = !!initial;
+  const isEdit = Boolean(initial?.id);
   const [docType, setDocType] = useState(initial?.doc_type ?? 'PZ');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [correctionReason, setCorrectionReason] = useState(initial?.correction_reason ?? '');
@@ -264,6 +264,11 @@ function DocForm({ onSaved, onCancel, initial }) {
     if (docType === 'PZ') return true;
     if (docType === 'KK') return row.quantity === '' || Number(row.quantity) >= 0;
     return false;
+  };
+
+  const handleDocTypeChange = (nextType) => {
+    setDocType(nextType);
+    setError('');
   };
 
   const validateForm = () => {
@@ -365,7 +370,7 @@ function DocForm({ onSaved, onCancel, initial }) {
               className="input"
               value={docType}
               disabled={isEdit}
-              onChange={(e) => setDocType(e.target.value)}
+              onChange={(e) => handleDocTypeChange(e.target.value)}
             >
               <option value="PZ">PZ — Przyjęcie</option>
               <option value="WZ">WZ — Wydanie</option>
@@ -471,12 +476,15 @@ function DocForm({ onSaved, onCancel, initial }) {
                   <th className={styles.right}>STAWKA VAT</th>
                   <th className={styles.right}>NORMATYWNA CENA SPRZEDAŻY BRUTTO</th>
                 </>
+              ) : docType === 'KK' ? (
+                <>
+                  <th className={styles.right}>Ilość</th>
+                  <th className={styles.right}>Cena zakupu</th>
+                  <th className={styles.right}>Cena suger.</th>
+                </>
               ) : (
                 <>
                   <th className={styles.right}>Ilość</th>
-                  {(docType === 'KK') && (
-                    <th className={styles.right}>Cena zakupu</th>
-                  )}
                   <th className={styles.right}>Cena suger.</th>
                 </>
               )}
@@ -573,35 +581,33 @@ function DocForm({ onSaved, onCancel, initial }) {
                         />
                       </td>
                     </>
-                  ) : (
+                  ) : docType === 'KK' ? (
                     <>
-                      {docType === 'KK' && (
-                        <td className={styles.right}>
-                          {needsPurchasePrice(row) ? (
-                            <input
-                              className="input"
-                              style={{ width: 90, textAlign: 'right' }}
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={row.purchase_unit_price}
-                              onChange={(e) =>
-                                setField(row._key, 'purchase_unit_price', e.target.value)
-                              }
-                              placeholder="0.00"
-                            />
-                          ) : (
-                            <span
-                              style={{
-                                color: 'var(--color-text-secondary)',
-                                fontSize: '0.8rem',
-                              }}
-                            >
-                              n/d
-                            </span>
-                          )}
-                        </td>
-                      )}
+                      <td className={styles.right}>
+                        {needsPurchasePrice(row) ? (
+                          <input
+                            className="input"
+                            style={{ width: 90, textAlign: 'right' }}
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={row.purchase_unit_price}
+                            onChange={(e) =>
+                              setField(row._key, 'purchase_unit_price', e.target.value)
+                            }
+                            placeholder="0.00"
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              color: 'var(--color-text-secondary)',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            n/d
+                          </span>
+                        )}
+                      </td>
                       <td className={styles.right}>
                         <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
                           {ci?.suggested_sale_price != null
@@ -610,6 +616,14 @@ function DocForm({ onSaved, onCancel, initial }) {
                         </span>
                       </td>
                     </>
+                  ) : (
+                    <td className={styles.right}>
+                      <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
+                        {ci?.suggested_sale_price != null
+                          ? `${fmtMoney2(ci.suggested_sale_price)} zł`
+                          : '—'}
+                      </span>
+                    </td>
                   )}
                   <td>
                     <button
