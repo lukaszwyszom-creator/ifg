@@ -243,6 +243,36 @@
   width: 4%;
 }
 
+/* WZ — podgląd pozycji */
+.wzItemsTable {
+  table-layout: fixed;
+}
+
+.wzItemsTable th.right {
+  text-align: right;
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+
+.wzItemsTable td.numCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.colWzProduct {
+  width: 55%;
+}
+
+.colWzQty {
+  width: 12%;
+}
+
+.colWzGross {
+  width: 33%;
+}
+
 .actions {
   display: flex;
   gap: 6px;

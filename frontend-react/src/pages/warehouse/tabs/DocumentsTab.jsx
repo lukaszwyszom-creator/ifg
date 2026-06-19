@@ -70,6 +70,39 @@ function fmtVatRate(value) {
   return `${normalized}%`;
 }
 
+function netToGrossDisplay(net, vatRate) {
+  const n = Number(net);
+  const rate = Number.parseFloat(String(vatRate ?? '23').replace(',', '.'));
+  if (!Number.isFinite(n)) return '—';
+  if (!Number.isFinite(rate) || rate <= 0) return fmtMoney2(n);
+  return fmtMoney2(n * (1 + rate / 100));
+}
+
+function wzSalePriceGross(it, ci) {
+  const vat = it.vat_rate ?? ci?.vat_rate;
+  if (it.suggested_sale_price != null) {
+    if (it.suggested_sale_price_mode === 'gross') return fmtMoney2(it.suggested_sale_price);
+    if (it.suggested_sale_price_mode === 'net') {
+      return netToGrossDisplay(it.suggested_sale_price, vat);
+    }
+  }
+  if (ci?.suggested_sale_price != null) {
+    const mode = ci.suggested_sale_price_mode ?? 'net';
+    if (mode === 'gross') return fmtMoney2(ci.suggested_sale_price);
+    return netToGrossDisplay(ci.suggested_sale_price, ci.vat_rate);
+  }
+  if (it.unit_price_net != null) {
+    return netToGrossDisplay(it.unit_price_net, vat);
+  }
+  return '—';
+}
+
+function detailItemColSpan(docType) {
+  if (docType === 'PZ') return 5;
+  if (docType === 'WZ') return 3;
+  return 4;
+}
+
 // ── DocList ───────────────────────────────────────────────────────────────────
 
 function DocList({ onNew, onOpen, refreshKey }) {
@@ -658,6 +691,13 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
   const isDraft = doc.status === 'draft';
   const isPosted = doc.status === 'posted';
   const reason = doc.correction_reason || doc.issue_reason || doc.notes;
+  const reasonLabel =
+    doc.doc_type === 'WZ' && doc.issue_reason
+      ? 'Powód wydania'
+      : doc.doc_type === 'KK' && doc.correction_reason
+        ? 'Powód korekty'
+        : 'Opis / Powód';
+  const itemColSpan = detailItemColSpan(doc.doc_type);
 
   const fifoSectionTitle = (docType) =>
     docType === 'WZ' ? 'Zdjęcie z warstw FIFO' : 'Korekta — zdjęcie z warstw FIFO';
@@ -711,7 +751,7 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
           )}
           {reason && (
             <div style={{ flex: '1 1 200px' }}>
-              <div className={styles.fieldLabel}>Opis / Powód</div>
+              <div className={styles.fieldLabel}>{reasonLabel}</div>
               <span>{reason}</span>
             </div>
           )}
@@ -724,7 +764,13 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
           Pozycje ({doc.items?.length ?? 0})
         </div>
         <table
-          className={`${styles.catalogTable}${doc.doc_type === 'PZ' ? ` ${styles.pzItemsTable}` : ''}`}
+          className={`${styles.catalogTable}${
+            doc.doc_type === 'PZ'
+              ? ` ${styles.pzItemsTable}`
+              : doc.doc_type === 'WZ'
+                ? ` ${styles.wzItemsTable}`
+                : ''
+          }`}
         >
           {doc.doc_type === 'PZ' && (
             <colgroup>
@@ -733,6 +779,13 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
               <col className={styles.colPzPurchase} />
               <col className={styles.colPzVat} />
               <col className={styles.colPzGross} />
+            </colgroup>
+          )}
+          {doc.doc_type === 'WZ' && (
+            <colgroup>
+              <col className={styles.colWzProduct} />
+              <col className={styles.colWzQty} />
+              <col className={styles.colWzGross} />
             </colgroup>
           )}
           <thead>
@@ -744,6 +797,11 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                   <th className={styles.right}>CENA ZAKUPU (NETTO)</th>
                   <th className={styles.right}>STAWKA VAT</th>
                   <th className={styles.right}>NORMATYWNA CENA SPRZEDAŻY BRUTTO</th>
+                </>
+              ) : doc.doc_type === 'WZ' ? (
+                <>
+                  <th className={styles.right}>ILOŚĆ</th>
+                  <th className={styles.right}>CENA SPRZEDAŻY BRUTTO</th>
                 </>
               ) : (
                 <>
@@ -792,8 +850,8 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                         </span>
                       )}
                     </td>
-                    <td className={doc.doc_type === 'PZ' ? styles.numCell : styles.right}>
-                      {doc.doc_type === 'PZ' ? fmtIntegerQty(it.quantity) : it.quantity}
+                    <td className={doc.doc_type === 'KK' ? styles.right : styles.numCell}>
+                      {fmtIntegerQty(it.quantity)}
                     </td>
                     {doc.doc_type === 'PZ' ? (
                       <>
@@ -803,6 +861,8 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                         </td>
                         <td className={styles.numCell}>{fmtMoney2(it.suggested_sale_price)}</td>
                       </>
+                    ) : doc.doc_type === 'WZ' ? (
+                      <td className={styles.numCell}>{wzSalePriceGross(it, ci)}</td>
                     ) : (
                       <>
                         <td className={styles.right}>{it.purchase_unit_price ?? '—'}</td>
@@ -813,7 +873,7 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                   {showFifoMovements && (
                     <tr>
                       <td
-                        colSpan={doc.doc_type === 'PZ' ? 5 : 4}
+                        colSpan={itemColSpan}
                         style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}
                       >
                         <div
@@ -860,7 +920,7 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                   {isPositiveKkPosted && (
                     <tr>
                       <td
-                        colSpan={doc.doc_type === 'PZ' ? 5 : 4}
+                        colSpan={itemColSpan}
                         style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}
                       >
                         <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
