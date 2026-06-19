@@ -21,6 +21,10 @@ class WarehouseItemORM(Base):
     default_price_net: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     # Cena sugerowana sprzedaży — domyślnie trafia na FV/WZ; zmiana nie wpływa na historię
     suggested_sale_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # net = historyczne dane; gross = normatywna cena brutto z PZ (od cutover)
+    suggested_sale_price_mode: Mapped[str] = mapped_column(
+        String(5), nullable=False, server_default="net"
+    )
     unit: Mapped[str] = mapped_column(String(32), nullable=False, default="szt.")
     is_warehouse_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"

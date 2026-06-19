@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.domain.enums import WarehouseDocumentType
 
+_SALE_PRICE_MODES = frozenset({"net", "gross"})
+
 
 class WarehouseDocItemInput(BaseModel):
     item_id: UUID
@@ -17,6 +19,16 @@ class WarehouseDocItemInput(BaseModel):
     vat_rate: Decimal | None = None
     # suggested_sale_price — podawane przy PZ; na post() zapisywane na towarze
     suggested_sale_price: Decimal | None = None
+    suggested_sale_price_mode: str | None = None
+
+    @field_validator("suggested_sale_price_mode")
+    @classmethod
+    def validate_suggested_sale_price_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if v not in _SALE_PRICE_MODES:
+            raise ValueError("suggested_sale_price_mode musi być 'net' lub 'gross'.")
+        return v
 
     @field_validator("quantity")
     @classmethod
@@ -56,6 +68,7 @@ class WarehouseDocItemResponse(BaseModel):
     unit_price_net: Decimal | None
     vat_rate: Decimal | None
     suggested_sale_price: Decimal | None
+    suggested_sale_price_mode: str | None
     fifo_movements: list[WarehouseDocFifoMovementResponse] = []
 
 
@@ -92,6 +105,7 @@ class WarehouseDocResponse(BaseModel):
                     unit_price_net=i.unit_price_net,
                     vat_rate=i.vat_rate,
                     suggested_sale_price=i.suggested_sale_price,
+                    suggested_sale_price_mode=i.suggested_sale_price_mode,
                     fifo_movements=(fifo_by_item_id or {}).get(i.id, []),
                 )
             )

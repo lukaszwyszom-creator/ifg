@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { contractorsApi } from '../../api/contractors';
 import { warehouseItemsApi } from '../../api/warehouseItems';
+import { catalogItemToLineFields } from './catalogItemLineFromWarehouse';
 import styles from './InvoiceForm.module.css';
 
 const TODAY = new Date().toISOString().split('T')[0];
@@ -144,20 +145,6 @@ function filterCatalogItems(catalogItems, query) {
       return name.includes(q) || isbn.includes(q);
     })
     .slice(0, 12);
-}
-
-function catalogItemToLineFields(catalogItem) {
-  const price = catalogItem.suggested_sale_price ?? catalogItem.default_price_net;
-  const fields = {
-    name: catalogItem.name,
-    isbn: catalogItem.isbn ?? '',
-    unit: catalogItem.unit || 'szt.',
-    unit_price_net: price != null ? String(price) : '',
-  };
-  if (catalogItem.vat_rate != null) {
-    fields.vat_rate = normalizeVatRateForSelect(catalogItem.vat_rate);
-  }
-  return fields;
 }
 
 function useWarehouseCatalog() {

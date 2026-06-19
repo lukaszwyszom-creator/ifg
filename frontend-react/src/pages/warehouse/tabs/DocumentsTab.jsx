@@ -30,6 +30,46 @@ function apiErr(err) {
   );
 }
 
+function normalizeVatRateForSelect(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '23';
+  const n = Number.parseFloat(text.replace(',', '.'));
+  if (!Number.isFinite(n)) return '23';
+  if (n <= 0.5) return '0';
+  if (n >= 22.5 && n <= 23.5) return '23';
+  if (n >= 7.5 && n <= 8.5) return '8';
+  if (n >= 4.5 && n <= 5.5) return '5';
+  return String(Math.round(n));
+}
+
+function sanitizeIntegerQty(value, allowNegative = false) {
+  const raw = String(value ?? '').trim();
+  if (raw === '' || (allowNegative && raw === '-')) return raw;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed === 0) return raw === '0' ? '0' : '';
+  return String(parsed);
+}
+
+function fmtIntegerQty(value) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return String(Math.trunc(n));
+}
+
+function fmtMoney2(value) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtVatRate(value) {
+  if (value == null || value === '') return '—';
+  const normalized = normalizeVatRateForSelect(value);
+  return `${normalized}%`;
+}
+
 // ── DocList ───────────────────────────────────────────────────────────────────
 
 function DocList({ onNew, onOpen, refreshKey }) {
@@ -168,6 +208,25 @@ function DocForm({ onSaved, onCancel, initial }) {
   const setField = (key, field, val) =>
     setItems((p) => p.map((i) => (i._key === key ? { ...i, [field]: val } : i)));
 
+  const selectItem = (rowKey, itemId) => {
+    setItems((p) =>
+      p.map((row) => {
+        if (row._key !== rowKey) return row;
+        const ci = catalogMap[itemId];
+        const next = { ...row, item_id: itemId };
+        if (docType === 'PZ' && ci) {
+          if (ci.vat_rate != null) {
+            next.vat_rate = normalizeVatRateForSelect(ci.vat_rate);
+          }
+          if (ci.suggested_sale_price != null) {
+            next.suggested_sale_price = String(ci.suggested_sale_price);
+          }
+        }
+        return next;
+      })
+    );
+  };
+
   const needsPurchasePrice = (row) => {
     if (docType === 'PZ') return true;
     if (docType === 'KK') return row.quantity === '' || Number(row.quantity) >= 0;
@@ -192,7 +251,7 @@ function DocForm({ onSaved, onCancel, initial }) {
         if (row.suggested_sale_price !== '') {
           const sp = Number(row.suggested_sale_price);
           if (isNaN(sp) || sp < 0)
-            return `Pozycja ${nr}: cena sugerowana musi być >= 0.`;
+            return `Pozycja ${nr}: normatywna cena sprzedaży brutto musi być >= 0.`;
         }
       }
       if (docType === 'KK' && qty > 0) {
@@ -233,6 +292,10 @@ function DocForm({ onSaved, onCancel, initial }) {
         suggested_sale_price:
           docType === 'PZ' && it.suggested_sale_price !== ''
             ? it.suggested_sale_price
+            : undefined,
+        suggested_sale_price_mode:
+          docType === 'PZ' && it.suggested_sale_price !== ''
+            ? 'gross'
             : undefined,
       })),
     };
@@ -345,17 +408,40 @@ function DocForm({ onSaved, onCancel, initial }) {
           </button>
         </div>
 
-        <table className={styles.catalogTable}>
+        <table
+          className={`${styles.catalogTable}${docType === 'PZ' ? ` ${styles.pzItemsTable}` : ''}`}
+        >
+          {docType === 'PZ' && (
+            <colgroup>
+              <col className={styles.colPzProduct} />
+              <col className={styles.colPzIsbn} />
+              <col className={styles.colPzQty} />
+              <col className={styles.colPzPurchase} />
+              <col className={styles.colPzVat} />
+              <col className={styles.colPzGross} />
+              <col className={styles.colPzActions} />
+            </colgroup>
+          )}
           <thead>
             <tr>
               <th>Towar</th>
               <th>ISBN</th>
-              <th className={styles.right}>Ilość</th>
-              {(docType === 'PZ' || docType === 'KK') && (
-                <th className={styles.right}>Cena zakupu</th>
+              {docType === 'PZ' ? (
+                <>
+                  <th className={styles.right}>ILOŚĆ</th>
+                  <th className={styles.right}>CENA ZAKUPU (NETTO)</th>
+                  <th className={styles.right}>STAWKA VAT</th>
+                  <th className={styles.right}>NORMATYWNA CENA SPRZEDAŻY BRUTTO</th>
+                </>
+              ) : (
+                <>
+                  <th className={styles.right}>Ilość</th>
+                  {(docType === 'KK') && (
+                    <th className={styles.right}>Cena zakupu</th>
+                  )}
+                  <th className={styles.right}>Cena suger.</th>
+                </>
               )}
-              {docType === 'PZ' && <th className={styles.right}>VAT %</th>}
-              <th className={styles.right}>Cena suger.</th>
               <th />
             </tr>
           </thead>
@@ -369,7 +455,7 @@ function DocForm({ onSaved, onCancel, initial }) {
                       className="input"
                       style={{ minWidth: 160 }}
                       value={row.item_id}
-                      onChange={(e) => setField(row._key, 'item_id', e.target.value)}
+                      onChange={(e) => selectItem(row._key, e.target.value)}
                     >
                       <option value="">— wybierz —</option>
                       {warehouseItems.map((ci) => (
@@ -388,24 +474,29 @@ function DocForm({ onSaved, onCancel, initial }) {
                   >
                     {ci?.isbn ?? '—'}
                   </td>
-                  <td className={styles.right}>
+                  <td className={docType === 'PZ' ? styles.numCell : styles.right}>
                     <input
-                      className="input"
-                      style={{ width: 80, textAlign: 'right' }}
+                      className={docType === 'PZ' ? `${styles.numInput} input` : 'input'}
+                      style={docType === 'PZ' ? undefined : { width: 80, textAlign: 'right' }}
                       type="number"
                       step="1"
                       min={docType === 'KK' ? undefined : '1'}
                       value={row.quantity}
-                      onChange={(e) => setField(row._key, 'quantity', e.target.value)}
-                      placeholder="Ilość"
+                      onChange={(e) =>
+                        setField(
+                          row._key,
+                          'quantity',
+                          sanitizeIntegerQty(e.target.value, docType === 'KK')
+                        )
+                      }
+                      placeholder="0"
                     />
                   </td>
-                  {(docType === 'PZ' || docType === 'KK') && (
-                    <td className={styles.right}>
-                      {needsPurchasePrice(row) ? (
+                  {docType === 'PZ' ? (
+                    <>
+                      <td className={styles.numCell}>
                         <input
-                          className="input"
-                          style={{ width: 90, textAlign: 'right' }}
+                          className={`${styles.numInput} input`}
                           type="number"
                           step="0.01"
                           min="0"
@@ -413,59 +504,75 @@ function DocForm({ onSaved, onCancel, initial }) {
                           onChange={(e) =>
                             setField(row._key, 'purchase_unit_price', e.target.value)
                           }
-                          placeholder="0.00"
+                          placeholder="0,00"
                         />
-                      ) : (
-                        <span
-                          style={{
-                            color: 'var(--color-text-secondary)',
-                            fontSize: '0.8rem',
-                          }}
+                      </td>
+                      <td className={styles.numCell}>
+                        <select
+                          className={`${styles.numInput} input`}
+                          value={row.vat_rate}
+                          onChange={(e) => setField(row._key, 'vat_rate', e.target.value)}
                         >
-                          n/d
-                        </span>
+                          <option value="">—</option>
+                          {VAT_OPTIONS.map((v) => (
+                            <option key={v} value={v}>
+                              {v}%
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className={styles.numCell}>
+                        <input
+                          className={`${styles.numInput} input`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.suggested_sale_price}
+                          onChange={(e) =>
+                            setField(row._key, 'suggested_sale_price', e.target.value)
+                          }
+                          placeholder="0,00"
+                        />
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      {docType === 'KK' && (
+                        <td className={styles.right}>
+                          {needsPurchasePrice(row) ? (
+                            <input
+                              className="input"
+                              style={{ width: 90, textAlign: 'right' }}
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={row.purchase_unit_price}
+                              onChange={(e) =>
+                                setField(row._key, 'purchase_unit_price', e.target.value)
+                              }
+                              placeholder="0.00"
+                            />
+                          ) : (
+                            <span
+                              style={{
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.8rem',
+                              }}
+                            >
+                              n/d
+                            </span>
+                          )}
+                        </td>
                       )}
-                    </td>
+                      <td className={styles.right}>
+                        <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
+                          {ci?.suggested_sale_price != null
+                            ? `${fmtMoney2(ci.suggested_sale_price)} zł`
+                            : '—'}
+                        </span>
+                      </td>
+                    </>
                   )}
-                  {docType === 'PZ' && (
-                    <td className={styles.right}>
-                      <select
-                        className="input"
-                        style={{ width: 72 }}
-                        value={row.vat_rate}
-                        onChange={(e) => setField(row._key, 'vat_rate', e.target.value)}
-                      >
-                        <option value="">—</option>
-                        {VAT_OPTIONS.map((v) => (
-                          <option key={v} value={v}>
-                            {v}%
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  )}
-                  <td className={styles.right}>
-                    {docType === 'PZ' ? (
-                      <input
-                        className="input"
-                        style={{ width: 90, textAlign: 'right' }}
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={row.suggested_sale_price}
-                        onChange={(e) =>
-                          setField(row._key, 'suggested_sale_price', e.target.value)
-                        }
-                        placeholder="opcjonalna"
-                      />
-                    ) : (
-                      <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
-                        {ci?.suggested_sale_price != null
-                          ? `${ci.suggested_sale_price} zł`
-                          : '—'}
-                      </span>
-                    )}
-                  </td>
                   <td>
                     <button
                       className="btn btn-ghost"
@@ -611,13 +718,35 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
         <div className={styles.sectionTitle} style={{ marginBottom: 10 }}>
           Pozycje ({doc.items?.length ?? 0})
         </div>
-        <table className={styles.catalogTable}>
+        <table
+          className={`${styles.catalogTable}${doc.doc_type === 'PZ' ? ` ${styles.pzItemsTable}` : ''}`}
+        >
+          {doc.doc_type === 'PZ' && (
+            <colgroup>
+              <col className={styles.colPzProduct} />
+              <col className={styles.colPzQty} />
+              <col className={styles.colPzPurchase} />
+              <col className={styles.colPzVat} />
+              <col className={styles.colPzGross} />
+            </colgroup>
+          )}
           <thead>
             <tr>
               <th>Towar</th>
-              <th className={styles.right}>Ilość</th>
-              <th className={styles.right}>Cena zakupu</th>
-              <th className={styles.right}>Cena sprzedaży</th>
+              {doc.doc_type === 'PZ' ? (
+                <>
+                  <th className={styles.right}>ILOŚĆ</th>
+                  <th className={styles.right}>CENA ZAKUPU (NETTO)</th>
+                  <th className={styles.right}>STAWKA VAT</th>
+                  <th className={styles.right}>NORMATYWNA CENA SPRZEDAŻY BRUTTO</th>
+                </>
+              ) : (
+                <>
+                  <th className={styles.right}>Ilość</th>
+                  <th className={styles.right}>Cena zakupu</th>
+                  <th className={styles.right}>Cena sprzedaży</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -658,13 +787,30 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                         </span>
                       )}
                     </td>
-                    <td className={styles.right}>{it.quantity}</td>
-                    <td className={styles.right}>{it.purchase_unit_price ?? '—'}</td>
-                    <td className={styles.right}>{it.unit_price_net ?? '—'}</td>
+                    <td className={doc.doc_type === 'PZ' ? styles.numCell : styles.right}>
+                      {doc.doc_type === 'PZ' ? fmtIntegerQty(it.quantity) : it.quantity}
+                    </td>
+                    {doc.doc_type === 'PZ' ? (
+                      <>
+                        <td className={styles.numCell}>{fmtMoney2(it.purchase_unit_price)}</td>
+                        <td className={styles.numCell}>
+                          {fmtVatRate(it.vat_rate ?? ci?.vat_rate)}
+                        </td>
+                        <td className={styles.numCell}>{fmtMoney2(it.suggested_sale_price)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className={styles.right}>{it.purchase_unit_price ?? '—'}</td>
+                        <td className={styles.right}>{it.unit_price_net ?? '—'}</td>
+                      </>
+                    )}
                   </tr>
                   {showFifoMovements && (
                     <tr>
-                      <td colSpan={4} style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}>
+                      <td
+                        colSpan={doc.doc_type === 'PZ' ? 5 : 4}
+                        style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}
+                      >
                         <div
                           style={{
                             fontSize: '0.78rem',
@@ -708,7 +854,10 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                   )}
                   {isPositiveKkPosted && (
                     <tr>
-                      <td colSpan={4} style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}>
+                      <td
+                        colSpan={doc.doc_type === 'PZ' ? 5 : 4}
+                        style={{ padding: '4px 8px 10px', background: 'var(--color-bg-subtle, #f8f9fa)' }}
+                      >
                         <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
                           Korekta dodatnia tworzy nową warstwę magazynową.
                         </div>

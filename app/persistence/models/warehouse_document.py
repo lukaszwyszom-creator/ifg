@@ -101,6 +101,7 @@ class WarehouseDocumentItemORM(Base):
     vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     # suggested_sale_price — sugerowana cena sprzedaży podana przy PZ; przy post() zapisywana na towarze
     suggested_sale_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    suggested_sale_price_mode: Mapped[str | None] = mapped_column(String(5), nullable=True)
 
     document = relationship("WarehouseDocumentORM", back_populates="doc_items")
     item = relationship("WarehouseItemORM")

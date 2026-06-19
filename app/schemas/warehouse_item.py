@@ -65,6 +65,7 @@ class WarehouseItemResponse(BaseModel):
     vat_rate: Decimal | None
     default_price_net: Decimal | None
     suggested_sale_price: Decimal | None
+    suggested_sale_price_mode: str
     unit: str
     is_warehouse_active: bool
     is_active: bool

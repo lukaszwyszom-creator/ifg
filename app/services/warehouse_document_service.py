@@ -53,10 +53,25 @@ from app.schemas.warehouse_document import (
 logger = logging.getLogger(__name__)
 
 _FOUR = Decimal("0.0001")
+_SALE_PRICE_MODE_NET = "net"
+_SALE_PRICE_MODE_GROSS = "gross"
 
 
 def _to_dec(v: object) -> Decimal:
     return Decimal(str(v)).quantize(_FOUR, rounding=ROUND_HALF_UP)
+
+
+def _resolve_doc_item_suggested_sale_price_mode(raw: dict) -> str | None:
+    mode = raw.get("suggested_sale_price_mode")
+    if mode is not None:
+        if mode not in (_SALE_PRICE_MODE_NET, _SALE_PRICE_MODE_GROSS):
+            raise InvalidWarehouseDocumentError(
+                "suggested_sale_price_mode musi być 'net' lub 'gross'."
+            )
+        return mode
+    if raw.get("suggested_sale_price") is not None:
+        return _SALE_PRICE_MODE_GROSS
+    return None
 
 
 def _build_item_orm(raw: dict, document_id: object) -> WarehouseDocumentItemORM:
@@ -86,6 +101,7 @@ def _build_item_orm(raw: dict, document_id: object) -> WarehouseDocumentItemORM:
             if raw.get("suggested_sale_price") is not None
             else None
         ),
+        suggested_sale_price_mode=_resolve_doc_item_suggested_sale_price_mode(raw),
     )
 
 
@@ -239,6 +255,9 @@ class WarehouseDocumentService:
                     catalog_item.vat_rate = _to_dec(item.vat_rate)
                 if item.suggested_sale_price is not None:
                     catalog_item.suggested_sale_price = _to_dec(item.suggested_sale_price)
+                    catalog_item.suggested_sale_price_mode = (
+                        item.suggested_sale_price_mode or _SALE_PRICE_MODE_GROSS
+                    )
                 self.session.add(catalog_item)
 
     # ── WZ ────────────────────────────────────────────────────────────────────

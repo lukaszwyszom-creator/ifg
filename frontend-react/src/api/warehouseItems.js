@@ -1,5 +1,6 @@
 import client from './client';
 
+/** Kartoteka: suggested_sale_price + suggested_sale_price_mode (net|gross). */
 const BASE = '/warehouse/items';
 
 export const warehouseItemsApi = {

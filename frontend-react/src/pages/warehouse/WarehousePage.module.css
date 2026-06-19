@@ -190,6 +190,59 @@
   text-align: right;
 }
 
+/* PZ — pozycje: wspólna oś nagłówków i wartości liczbowych */
+.pzItemsTable {
+  table-layout: fixed;
+}
+
+.pzItemsTable th.right {
+  text-align: right;
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+
+.pzItemsTable td.numCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.pzItemsTable .numInput {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.colPzProduct {
+  width: 22%;
+}
+
+.colPzIsbn {
+  width: 11%;
+}
+
+.colPzQty {
+  width: 7%;
+}
+
+.colPzPurchase {
+  width: 13%;
+}
+
+.colPzVat {
+  width: 9%;
+}
+
+.colPzGross {
+  width: 16%;
+}
+
+.colPzActions {
+  width: 4%;
+}
+
 .actions {
   display: flex;
   gap: 6px;
