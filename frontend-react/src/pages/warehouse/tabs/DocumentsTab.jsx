@@ -100,7 +100,16 @@ function wzSalePriceGross(it, ci) {
 function detailItemColSpan(docType) {
   if (docType === 'PZ') return 5;
   if (docType === 'WZ') return 3;
+  if (docType === 'KK') return 3;
   return 4;
+}
+
+function kkQuantityDirectionHint(quantity) {
+  if (quantity === '' || quantity == null) return null;
+  const n = Number(quantity);
+  if (!Number.isFinite(n) || n === 0) return null;
+  if (n > 0) return 'Korekta dodatnia — przyjęcie na stan';
+  return 'Korekta ujemna — zdjęcie ze stanu';
 }
 
 function sumDocItemQuantities(items) {
@@ -474,7 +483,13 @@ function DocForm({ onSaved, onCancel, initial }) {
         </div>
 
         <table
-          className={`${styles.catalogTable}${docType === 'PZ' ? ` ${styles.pzItemsTable}` : ''}`}
+          className={`${styles.catalogTable}${
+            docType === 'PZ'
+              ? ` ${styles.pzItemsTable}`
+              : docType === 'KK'
+                ? ` ${styles.kkItemsTable}`
+                : ''
+          }`}
         >
           {docType === 'PZ' && (
             <colgroup>
@@ -485,6 +500,15 @@ function DocForm({ onSaved, onCancel, initial }) {
               <col className={styles.colPzVat} />
               <col className={styles.colPzGross} />
               <col className={styles.colPzActions} />
+            </colgroup>
+          )}
+          {docType === 'KK' && (
+            <colgroup>
+              <col className={styles.colKkProduct} />
+              <col className={styles.colKkIsbn} />
+              <col className={styles.colKkQty} />
+              <col className={styles.colKkPurchase} />
+              <col className={styles.colKkActions} />
             </colgroup>
           )}
           <thead>
@@ -502,7 +526,6 @@ function DocForm({ onSaved, onCancel, initial }) {
                 <>
                   <th className={styles.right}>Ilość</th>
                   <th className={styles.right}>Cena zakupu</th>
-                  <th className={styles.right}>Cena suger.</th>
                 </>
               ) : (
                 <>
@@ -542,10 +565,10 @@ function DocForm({ onSaved, onCancel, initial }) {
                   >
                     {ci?.isbn ?? '—'}
                   </td>
-                  <td className={docType === 'PZ' ? styles.numCell : styles.right}>
+                  <td className={docType === 'PZ' ? styles.numCell : docType === 'KK' ? styles.numCell : styles.right}>
                     <input
-                      className={docType === 'PZ' ? `${styles.numInput} input` : 'input'}
-                      style={docType === 'PZ' ? undefined : { width: 80, textAlign: 'right' }}
+                      className={docType === 'PZ' || docType === 'KK' ? `${styles.numInput} input` : 'input'}
+                      style={docType === 'PZ' || docType === 'KK' ? undefined : { width: 80, textAlign: 'right' }}
                       type="number"
                       step="1"
                       min={docType === 'KK' ? undefined : '1'}
@@ -559,6 +582,18 @@ function DocForm({ onSaved, onCancel, initial }) {
                       }
                       placeholder="0"
                     />
+                    {docType === 'KK' && kkQuantityDirectionHint(row.quantity) && (
+                      <div
+                        style={{
+                          fontSize: '0.72rem',
+                          color: 'var(--color-text-secondary)',
+                          marginTop: 4,
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {kkQuantityDirectionHint(row.quantity)}
+                      </div>
+                    )}
                   </td>
                   {docType === 'PZ' ? (
                     <>
@@ -604,40 +639,30 @@ function DocForm({ onSaved, onCancel, initial }) {
                       </td>
                     </>
                   ) : docType === 'KK' ? (
-                    <>
-                      <td className={styles.right}>
-                        {needsPurchasePrice(row) ? (
-                          <input
-                            className="input"
-                            style={{ width: 90, textAlign: 'right' }}
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={row.purchase_unit_price}
-                            onChange={(e) =>
-                              setField(row._key, 'purchase_unit_price', e.target.value)
-                            }
-                            placeholder="0.00"
-                          />
-                        ) : (
-                          <span
-                            style={{
-                              color: 'var(--color-text-secondary)',
-                              fontSize: '0.8rem',
-                            }}
-                          >
-                            n/d
-                          </span>
-                        )}
-                      </td>
-                      <td className={styles.right}>
-                        <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
-                          {ci?.suggested_sale_price != null
-                            ? `${fmtMoney2(ci.suggested_sale_price)} zł`
-                            : '—'}
+                    <td className={styles.numCell}>
+                      {needsPurchasePrice(row) ? (
+                        <input
+                          className={`${styles.numInput} input`}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.purchase_unit_price}
+                          onChange={(e) =>
+                            setField(row._key, 'purchase_unit_price', e.target.value)
+                          }
+                          placeholder="0,00"
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            color: 'var(--color-text-secondary)',
+                            fontSize: '0.8rem',
+                          }}
+                        >
+                          n/d
                         </span>
-                      </td>
-                    </>
+                      )}
+                    </td>
                   ) : (
                     <td className={styles.right}>
                       <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
@@ -805,7 +830,9 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
               ? ` ${styles.pzItemsTable}`
               : doc.doc_type === 'WZ'
                 ? ` ${styles.wzItemsTable}`
-                : ''
+                : doc.doc_type === 'KK'
+                  ? ` ${styles.kkItemsTable}`
+                  : ''
           }`}
         >
           {doc.doc_type === 'PZ' && (
@@ -824,6 +851,13 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
               <col className={styles.colWzGross} />
             </colgroup>
           )}
+          {doc.doc_type === 'KK' && (
+            <colgroup>
+              <col className={styles.colKkProduct} />
+              <col className={styles.colKkQty} />
+              <col className={styles.colKkPurchase} />
+            </colgroup>
+          )}
           <thead>
             <tr>
               <th>Towar</th>
@@ -838,6 +872,11 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                 <>
                   <th className={styles.right}>ILOŚĆ</th>
                   <th className={styles.right}>CENA SPRZEDAŻY BRUTTO</th>
+                </>
+              ) : doc.doc_type === 'KK' ? (
+                <>
+                  <th className={styles.right}>ILOŚĆ</th>
+                  <th className={styles.right}>CENA ZAKUPU</th>
                 </>
               ) : (
                 <>
@@ -886,9 +925,7 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                         </span>
                       )}
                     </td>
-                    <td className={doc.doc_type === 'KK' ? styles.right : styles.numCell}>
-                      {fmtIntegerQty(it.quantity)}
-                    </td>
+                    <td className={styles.numCell}>{fmtIntegerQty(it.quantity)}</td>
                     {doc.doc_type === 'PZ' ? (
                       <>
                         <td className={styles.numCell}>{fmtMoney2(it.purchase_unit_price)}</td>
@@ -899,6 +936,8 @@ function DocDetail({ docId, onBack, onChanged, onEdit }) {
                       </>
                     ) : doc.doc_type === 'WZ' ? (
                       <td className={styles.numCell}>{wzSalePriceGross(it, ci)}</td>
+                    ) : doc.doc_type === 'KK' ? (
+                      <td className={styles.numCell}>{fmtMoney2(it.purchase_unit_price)}</td>
                     ) : (
                       <>
                         <td className={styles.right}>{it.purchase_unit_price ?? '—'}</td>

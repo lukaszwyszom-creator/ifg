@@ -273,6 +273,51 @@
   width: 33%;
 }
 
+/* KK — formularz i podgląd pozycji */
+.kkItemsTable {
+  table-layout: fixed;
+}
+
+.kkItemsTable th.right {
+  text-align: right;
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+
+.kkItemsTable td.numCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.kkItemsTable .numInput {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.colKkProduct {
+  width: 38%;
+}
+
+.colKkIsbn {
+  width: 14%;
+}
+
+.colKkQty {
+  width: 18%;
+}
+
+.colKkPurchase {
+  width: 14%;
+}
+
+.colKkActions {
+  width: 4%;
+}
+
 .actions {
   display: flex;
   gap: 6px;
