@@ -170,7 +170,7 @@ const emptyRow = () => ({
 
 function DocForm({ onSaved, onCancel, initial }) {
   const isEdit = !!initial;
-  const [docType] = useState(initial?.doc_type ?? 'PZ');
+  const [docType, setDocType] = useState(initial?.doc_type ?? 'PZ');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [correctionReason, setCorrectionReason] = useState(initial?.correction_reason ?? '');
   const [issueReason, setIssueReason] = useState(initial?.issue_reason ?? '');
@@ -328,7 +328,12 @@ function DocForm({ onSaved, onCancel, initial }) {
         <div className={styles.formRowMain} style={{ gap: 12 }}>
           <div style={{ flex: '0 0 160px' }}>
             <label className={styles.fieldLabel}>Typ dokumentu</label>
-            <select className="input" value={docType} disabled={isEdit}>
+            <select
+              className="input"
+              value={docType}
+              disabled={isEdit}
+              onChange={(e) => setDocType(e.target.value)}
+            >
               <option value="PZ">PZ — Przyjęcie</option>
               <option value="WZ">WZ — Wydanie</option>
               <option value="KK">KK — Korekta</option>
