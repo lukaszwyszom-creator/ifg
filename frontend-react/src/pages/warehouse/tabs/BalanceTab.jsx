@@ -50,42 +50,46 @@ function fmtAmountZl(v) {
   return `${fmtAmount(v)} zł`;
 }
 
-function layerValueNet(entry) {
-  if (entry.cost_pending) return null;
-  if (entry.value_net != null && entry.value_net !== '') {
-    const v = parseFloat(entry.value_net);
-    if (!Number.isNaN(v)) return v;
-  }
-  const qty = parseFloat(entry.quantity_available);
-  const price = parseFloat(entry.unit_price_net);
+function rowValueNet(row) {
+  if (row.cost_pending || row.unit_price_net == null) return null;
+  const qty = parseFloat(row.quantity_available);
+  const price = parseFloat(row.unit_price_net);
   if (Number.isNaN(qty) || Number.isNaN(price)) return null;
   return qty * price;
 }
 
-function aggregateBalanceByItem(entries) {
+function balanceGroupKey(entry) {
+  if (entry.cost_pending || entry.unit_price_net == null) {
+    return `${entry.item_id}:pending`;
+  }
+  return `${entry.item_id}:${parseFloat(entry.unit_price_net)}`;
+}
+
+function aggregateBalanceByItemAndPrice(entries) {
   const map = new Map();
   for (const e of entries) {
-    if (!e.item_id) return { error: 'Brak item_id w odpowiedzi API — agregacja po towarze niemożliwa.', rows: [] };
-    const key = String(e.item_id);
+    if (!e.item_id) {
+      return { error: 'Brak item_id w odpowiedzi API — agregacja niemożliwa.', rows: [] };
+    }
+    const key = balanceGroupKey(e);
+    const costPending = e.cost_pending || e.unit_price_net == null;
     let agg = map.get(key);
     if (!agg) {
       agg = {
+        row_key: key,
         item_id: e.item_id,
         name: e.name,
         isbn: e.isbn ?? null,
         quantity_available: 0,
-        value_net: 0,
-        has_cost_pending: false,
+        unit_price_net: costPending ? null : parseFloat(e.unit_price_net),
+        cost_pending: costPending,
         vat_rate: e.vat_rate ?? null,
         layers: [],
       };
       map.set(key, agg);
     }
     const qty = parseFloat(e.quantity_available) || 0;
-    const val = layerValueNet(e);
     agg.quantity_available += qty;
-    if (val != null && !Number.isNaN(val)) agg.value_net += val;
-    if (e.cost_pending) agg.has_cost_pending = true;
     if (agg.vat_rate == null && e.vat_rate != null) agg.vat_rate = e.vat_rate;
     agg.layers.push({
       layer_id: e.layer_id,
@@ -93,39 +97,32 @@ function aggregateBalanceByItem(entries) {
       source_document_date: e.source_document_date,
       quantity_available: qty,
       unit_price_net: e.unit_price_net,
-      value_net: val,
       cost_pending: e.cost_pending,
     });
   }
   const rows = Array.from(map.values())
     .map((agg) => ({
       ...agg,
-      unit_price_net:
-        !agg.has_cost_pending && agg.quantity_available > 0 && agg.value_net > 0
-          ? agg.value_net / agg.quantity_available
-          : null,
-      has_cost_pending: agg.has_cost_pending,
+      value_net: rowValueNet(agg),
     }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+    .sort((a, b) => {
+      const byName = a.name.localeCompare(b.name, 'pl');
+      if (byName !== 0) return byName;
+      if (a.cost_pending && !b.cost_pending) return 1;
+      if (!a.cost_pending && b.cost_pending) return -1;
+      return (a.unit_price_net ?? 0) - (b.unit_price_net ?? 0);
+    });
   return { error: null, rows };
 }
 
-const AVG_PRICE_TOOLTIP =
-  'Średnia cena netto = wartość netto / liczba dostępna. Nie zmienia cen zakupu warstw FIFO.';
-
-function avgPriceTooltip(row) {
-  const parts = [AVG_PRICE_TOOLTIP];
-  if (row.layers?.length > 1) {
-    const src = layerSourcesTooltip(row.layers);
-    if (src) parts.push('', src);
-  }
-  return parts.join('\n');
+function fmtPurchaseUnitPrice(row) {
+  if (row.cost_pending || row.unit_price_net == null) return 'koszt nieustalony';
+  return `${fmtAmount(row.unit_price_net)} zł`;
 }
 
-function fmtAvgUnitPrice(row) {
-  if (row.has_cost_pending) return 'koszt nieustalony';
-  if (row.unit_price_net != null) return `${fmtAmount(row.unit_price_net)} zł`;
-  return '—';
+function rowLayersTooltip(row) {
+  if (!row.layers?.length || row.layers.length <= 1) return '';
+  return `${row.layers.length} warstw FIFO:\n${layerSourcesTooltip(row.layers)}`;
 }
 
 function layerSourcesTooltip(layers) {
@@ -185,14 +182,14 @@ function buildInventoryHtml(rows, totalNet, logoUrl) {
   const tableRows = rows
     .map((e, idx) => {
       const qty = Math.round(parseFloat(e.quantity_available) || 0);
-      const price = parseFloat(e.unit_price_net) || 0;
-      const lineNet = layerValueNet(e);
+      const priceCell = e.cost_pending ? 'koszt nieustalony' : `${fmtAmount(e.unit_price_net)} zł`;
+      const lineNet = rowValueNet(e);
       return `<tr>
         <td style="text-align:center">${idx + 1}</td>
         <td>${escHtml(e.name)}</td>
         <td style="text-align:center">${qty.toLocaleString('pl-PL')}</td>
-        <td style="text-align:right">${fmtAmount(price)} zł</td>
-        <td style="text-align:right">${fmtAmount(lineNet)} zł</td>
+        <td style="text-align:right">${priceCell}</td>
+        <td style="text-align:right">${lineNet != null ? `${fmtAmount(lineNet)} zł` : '—'}</td>
       </tr>`;
     })
     .join('');
@@ -228,7 +225,7 @@ function buildInventoryHtml(rows, totalNet, logoUrl) {
       <th style="width:36px">lp</th>
       <th>Towar</th>
       <th style="width:70px">liczba</th>
-      <th style="width:100px">cena netto</th>
+      <th style="width:100px">cena zakupu netto</th>
       <th style="width:110px">wartość netto</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
@@ -261,11 +258,11 @@ export default function BalanceTab({ onAddItem }) {
   const pdfIframeRef = useRef(null);
 
   const { error: aggregateError, rows } = useMemo(
-    () => aggregateBalanceByItem(entries),
+    () => aggregateBalanceByItemAndPrice(entries),
     [entries]
   );
   const total2026 = useMemo(
-    () => rows.reduce((sum, e) => sum + layerValueNet(e), 0),
+    () => rows.reduce((sum, e) => sum + (rowValueNet(e) ?? 0), 0),
     [rows]
   );
   const manual2025 = parseFloat(value2025) || 0;
@@ -338,7 +335,7 @@ export default function BalanceTab({ onAddItem }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <span className={styles.sectionTitle} style={{ margin: 0 }}>
-            Stan magazynowy: {rows.length} towarów,{' '}
+            Stan magazynowy: {rows.length} pozycji,{' '}
             <span style={{ color: 'var(--color-warning, #f59e0b)' }}>{fmtAmountZl(total2026)}</span>
           </span>
           <button
@@ -406,24 +403,22 @@ export default function BalanceTab({ onAddItem }) {
             <th style={{ textAlign: 'left' }}>Towar</th>
             <th style={{ textAlign: 'left' }}>ISBN</th>
             <th style={{ textAlign: 'center' }}>Liczba dostępna</th>
-            <th style={{ textAlign: 'center' }} title={AVG_PRICE_TOOLTIP}>
-              Śr. cena netto
-            </th>
+            <th style={{ textAlign: 'center' }}>Cena zakupu netto</th>
             <th style={{ textAlign: 'center' }}>VAT</th>
             <th className={styles.right}>Wartość netto</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((e, idx) => {
-            const sourcesHint = e.layers.length > 1 ? layerSourcesTooltip(e.layers) : '';
+            const layersHint = rowLayersTooltip(e);
             return (
-            <tr key={e.item_id}>
+            <tr key={e.row_key}>
               <td style={{ textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
                 {idx + 1}
               </td>
               <td
                 style={{ textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                title={sourcesHint || undefined}
+                title={layersHint || undefined}
               >
                 {e.name}
               </td>
@@ -438,11 +433,8 @@ export default function BalanceTab({ onAddItem }) {
                 {e.isbn ?? '—'}
               </td>
               <td style={{ textAlign: 'center' }}>{fmtQty(e.quantity_available)}</td>
-              <td
-                style={{ textAlign: 'center' }}
-                title={avgPriceTooltip(e)}
-              >
-                {fmtAvgUnitPrice(e)}
+              <td style={{ textAlign: 'center' }} title={layersHint || undefined}>
+                {fmtPurchaseUnitPrice(e)}
               </td>
               <td style={{ textAlign: 'center' }}>
                 {e.vat_rate != null ? `${e.vat_rate}%` : '—'}
