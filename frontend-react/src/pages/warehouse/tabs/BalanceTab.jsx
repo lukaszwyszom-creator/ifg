@@ -75,6 +75,7 @@ function aggregateBalanceByItem(entries) {
         isbn: e.isbn ?? null,
         quantity_available: 0,
         value_net: 0,
+        has_cost_pending: false,
         vat_rate: e.vat_rate ?? null,
         layers: [],
       };
@@ -84,6 +85,7 @@ function aggregateBalanceByItem(entries) {
     const val = layerValueNet(e);
     agg.quantity_available += qty;
     if (val != null && !Number.isNaN(val)) agg.value_net += val;
+    if (e.cost_pending) agg.has_cost_pending = true;
     if (agg.vat_rate == null && e.vat_rate != null) agg.vat_rate = e.vat_rate;
     agg.layers.push({
       layer_id: e.layer_id,
@@ -99,12 +101,31 @@ function aggregateBalanceByItem(entries) {
     .map((agg) => ({
       ...agg,
       unit_price_net:
-        agg.quantity_available > 0 && agg.value_net > 0
+        !agg.has_cost_pending && agg.quantity_available > 0 && agg.value_net > 0
           ? agg.value_net / agg.quantity_available
           : null,
+      has_cost_pending: agg.has_cost_pending,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
   return { error: null, rows };
+}
+
+const AVG_PRICE_TOOLTIP =
+  'Średnia cena netto = wartość netto / liczba dostępna. Nie zmienia cen zakupu warstw FIFO.';
+
+function avgPriceTooltip(row) {
+  const parts = [AVG_PRICE_TOOLTIP];
+  if (row.layers?.length > 1) {
+    const src = layerSourcesTooltip(row.layers);
+    if (src) parts.push('', src);
+  }
+  return parts.join('\n');
+}
+
+function fmtAvgUnitPrice(row) {
+  if (row.has_cost_pending) return 'koszt nieustalony';
+  if (row.unit_price_net != null) return `${fmtAmount(row.unit_price_net)} zł`;
+  return '—';
 }
 
 function layerSourcesTooltip(layers) {
@@ -385,34 +406,26 @@ export default function BalanceTab({ onAddItem }) {
             <th style={{ textAlign: 'left' }}>Towar</th>
             <th style={{ textAlign: 'left' }}>ISBN</th>
             <th style={{ textAlign: 'center' }}>Liczba dostępna</th>
-            <th style={{ textAlign: 'center' }}>Cena netto</th>
+            <th style={{ textAlign: 'center' }} title={AVG_PRICE_TOOLTIP}>
+              Śr. cena netto
+            </th>
             <th style={{ textAlign: 'center' }}>VAT</th>
             <th className={styles.right}>Wartość netto</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((e, idx) => {
-            const sourcesHint = layerSourcesTooltip(e.layers);
+            const sourcesHint = e.layers.length > 1 ? layerSourcesTooltip(e.layers) : '';
             return (
-            <tr key={e.item_id} title={sourcesHint || undefined}>
+            <tr key={e.item_id}>
               <td style={{ textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
                 {idx + 1}
               </td>
-              <td style={{ textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <td
+                style={{ textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={sourcesHint || undefined}
+              >
                 {e.name}
-                {sourcesHint && e.layers.length > 1 && (
-                  <div
-                    style={{
-                      fontSize: '0.72rem',
-                      color: 'var(--color-text-secondary)',
-                      marginTop: 2,
-                      fontWeight: 400,
-                    }}
-                    title={sourcesHint}
-                  >
-                    {e.layers.length} warstw FIFO — szczegóły w podpowiedzi
-                  </div>
-                )}
               </td>
               <td
                 style={{
@@ -425,8 +438,11 @@ export default function BalanceTab({ onAddItem }) {
                 {e.isbn ?? '—'}
               </td>
               <td style={{ textAlign: 'center' }}>{fmtQty(e.quantity_available)}</td>
-              <td style={{ textAlign: 'center' }}>
-                {e.unit_price_net != null ? `${fmtAmount(e.unit_price_net)} zł` : '—'}
+              <td
+                style={{ textAlign: 'center' }}
+                title={avgPriceTooltip(e)}
+              >
+                {fmtAvgUnitPrice(e)}
               </td>
               <td style={{ textAlign: 'center' }}>
                 {e.vat_rate != null ? `${e.vat_rate}%` : '—'}
