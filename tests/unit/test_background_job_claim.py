@@ -256,6 +256,48 @@ class TestWorkerPollRegression:
         assert refreshed.attempts == 0
         assert refreshed.available_at is not None
 
+    def test_sync_rate_limit_defers_job_persists_resume_in_payload(self, db: Session):
+        job = _sync_purchase_job(max_attempts=5)
+        db.add(job)
+        db.flush()
+        db.commit()
+
+        resume = {
+            "invoice_refs": ["KSEF-A", "KSEF-B"],
+            "current_offset": 1,
+            "current_reference": "KSEF-B",
+            "downloaded_count": 1,
+        }
+        handler = MagicMock()
+        handler.handle.side_effect = JobRateLimitDeferredError(
+            "KSeF rate limit",
+            retry_after_seconds=120.0,
+            resume=resume,
+            partial_result={"saved": 1, "received": 2},
+        )
+
+        session_factory = sessionmaker(
+            bind=db.get_bind(),
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+
+        with (
+            patch.object(worker_main, "SessionLocal", session_factory),
+            patch.object(worker_main, "_build_ksef_session_service") as build_service,
+            patch.object(worker_main, "_build_handlers") as build_handlers,
+        ):
+            build_service.return_value = (MagicMock(), MagicMock())
+            build_handlers.return_value = {"sync_purchase_invoices": handler}
+
+            worker_main._process_batch()
+
+        refreshed = db.get(BackgroundJob, job.id)
+        assert refreshed is not None
+        assert refreshed.payload_json.get("resume") == resume
+        assert refreshed.payload_json.get("partial_result", {}).get("saved") == 1
+
     def test_submit_invoice_runs_immediately_when_sync_is_rate_limited(self, db: Session):
         sync_job = _sync_purchase_job(
             available_at=datetime.now(UTC) - timedelta(hours=2),

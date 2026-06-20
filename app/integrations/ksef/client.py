@@ -631,6 +631,27 @@ class KSeFClient:
             metadata_refs_count=len(invoice_refs),
         )
 
+    def query_purchase_metadata_refs(
+        self,
+        access_token: str,
+        date_from: str,
+        date_to: str,
+    ) -> list[str] | None:
+        """Publiczny wrapper: lista ksefNumber z POST /invoices/query/metadata."""
+        return self._query_purchase_metadata_refs(
+            access_token=access_token,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    def get_purchase_invoice_xml(
+        self,
+        access_token: str,
+        ksef_reference_number: str,
+    ) -> bytes:
+        """Publiczny wrapper: GET /invoices/ksef/{ref} → raw XML."""
+        return self._get_purchase_invoice_xml(access_token, ksef_reference_number)
+
     def _query_purchase_metadata_refs(
         self,
         *,

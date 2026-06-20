@@ -16,7 +16,12 @@ from app.core.exceptions import AppError, ConflictError, ExternalServiceError, N
 from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
-from app.integrations.ksef.client import KSeFClient, KSeFClientError, QueryReceivedInvoicesResult
+from app.integrations.ksef.client import (
+    KSeFClient,
+    KSeFClientError,
+    KSeFRateLimitDeferredError,
+    QueryReceivedInvoicesResult,
+)
 from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
@@ -399,6 +404,7 @@ class KSeFSessionService:
         force_full: bool = False,
         incremental: bool = False,
         actor_user_id: UUID | None = None,
+        resume_state: dict | None = None,
     ) -> dict:
         """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
         resolved_nip = self._resolve_seller_nip(nip)
@@ -424,7 +430,27 @@ class KSeFSessionService:
                 date_from=resolved_from,
                 date_to=resolved_to,
                 actor_user_id=actor_user_id,
+                resume_state=resume_state,
             )
+            if counts.get("rate_limit_deferred"):
+                warning = counts.get("warning") or _RATE_LIMIT_WARNING
+                sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, warning)
+                return {
+                    "status": "deferred",
+                    "date_from": resolved_from.isoformat(),
+                    "date_to": resolved_to.isoformat(),
+                    "subject_type": counts.get("subject_type"),
+                    "ksef_returned": counts["received"],
+                    "created": counts["saved"],
+                    "skipped_existing": counts["skipped_existing"],
+                    "errors": counts["skipped_parse"],
+                    "error_samples": counts.get("error_samples", []),
+                    "rate_limited": True,
+                    "rate_limit_deferred": True,
+                    "retry_after_seconds": counts["retry_after_seconds"],
+                    "resume_state": counts["resume_state"],
+                    "warning": warning,
+                }
             report = {
                 "status": "ok",
                 "date_from": resolved_from.isoformat(),
@@ -470,6 +496,7 @@ class KSeFSessionService:
         date_from: date,
         date_to: date,
         actor_user_id: UUID | None = None,
+        resume_state: dict | None = None,
     ) -> dict:
         """Pobiera faktury zakupowe z KSeF za podany zakres dat i zapisuje nowe do bazy.
 
@@ -481,6 +508,18 @@ class KSeFSessionService:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
 
         ctx = self.get_session_context(nip)
+        use_incremental = bool(resume_state) or (
+            getattr(self.ksef_client, "defer_purchase_rate_limit", False) is True
+        )
+        if use_incremental:
+            return self._sync_received_invoices_incremental(
+                nip=nip,
+                ctx=ctx,
+                date_from=date_from,
+                date_to=date_to,
+                actor_user_id=actor_user_id,
+                resume_state=resume_state,
+            )
 
         received: list = []
         query_result: QueryReceivedInvoicesResult | None = None
@@ -528,117 +567,18 @@ class KSeFSessionService:
                 if len(error_samples) < _MAX_ERROR_SAMPLES:
                     error_samples.append(err)
         for result in received:
-            if self.invoice_repository.exists_by_ksef_number(result.ksef_reference_number):
-                logger.debug("KSeF sync: pomijam istniejącą fakturę %s", result.ksef_reference_number)
-                skipped_existing += 1
-                continue
-            try:
-                parsed = parse_fa3_xml(result.xml_bytes)
-            except (ValueError, Exception) as exc:  # noqa: BLE001
-                logger.warning("KSeF sync: błąd parsowania %s: %s", result.ksef_reference_number, exc)
-                skipped_parse += 1
-                if len(error_samples) < _MAX_ERROR_SAMPLES:
-                    error_samples.append(
-                        f"{result.ksef_reference_number}: parse error: {str(exc)[:120]}"
-                    )
-                continue
-
-            items_error = purchase_items_validation_error(parsed)
-            if items_error:
-                logger.error(
-                    "KSeF sync: faktura %s (nr=%s) — %s — pomijam zapis",
-                    result.ksef_reference_number,
-                    parsed.get("number_local"),
-                    items_error,
-                )
-                skipped_parse += 1
-                if len(error_samples) < _MAX_ERROR_SAMPLES:
-                    error_samples.append(
-                        f"{result.ksef_reference_number}: {items_error[:120]}"
-                    )
-                continue
-
-            try:
-                invoice_type_str = parsed.get("invoice_type", "VAT")
-                try:
-                    invoice_type = InvoiceType(invoice_type_str)
-                except ValueError:
-                    invoice_type = InvoiceType.VAT
-
-                exchange_rate = parsed.get("exchange_rate")
-                exchange_rate_date_str = parsed.get("exchange_rate_date")
-                exchange_rate_date: date | None = None
-                if exchange_rate_date_str:
-                    try:
-                        from datetime import date as _date
-                        exchange_rate_date = _date.fromisoformat(exchange_rate_date_str)
-                    except ValueError:
-                        pass
-
-                items = [
-                    InvoiceItem(
-                        name=item["name"] or "",
-                        quantity=Decimal(str(item["quantity"])),
-                        unit=item["unit"] or "szt.",
-                        unit_price_net=Decimal(str(item["unit_price_net"])),
-                        vat_rate=Decimal(str(item["vat_rate"])),
-                        net_total=Decimal(str(item["net_total"])),
-                        vat_total=Decimal(str(item["vat_total"])),
-                        gross_total=Decimal(str(item["gross_total"])),
-                        sort_order=item["sort_order"],
-                    )
-                    for item in parsed.get("items", [])
-                ]
-
-                now = datetime.now(UTC)
-                invoice = Invoice(
-                    id=uuid4(),
-                    status=InvoiceStatus.ACCEPTED,
-                    issue_date=date.fromisoformat(parsed["issue_date"]),
-                    sale_date=date.fromisoformat(parsed["sale_date"]),
-                    due_date=date.fromisoformat(parsed["due_date"]) if parsed.get("due_date") else None,
-                    payment_method=PaymentMethod(parsed["payment_method"])
-                    if parsed.get("payment_method") in {"cash", "transfer"}
-                    else PaymentMethod.TRANSFER,
-                    currency=parsed.get("currency", "PLN"),
-                    seller_snapshot=parsed["seller_snapshot"],
-                    buyer_snapshot=parsed["buyer_snapshot"],
-                    items=items,
-                    total_net=Decimal(str(parsed.get("total_net", 0))),
-                    total_vat=Decimal(str(parsed.get("total_vat", 0))),
-                    total_gross=Decimal(str(parsed.get("total_gross", 0))),
-                    created_at=now,
-                    updated_at=now,
-                    number_local=parsed.get("number_local"),
-                    ksef_reference_number=result.ksef_reference_number,
-                    invoice_type=invoice_type,
-                    use_split_payment=parsed.get("use_split_payment", False),
-                    self_billing=parsed.get("self_billing", False),
-                    reverse_charge=parsed.get("reverse_charge", False),
-                    reverse_charge_art=parsed.get("reverse_charge_art", False),
-                    reverse_charge_flag=parsed.get("reverse_charge_flag", False),
-                    cash_accounting_method=parsed.get("cash_accounting_method", False),
-                    exchange_rate=exchange_rate,
-                    exchange_rate_date=exchange_rate_date,
-                    direction="purchase",
-                    created_by=actor_user_id,
-                )
-
-                self.invoice_repository.add(invoice, source_system="ksef_import")
+            outcome = self._process_purchase_invoice_xml(
+                ksef_reference_number=result.ksef_reference_number,
+                xml_bytes=result.xml_bytes,
+                actor_user_id=actor_user_id,
+                error_samples=error_samples,
+            )
+            if outcome == "saved":
                 saved += 1
-                logger.info("KSeF sync: zapisano fakturę zakupową %s", result.ksef_reference_number)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "KSeF sync: błąd tworzenia faktury %s: %s",
-                    result.ksef_reference_number,
-                    exc,
-                    exc_info=True,
-                )
+            elif outcome == "skipped_existing":
+                skipped_existing += 1
+            else:
                 skipped_parse += 1
-                if len(error_samples) < _MAX_ERROR_SAMPLES:
-                    error_samples.append(
-                        f"{result.ksef_reference_number}: import error: {str(exc)[:120]}"
-                    )
 
         received_count = (
             query_result.metadata_refs_count
@@ -655,6 +595,231 @@ class KSeFSessionService:
             "rate_limited": rate_limited,
             "warning": _RATE_LIMIT_WARNING if rate_limited else None,
         }
+
+    def _sync_received_invoices_incremental(
+        self,
+        *,
+        nip: str,
+        ctx,
+        date_from: date,
+        date_to: date,
+        actor_user_id: UUID | None,
+        resume_state: dict | None,
+    ) -> dict:
+        """Pobiera metadata raz, następnie GET+save per faktura z resume przy 429."""
+        resume = resume_state or {}
+        refs: list[str] | None = resume.get("invoice_refs")
+        start_offset = int(resume.get("current_offset", 0))
+        subject_type_used: str | None = resume.get("subject_type")
+        saved = int(resume.get("saved_accumulated", 0))
+        skipped_existing = int(resume.get("skipped_existing_accumulated", 0))
+        skipped_parse = int(resume.get("skipped_parse_accumulated", 0))
+        error_samples: list[str] = list(resume.get("error_samples", []))[:_MAX_ERROR_SAMPLES]
+
+        if not refs:
+            metadata_refs = self.ksef_client.query_purchase_metadata_refs(
+                access_token=ctx.access_token,
+                date_from=date_from.isoformat(),
+                date_to=date_to.isoformat(),
+            )
+            if metadata_refs is None:
+                prev_defer = self.ksef_client.defer_purchase_rate_limit
+                self.ksef_client.defer_purchase_rate_limit = False
+                try:
+                    return self.sync_received_invoices(
+                        nip=nip,
+                        date_from=date_from,
+                        date_to=date_to,
+                        actor_user_id=actor_user_id,
+                        resume_state=None,
+                    )
+                finally:
+                    self.ksef_client.defer_purchase_rate_limit = prev_defer
+            refs = metadata_refs
+            subject_type_used = "subject2"
+            start_offset = 0
+
+        logger.info(
+            "KSeF purchases incremental sync subjectType=%s refs=%d offset=%d date_from=%s date_to=%s",
+            subject_type_used,
+            len(refs),
+            start_offset,
+            date_from,
+            date_to,
+        )
+
+        for idx in range(start_offset, len(refs)):
+            ref = refs[idx]
+            try:
+                xml_bytes = self.ksef_client.get_purchase_invoice_xml(ctx.access_token, ref)
+            except KSeFRateLimitDeferredError as exc:
+                self.session.flush()
+                return {
+                    "received": len(refs),
+                    "saved": saved,
+                    "skipped_existing": skipped_existing,
+                    "skipped_parse": skipped_parse,
+                    "subject_type": subject_type_used,
+                    "error_samples": error_samples,
+                    "rate_limited": True,
+                    "rate_limit_deferred": True,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "resume_state": {
+                        "invoice_refs": refs,
+                        "current_offset": idx,
+                        "current_reference": ref,
+                        "downloaded_count": idx,
+                        "subject_type": subject_type_used,
+                        "saved_accumulated": saved,
+                        "skipped_existing_accumulated": skipped_existing,
+                        "skipped_parse_accumulated": skipped_parse,
+                        "error_samples": error_samples,
+                    },
+                    "warning": _RATE_LIMIT_WARNING,
+                }
+            except KSeFClientError as exc:
+                raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
+
+            outcome = self._process_purchase_invoice_xml(
+                ksef_reference_number=ref,
+                xml_bytes=xml_bytes,
+                actor_user_id=actor_user_id,
+                error_samples=error_samples,
+            )
+            if outcome == "saved":
+                saved += 1
+            elif outcome == "skipped_existing":
+                skipped_existing += 1
+            else:
+                skipped_parse += 1
+            self.session.flush()
+
+        return {
+            "received": len(refs),
+            "saved": saved,
+            "skipped_existing": skipped_existing,
+            "skipped_parse": skipped_parse,
+            "subject_type": subject_type_used,
+            "error_samples": error_samples,
+            "rate_limited": False,
+            "rate_limit_deferred": False,
+        }
+
+    def _process_purchase_invoice_xml(
+        self,
+        *,
+        ksef_reference_number: str,
+        xml_bytes: bytes,
+        actor_user_id: UUID | None,
+        error_samples: list[str],
+    ) -> str:
+        """Import pojedynczej faktury zakupowej. Zwraca saved|skipped_existing|skipped_parse."""
+        if self.invoice_repository.exists_by_ksef_number(ksef_reference_number):
+            logger.debug("KSeF sync: pomijam istniejącą fakturę %s", ksef_reference_number)
+            return "skipped_existing"
+
+        try:
+            parsed = parse_fa3_xml(xml_bytes)
+        except (ValueError, Exception) as exc:  # noqa: BLE001
+            logger.warning("KSeF sync: błąd parsowania %s: %s", ksef_reference_number, exc)
+            if len(error_samples) < _MAX_ERROR_SAMPLES:
+                error_samples.append(
+                    f"{ksef_reference_number}: parse error: {str(exc)[:120]}"
+                )
+            return "skipped_parse"
+
+        items_error = purchase_items_validation_error(parsed)
+        if items_error:
+            logger.error(
+                "KSeF sync: faktura %s (nr=%s) — %s — pomijam zapis",
+                ksef_reference_number,
+                parsed.get("number_local"),
+                items_error,
+            )
+            if len(error_samples) < _MAX_ERROR_SAMPLES:
+                error_samples.append(f"{ksef_reference_number}: {items_error[:120]}")
+            return "skipped_parse"
+
+        try:
+            invoice_type_str = parsed.get("invoice_type", "VAT")
+            try:
+                invoice_type = InvoiceType(invoice_type_str)
+            except ValueError:
+                invoice_type = InvoiceType.VAT
+
+            exchange_rate = parsed.get("exchange_rate")
+            exchange_rate_date_str = parsed.get("exchange_rate_date")
+            exchange_rate_date: date | None = None
+            if exchange_rate_date_str:
+                try:
+                    exchange_rate_date = date.fromisoformat(exchange_rate_date_str)
+                except ValueError:
+                    pass
+
+            items = [
+                InvoiceItem(
+                    name=item["name"] or "",
+                    quantity=Decimal(str(item["quantity"])),
+                    unit=item["unit"] or "szt.",
+                    unit_price_net=Decimal(str(item["unit_price_net"])),
+                    vat_rate=Decimal(str(item["vat_rate"])),
+                    net_total=Decimal(str(item["net_total"])),
+                    vat_total=Decimal(str(item["vat_total"])),
+                    gross_total=Decimal(str(item["gross_total"])),
+                    sort_order=item["sort_order"],
+                )
+                for item in parsed.get("items", [])
+            ]
+
+            now = datetime.now(UTC)
+            invoice = Invoice(
+                id=uuid4(),
+                status=InvoiceStatus.ACCEPTED,
+                issue_date=date.fromisoformat(parsed["issue_date"]),
+                sale_date=date.fromisoformat(parsed["sale_date"]),
+                due_date=date.fromisoformat(parsed["due_date"]) if parsed.get("due_date") else None,
+                payment_method=PaymentMethod(parsed["payment_method"])
+                if parsed.get("payment_method") in {"cash", "transfer"}
+                else PaymentMethod.TRANSFER,
+                currency=parsed.get("currency", "PLN"),
+                seller_snapshot=parsed["seller_snapshot"],
+                buyer_snapshot=parsed["buyer_snapshot"],
+                items=items,
+                total_net=Decimal(str(parsed.get("total_net", 0))),
+                total_vat=Decimal(str(parsed.get("total_vat", 0))),
+                total_gross=Decimal(str(parsed.get("total_gross", 0))),
+                created_at=now,
+                updated_at=now,
+                number_local=parsed.get("number_local"),
+                ksef_reference_number=ksef_reference_number,
+                invoice_type=invoice_type,
+                use_split_payment=parsed.get("use_split_payment", False),
+                self_billing=parsed.get("self_billing", False),
+                reverse_charge=parsed.get("reverse_charge", False),
+                reverse_charge_art=parsed.get("reverse_charge_art", False),
+                reverse_charge_flag=parsed.get("reverse_charge_flag", False),
+                cash_accounting_method=parsed.get("cash_accounting_method", False),
+                exchange_rate=exchange_rate,
+                exchange_rate_date=exchange_rate_date,
+                direction="purchase",
+                created_by=actor_user_id,
+            )
+
+            self.invoice_repository.add(invoice, source_system="ksef_import")
+            logger.info("KSeF sync: zapisano fakturę zakupową %s", ksef_reference_number)
+            return "saved"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "KSeF sync: błąd tworzenia faktury %s: %s",
+                ksef_reference_number,
+                exc,
+                exc_info=True,
+            )
+            if len(error_samples) < _MAX_ERROR_SAMPLES:
+                error_samples.append(
+                    f"{ksef_reference_number}: import error: {str(exc)[:120]}"
+                )
+            return "skipped_parse"
 
     def _resolve_seller_nip(self, requested_nip: str | None = None) -> str:
         requested_nip = _normalize_session_nip(requested_nip)

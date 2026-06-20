@@ -308,12 +308,33 @@ def sync_purchase_invoices(
 ) -> SyncPurchaseJobResponse:
     """POST /api/v1/ksef-sessions/sync-purchase — enqueue job synchronizacji faktur zakupowych."""
     from uuid import uuid4
+
+    from sqlalchemy import select
+
     from app.persistence.models.background_job import BackgroundJob
 
     logger.info(
         "KSEF_UI_TRIGGER_PURCHASE_SYNC nip=%s mode=async endpoint=/ksef-sessions/sync-purchase",
         body.nip,
     )
+    existing = session.execute(
+        select(BackgroundJob)
+        .where(
+            BackgroundJob.job_type == "sync_purchase_invoices",
+            BackgroundJob.status.in_(["pending", "processing"]),
+            BackgroundJob.payload_json["nip"].astext == body.nip,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        logger.info(
+            "KSEF_ASYNC_SYNC_ENQUEUE_BLOCKED nip=%s existing_job_id=%s status=%s",
+            body.nip,
+            existing.id,
+            existing.status,
+        )
+        return SyncPurchaseJobResponse(job_id=str(existing.id), status=existing.status)
+
     job_id = uuid4()
     job = BackgroundJob(
         id=job_id,

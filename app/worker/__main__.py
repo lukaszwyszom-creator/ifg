@@ -230,6 +230,13 @@ def _process_batch() -> int:
                     job.job_type,
                     exc.retry_after_seconds,
                 )
+                if exc.resume is not None:
+                    job.payload_json = {**job.payload_json, "resume": exc.resume}
+                if exc.partial_result is not None:
+                    job.payload_json = {
+                        **job.payload_json,
+                        "partial_result": exc.partial_result,
+                    }
                 _release_job_to_pending(job, error=str(exc))
                 job.available_at = datetime.now(UTC) + timedelta(
                     seconds=exc.retry_after_seconds

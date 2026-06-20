@@ -19,9 +19,18 @@ _DEFAULT_RATE_LIMIT_DEFER_SECONDS = 120.0
 class JobRateLimitDeferredError(Exception):
     """Sync zakupów odroczony — worker ustawia available_at bez sleep."""
 
-    def __init__(self, message: str, retry_after_seconds: float) -> None:
+    def __init__(
+        self,
+        message: str,
+        retry_after_seconds: float,
+        *,
+        resume: dict | None = None,
+        partial_result: dict | None = None,
+    ) -> None:
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
+        self.resume = resume
+        self.partial_result = partial_result
 
 
 class SyncPurchaseInvoicesJobHandler:
@@ -58,6 +67,7 @@ class SyncPurchaseInvoicesJobHandler:
                 date_from=date_from,
                 date_to=date_to,
                 actor_user_id=actor_id,
+                resume_state=payload.get("resume"),
             )
 
             counts = {
@@ -68,6 +78,15 @@ class SyncPurchaseInvoicesJobHandler:
                 "rate_limited": report.get("rate_limited", False),
                 "warning": report.get("warning"),
             }
+
+            if report.get("rate_limit_deferred"):
+                raise JobRateLimitDeferredError(
+                    report.get("warning")
+                    or f"KSeF rate limit podczas sync zakupów (job_id={job_id})",
+                    report.get("retry_after_seconds", _DEFAULT_RATE_LIMIT_DEFER_SECONDS),
+                    resume=report.get("resume_state"),
+                    partial_result=counts,
+                )
 
             if counts["rate_limited"]:
                 raise JobRateLimitDeferredError(
