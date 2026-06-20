@@ -132,19 +132,47 @@ function fmtDocListQtyImpact(docType, items) {
   return '0';
 }
 
+function shortItemId(itemId) {
+  if (!itemId) return '—';
+  const s = String(itemId);
+  return s.length > 8 ? `${s.slice(0, 8)}…` : s;
+}
+
+function resolveDocItemLabel(docItem, catalogById) {
+  const cat = catalogById[String(docItem.item_id)];
+  if (cat?.name) return cat.name;
+  if (cat?.isbn) return cat.isbn;
+  return shortItemId(docItem.item_id);
+}
+
+function fmtDocListItemsSummary(items, catalogById) {
+  if (!items?.length) return { text: '—', title: '' };
+  const labels = items.map((it) => resolveDocItemLabel(it, catalogById));
+  const title = labels.join('\n');
+  if (labels.length === 1) return { text: labels[0], title };
+  return { text: `${labels[0]} +${labels.length - 1}`, title };
+}
+
 // ── DocList ───────────────────────────────────────────────────────────────────
 
 function DocList({ onNew, onOpen, refreshKey }) {
   const [docs, setDocs] = useState([]);
+  const [catalogById, setCatalogById] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setLoading(true);
     setError('');
-    warehouseDocumentsApi
-      .list({ limit: 200 })
-      .then((r) => setDocs(r.items ?? []))
+    Promise.all([
+      warehouseDocumentsApi.list({ limit: 200 }),
+      warehouseItemsApi.list().catch(() => ({ items: [] })),
+    ])
+      .then(([docRes, catalogRes]) => {
+        setDocs(docRes.items ?? []);
+        const allItems = catalogRes.items ?? catalogRes ?? [];
+        setCatalogById(Object.fromEntries(allItems.map((ci) => [String(ci.id), ci])));
+      })
       .catch(() => setError('Błąd ładowania dokumentów'))
       .finally(() => setLoading(false));
   }, [refreshKey]);
@@ -175,14 +203,16 @@ function DocList({ onNew, onOpen, refreshKey }) {
               <th>Numer</th>
               <th>Typ</th>
               <th>Data</th>
-              <th>Opis / Powód</th>
+              <th>Towar</th>
               <th className={styles.right}>ILOŚĆ</th>
               <th className={styles.right}>Pozycji</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
-            {docs.map((d) => (
+            {docs.map((d) => {
+              const itemSummary = fmtDocListItemsSummary(d.items, catalogById);
+              return (
               <tr
                 key={d.id}
                 style={{ cursor: 'pointer' }}
@@ -199,8 +229,11 @@ function DocList({ onNew, onOpen, refreshKey }) {
                   <strong>{d.doc_type}</strong>
                 </td>
                 <td>{fmtDate(d.created_at)}</td>
-                <td style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
-                  {d.correction_reason || d.issue_reason || d.notes || '—'}
+                <td
+                  className={styles.docListItemCell}
+                  title={itemSummary.title || undefined}
+                >
+                  {itemSummary.text}
                 </td>
                 <td className={styles.right}>{fmtDocListQtyImpact(d.doc_type, d.items)}</td>
                 <td className={styles.right}>{d.items?.length ?? '?'}</td>
@@ -208,7 +241,8 @@ function DocList({ onNew, onOpen, refreshKey }) {
                   <StatusBadge status={d.status} />
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       )}

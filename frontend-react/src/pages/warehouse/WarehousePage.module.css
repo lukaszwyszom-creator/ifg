@@ -182,6 +182,14 @@
   background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
 }
 
+.docListItemCell {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
 .rowInactive td {
   opacity: 0.5;
 }
