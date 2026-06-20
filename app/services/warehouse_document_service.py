@@ -433,6 +433,7 @@ class WarehouseDocumentService:
             doc.doc_items.append(_build_item_orm(raw, doc.id))
 
         if doc.doc_type == WarehouseDocumentType.PZ.value:
+            self.session.flush()
             self._create_pz_draft_layers(doc, date.today())
 
         self.doc_repo.save(doc)

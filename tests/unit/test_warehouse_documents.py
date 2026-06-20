@@ -161,6 +161,45 @@ def _make_service() -> tuple[WarehouseDocumentService, FakeDocumentRepository, F
     return svc, doc_repo, layer_repo
 
 
+class FkEnforcingLayerRepository(FakeLayerRepository):
+    """Symuluje FK inventory_layers.source_document_item_id → warehouse_document_items.id."""
+
+    def __init__(self, doc_repo: FakeDocumentRepository) -> None:
+        super().__init__()
+        self._doc_repo = doc_repo
+        self._persisted_item_ids: set[UUID] = set()
+
+    def mark_items_persisted(self) -> None:
+        for doc in self._doc_repo._docs.values():
+            for item in doc.doc_items:
+                self._persisted_item_ids.add(item.id)
+
+    def add_layer(self, layer: InventoryLayerORM) -> InventoryLayerORM:
+        if layer.source_document_item_id not in self._persisted_item_ids:
+            raise InvalidWarehouseDocumentError(
+                f"FK violation: source_document_item_id={layer.source_document_item_id} "
+                "not in warehouse_document_items"
+            )
+        return super().add_layer(layer)
+
+
+def _make_service_with_fk_check() -> tuple[
+    WarehouseDocumentService, FakeDocumentRepository, FkEnforcingLayerRepository
+]:
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = MagicMock()
+    doc_repo = FakeDocumentRepository()
+    layer_repo = FkEnforcingLayerRepository(doc_repo)
+
+    def _flush() -> None:
+        layer_repo.mark_items_persisted()
+
+    session.flush = MagicMock(side_effect=_flush)
+    svc = WarehouseDocumentService(session=session, doc_repo=doc_repo, layer_repo=layer_repo)
+    return svc, doc_repo, layer_repo
+
+
 ITEM_ID = uuid4()
 
 
@@ -799,6 +838,25 @@ class TestDraftEditAndCancel:
         svc.update_document(doc.id, _update_body(qty="7"))
         assert len(layer_repo._layers) == 1
         assert layer_repo._layers[0].remaining_quantity == Decimal("7")
+        assert doc_repo.get_balance(ITEM_ID).quantity_available == Decimal("7")
+
+    def test_edit_pz_draft_recreates_layers(self):
+        """Regresja: edycja PZ draft wymaga flush pozycji przed utworzeniem warstw FIFO."""
+        svc, doc_repo, layer_repo = _make_service_with_fk_check()
+        doc = svc.create_document(_pz_body(qty="10", price="20.00"))
+        assert len(layer_repo._layers) == 1
+        assert layer_repo._layers[0].remaining_quantity == Decimal("10")
+
+        svc.update_document(doc.id, _update_body(qty="7", price="25.00"))
+
+        updated = doc_repo.get_by_id_with_items(doc.id)
+        assert len(updated.doc_items) == 1
+        assert updated.doc_items[0].quantity == Decimal("7.0000")
+        assert len(layer_repo._layers) == 1
+        layer = layer_repo.get_by_source_document_item_id(updated.doc_items[0].id)
+        assert layer is not None
+        assert layer.remaining_quantity == Decimal("7")
+        assert layer.received_quantity == Decimal("7")
         assert doc_repo.get_balance(ITEM_ID).quantity_available == Decimal("7")
 
     def test_update_draft_replaces_all_items(self):
