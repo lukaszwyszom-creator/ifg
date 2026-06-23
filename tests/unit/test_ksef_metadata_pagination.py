@@ -63,6 +63,7 @@ class TestMetadataPagination:
                     50: {"hasMore": False, "invoices": _refs(20, start=50)},
                 },
                 "Invoicing": {},
+                "Issue": {},
             },
         )
         assert len(refs) == 70
@@ -77,6 +78,7 @@ class TestMetadataPagination:
                     50: {"hasMore": False, "invoices": _refs(20, start=50)},
                 },
                 "Invoicing": {},
+                "Issue": {},
             },
         )
         assert len(refs) == 70
@@ -91,6 +93,7 @@ class TestMetadataPagination:
                     50: {"hasMore": False, "invoices": []},
                 },
                 "Invoicing": {},
+                "Issue": {},
             },
         )
         assert len(refs) == 50
@@ -112,6 +115,7 @@ class TestMetadataPagination:
                         ],
                     },
                 },
+                "Issue": {},
             },
         )
         assert refs == ["SHARED-REF", "INVOICING-ONLY"]

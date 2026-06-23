@@ -127,7 +127,7 @@ _FORM_CODE = {
 
 # Metadata query — zakupy (Subject2) w prod KSeF v2
 _METADATA_SUBJECT_PURCHASE = "Subject2"
-_METADATA_DATE_TYPES = ("PermanentStorage", "Invoicing")
+_METADATA_DATE_TYPES = ("PermanentStorage", "Invoicing", "Issue")
 _METADATA_PAGE_SIZE = 50
 _METADATA_MAX_PAGES = 200
 _REQUEST_MIN_INTERVAL = 1.2
@@ -697,6 +697,12 @@ class KSeFClient:
                         "to": to_dt,
                     },
                 }
+                logger.info(
+                    "KSeF metadata request body=%s pageOffset=%d pageSize=%d",
+                    body,
+                    current_offset,
+                    _METADATA_PAGE_SIZE,
+                )
                 try:
                     self._pace_purchase_request()
                     resp = self._request_with_retry(
@@ -719,12 +725,15 @@ class KSeFClient:
                 data = resp.json()
                 page_refs = _extract_metadata_invoice_refs(data)
                 has_more = data.get("hasMore") is True
+                is_truncated = data.get("isTruncated") is True
+                permanent_storage_hwm = data.get("permanentStorageHwmDate")
                 page_is_full = len(page_refs) >= _METADATA_PAGE_SIZE
                 page_date_min, page_date_max = _metadata_ref_date_range(page_refs)
 
                 logger.info(
                     "KSeF metadata page subjectType=%s dateType=%s pageOffset=%d "
-                    "pageSize=%d page_refs=%d hasMore=%s total_refs=%d "
+                    "pageSize=%d page_refs=%d hasMore=%s isTruncated=%s "
+                    "permanentStorageHwmDate=%s total_refs=%d "
                     "page_date_min=%s page_date_max=%s",
                     _METADATA_SUBJECT_PURCHASE,
                     date_type,
@@ -732,6 +741,8 @@ class KSeFClient:
                     _METADATA_PAGE_SIZE,
                     len(page_refs),
                     has_more,
+                    is_truncated,
+                    permanent_storage_hwm,
                     len(date_type_refs) + len(page_refs),
                     page_date_min,
                     page_date_max,
@@ -766,6 +777,18 @@ class KSeFClient:
                 )
 
             if date_type_refs:
+                date_type_seen: set[str] = set()
+                date_type_unique = 0
+                for ref in date_type_refs:
+                    if ref not in date_type_seen:
+                        date_type_seen.add(ref)
+                        date_type_unique += 1
+                logger.info(
+                    "KSeF metadata dateType=%s summary raw_refs=%d unique_refs=%d",
+                    date_type,
+                    len(date_type_refs),
+                    date_type_unique,
+                )
                 date_types_used.append(date_type)
                 all_refs.extend(date_type_refs)
 

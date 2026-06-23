@@ -569,7 +569,7 @@ class TestQueryReceivedInvoicesMetadata:
                 subject_type="subject2",
             )
 
-        assert len(recorded_posts) == 2
+        assert len(recorded_posts) == 3
         body = recorded_posts[0]["json"]
         assert body["subjectType"] == "Subject2"
         assert body["dateRange"]["dateType"] == "PermanentStorage"
