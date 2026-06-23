@@ -183,6 +183,44 @@ def test_incremental_sync_resumes_from_saved_offset_without_re_metadata() -> Non
     assert repo.add_calls == 1
 
 
+def test_incremental_sync_resume_continues_from_current_offset_in_full_list() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_incremental_service(repo)
+    refs = _refs(70)
+    for ref in refs[:50]:
+        repo.rows.append((ref, "ksef_import"))
+
+    resume_state = {
+        "invoice_refs": refs,
+        "current_offset": 50,
+        "current_reference": refs[50],
+        "downloaded_count": 50,
+        "subject_type": "subject2",
+        "saved_accumulated": 0,
+        "skipped_existing_accumulated": 50,
+        "skipped_parse_accumulated": 0,
+        "error_samples": [],
+    }
+
+    service.ksef_client.get_purchase_invoice_xml.side_effect = (
+        lambda _token, ref: _minimal_purchase_xml(ref)
+    )
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 3, 23),
+        date_to=date(2026, 6, 21),
+        resume_state=resume_state,
+    )
+
+    service.ksef_client.query_purchase_metadata_refs.assert_not_called()
+    assert service.ksef_client.get_purchase_invoice_xml.call_count == 20
+    downloaded = [c.args[1] for c in service.ksef_client.get_purchase_invoice_xml.call_args_list]
+    assert downloaded == refs[50:]
+    assert counts["saved"] == 20
+    assert counts["skipped_existing"] == 50
+
+
 def test_incremental_sync_resume_does_not_duplicate_existing_refs() -> None:
     repo = _FakeInvoiceRepository()
     refs = _refs(16)

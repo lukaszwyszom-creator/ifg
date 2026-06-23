@@ -129,6 +129,7 @@ _FORM_CODE = {
 _METADATA_SUBJECT_PURCHASE = "Subject2"
 _METADATA_DATE_TYPES = ("PermanentStorage", "Invoicing")
 _METADATA_PAGE_SIZE = 50
+_METADATA_MAX_PAGES = 200
 _REQUEST_MIN_INTERVAL = 1.2
 _PURCHASE_INVOICE_RATE_LIMIT_RETRIES = 5
 
@@ -158,6 +159,20 @@ def _extract_metadata_invoice_refs(payload: dict) -> list[str]:
         if isinstance(ref, str) and ref:
             refs.append(ref)
     return refs
+
+
+def _metadata_ref_date_token(ref: str) -> str | None:
+    parts = ref.split("-")
+    if len(parts) >= 2 and len(parts[1]) >= 8 and parts[1][:8].isdigit():
+        return parts[1][:8]
+    return None
+
+
+def _metadata_ref_date_range(refs: list[str]) -> tuple[str | None, str | None]:
+    tokens = [t for ref in refs if (t := _metadata_ref_date_token(ref))]
+    if not tokens:
+        return None, None
+    return min(tokens), max(tokens)
 
 
 class KSeFClient:
@@ -664,13 +679,16 @@ class KSeFClient:
         from_dt = _format_metadata_datetime(date_from, end_of_day=False)
         to_dt = _format_metadata_datetime(date_to, end_of_day=True)
 
-        refs: list[str] = []
-        date_type_used: str | None = None
+        all_refs: list[str] = []
+        date_types_used: list[str] = []
 
         for date_type in _METADATA_DATE_TYPES:
             page_offset = 0
-            batch_refs: list[str] = []
-            while True:
+            pages_fetched = 0
+            date_type_refs: list[str] = []
+
+            while pages_fetched < _METADATA_MAX_PAGES:
+                current_offset = page_offset
                 body = {
                     "subjectType": _METADATA_SUBJECT_PURCHASE,
                     "dateRange": {
@@ -685,7 +703,7 @@ class KSeFClient:
                         method="POST",
                         path="/invoices/query/metadata",
                         headers=headers,
-                        params={"pageOffset": page_offset, "pageSize": _METADATA_PAGE_SIZE},
+                        params={"pageOffset": current_offset, "pageSize": _METADATA_PAGE_SIZE},
                         json=body,
                     )
                 except KSeFClientError as exc:
@@ -700,33 +718,72 @@ class KSeFClient:
                 self._mark_purchase_request()
                 data = resp.json()
                 page_refs = _extract_metadata_invoice_refs(data)
-                batch_refs.extend(page_refs)
-
                 has_more = data.get("hasMore") is True
-                page_offset += _METADATA_PAGE_SIZE
-                if not has_more or not page_refs:
+                page_is_full = len(page_refs) >= _METADATA_PAGE_SIZE
+                page_date_min, page_date_max = _metadata_ref_date_range(page_refs)
+
+                logger.info(
+                    "KSeF metadata page subjectType=%s dateType=%s pageOffset=%d "
+                    "pageSize=%d page_refs=%d hasMore=%s total_refs=%d "
+                    "page_date_min=%s page_date_max=%s",
+                    _METADATA_SUBJECT_PURCHASE,
+                    date_type,
+                    current_offset,
+                    _METADATA_PAGE_SIZE,
+                    len(page_refs),
+                    has_more,
+                    len(date_type_refs) + len(page_refs),
+                    page_date_min,
+                    page_date_max,
+                )
+
+                if not page_refs:
                     break
 
-            if batch_refs:
-                refs = batch_refs
-                date_type_used = date_type
+                date_type_refs.extend(page_refs)
+                pages_fetched += 1
+
+                if has_more or page_is_full:
+                    if not has_more and page_is_full:
+                        logger.warning(
+                            "KSeF metadata hasMore=false on full page; continuing pagination "
+                            "dateType=%s pageOffset=%d page_refs=%d",
+                            date_type,
+                            current_offset,
+                            len(page_refs),
+                        )
+                    page_offset += _METADATA_PAGE_SIZE
+                    continue
+
                 break
 
-        if date_type_used:
-            logger.info(
-                "KSeF metadata query subjectType=%s dateType=%s refs=%d",
-                _METADATA_SUBJECT_PURCHASE,
-                date_type_used,
-                len(refs),
-            )
+            if pages_fetched >= _METADATA_MAX_PAGES:
+                logger.error(
+                    "KSeF metadata pagination stopped at max_pages=%d dateType=%s total_refs=%d",
+                    _METADATA_MAX_PAGES,
+                    date_type,
+                    len(date_type_refs),
+                )
 
-        # Dedup zachowując kolejność
+            if date_type_refs:
+                date_types_used.append(date_type)
+                all_refs.extend(date_type_refs)
+
         seen: set[str] = set()
         unique: list[str] = []
-        for ref in refs:
+        for ref in all_refs:
             if ref not in seen:
                 seen.add(ref)
                 unique.append(ref)
+
+        if date_types_used:
+            logger.info(
+                "KSeF metadata query subjectType=%s dateTypes=%s raw_refs=%d unique_refs=%d",
+                _METADATA_SUBJECT_PURCHASE,
+                ",".join(date_types_used),
+                len(all_refs),
+                len(unique),
+            )
         return unique
 
     def _download_metadata_purchase_invoices(

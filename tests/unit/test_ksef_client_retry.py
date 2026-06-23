@@ -534,7 +534,13 @@ class TestQueryReceivedInvoicesMetadata:
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
             if method == "POST" and "/invoices/query/metadata" in url:
                 recorded_posts.append({"json": json, "params": params})
-                return metadata_resp
+                date_type = json["dateRange"]["dateType"]
+                if date_type == "PermanentStorage":
+                    return metadata_resp
+                empty_resp = MagicMock()
+                empty_resp.status_code = 200
+                empty_resp.json.return_value = {"hasMore": False, "invoices": []}
+                return empty_resp
             raise AssertionError(f"Unexpected request: {method} {url}")
 
         def _fake_get(url, *, headers=None, **kw):
@@ -563,7 +569,7 @@ class TestQueryReceivedInvoicesMetadata:
                 subject_type="subject2",
             )
 
-        assert len(recorded_posts) == 1
+        assert len(recorded_posts) == 2
         body = recorded_posts[0]["json"]
         assert body["subjectType"] == "Subject2"
         assert body["dateRange"]["dateType"] == "PermanentStorage"
@@ -657,7 +663,13 @@ class TestPurchaseInvoiceDownloadRateLimit:
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
             if method == "POST" and "/invoices/query/metadata" in url:
-                return metadata_resp
+                date_type = json["dateRange"]["dateType"]
+                if date_type == "PermanentStorage":
+                    return metadata_resp
+                empty_resp = MagicMock()
+                empty_resp.status_code = 200
+                empty_resp.json.return_value = {"hasMore": False, "invoices": []}
+                return empty_resp
             raise AssertionError(f"Unexpected request: {method} {url}")
 
         def _fake_get(url, *, headers=None, **kw):
@@ -705,7 +717,13 @@ class TestPurchaseInvoiceDownloadRateLimit:
 
         def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
             if method == "POST" and "/invoices/query/metadata" in url:
-                return metadata_resp
+                date_type = json["dateRange"]["dateType"]
+                if date_type == "PermanentStorage":
+                    return metadata_resp
+                empty_resp = MagicMock()
+                empty_resp.status_code = 200
+                empty_resp.json.return_value = {"hasMore": False, "invoices": []}
+                return empty_resp
             raise AssertionError(f"Unexpected request: {method} {url}")
 
         ctx = MagicMock()
