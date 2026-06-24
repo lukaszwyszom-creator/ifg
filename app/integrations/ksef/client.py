@@ -709,7 +709,11 @@ class KSeFClient:
                         method="POST",
                         path="/invoices/query/metadata",
                         headers=headers,
-                        params={"pageOffset": current_offset, "pageSize": _METADATA_PAGE_SIZE},
+                        params={
+                            "pageOffset": current_offset,
+                            "pageSize": _METADATA_PAGE_SIZE,
+                            "sortOrder": "Asc",
+                        },
                         json=body,
                     )
                 except KSeFClientError as exc:
@@ -763,7 +767,7 @@ class KSeFClient:
                             current_offset,
                             len(page_refs),
                         )
-                    page_offset += _METADATA_PAGE_SIZE
+                    page_offset += 1
                     continue
 
                 break

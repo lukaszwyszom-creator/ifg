@@ -336,7 +336,12 @@ def main() -> None:
     parser.add_argument("--date-type", default="PermanentStorage", help="Issue|Invoicing|PermanentStorage|all")
     parser.add_argument("--date-from", required=True, help="YYYY-MM-DD")
     parser.add_argument("--date-to", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--page-offset", type=int, default=0)
+    parser.add_argument(
+        "--page-offset",
+        type=int,
+        default=0,
+        help="Numer strony wyników (0, 1, 2…), nie offset rekordów",
+    )
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument(
