@@ -6,13 +6,21 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.schemas.invoice import InvoiceItemResponse, InvoiceResponse
-from app.services.pdf_service import render_invoice_html
+from app.services.pdf_service import (
+    render_invoice_html,
+    resolve_seller_bank_account_for_render,
+)
 
 VALID_BANK = "12345678901234567890123456"
 VALID_BANK_DISPLAY = "12 3456 7890 1234 5678 9012 3456"
 
 
-def _sample_invoice(*, items: list[InvoiceItemResponse] | None = None) -> InvoiceResponse:
+def _sample_invoice(
+    *,
+    items: list[InvoiceItemResponse] | None = None,
+    direction: str = "sale",
+    seller_snapshot: dict | None = None,
+) -> InvoiceResponse:
     now = datetime(2026, 5, 22, 12, 0, 0)
     default_items = [
         InvoiceItemResponse(
@@ -37,7 +45,8 @@ def _sample_invoice(*, items: list[InvoiceItemResponse] | None = None) -> Invoic
         due_date=date(2026, 6, 5),
         payment_method="transfer",
         currency="PLN",
-        seller_snapshot={
+        seller_snapshot=seller_snapshot
+        or {
             "name": "Ikona",
             "nip": "9670402857",
             "address": "ul. Kossaka 72",
@@ -54,6 +63,7 @@ def _sample_invoice(*, items: list[InvoiceItemResponse] | None = None) -> Invoic
         total_vat=Decimal("342.86"),
         total_gross=Decimal("7200.00"),
         payment_status="unpaid",
+        direction=direction,
         created_at=now,
         updated_at=now,
     )
@@ -67,6 +77,48 @@ def test_html_includes_formatted_bank_account() -> None:
 def test_html_omits_bank_account_when_missing() -> None:
     html = render_invoice_html(_sample_invoice(), seller_bank_account=None)
     assert "Rachunek bankowy:" not in html
+
+
+def test_purchase_omits_company_bank_even_when_configured() -> None:
+    invoice = _sample_invoice(direction="purchase")
+    bank = resolve_seller_bank_account_for_render(
+        invoice,
+        company_bank_account=VALID_BANK,
+    )
+    assert bank is None
+    html = render_invoice_html(invoice, seller_bank_account=bank)
+    assert "Rachunek bankowy:" not in html
+
+
+def test_purchase_shows_seller_bank_from_snapshot() -> None:
+    invoice = _sample_invoice(
+        direction="purchase",
+        seller_snapshot={
+            "name": "Dostawca SA",
+            "nip": "1112223344",
+            "address": "ul. Dostawcza 1",
+            "city": "00-002 Warszawa",
+            "bank_account": VALID_BANK,
+        },
+    )
+    bank = resolve_seller_bank_account_for_render(
+        invoice,
+        company_bank_account=VALID_BANK,
+    )
+    assert bank == VALID_BANK
+    html = render_invoice_html(invoice, seller_bank_account=bank)
+    assert f"Rachunek bankowy: {VALID_BANK_DISPLAY}" in html
+
+
+def test_sale_uses_company_bank_account() -> None:
+    invoice = _sample_invoice(direction="sale")
+    bank = resolve_seller_bank_account_for_render(
+        invoice,
+        company_bank_account=VALID_BANK,
+    )
+    assert bank == VALID_BANK
+    html = render_invoice_html(invoice, seller_bank_account=bank)
+    assert f"Rachunek bankowy: {VALID_BANK_DISPLAY}" in html
 
 
 def test_html_quantity_without_decimals() -> None:

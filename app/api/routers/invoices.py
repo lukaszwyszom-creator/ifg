@@ -24,7 +24,11 @@ from app.schemas.invoice import (
 from app.services.idempotency_service import DuplicateRequestError, IdempotencyService
 from app.services.invoice_service import InvoiceService
 from app.services.payment_service import PaymentService
-from app.services.pdf_service import render_invoice_html, render_invoice_pdf
+from app.services.pdf_service import (
+    render_invoice_html,
+    render_invoice_pdf,
+    resolve_seller_bank_account_for_render,
+)
 from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -256,7 +260,11 @@ def get_invoice_preview(
     invoice = invoice_service.get_invoice(invoice_id)
     remaining_map = invoice_service.compute_remaining_amounts([invoice])
     schema = InvoiceResponse.from_domain(invoice, remaining_amount=remaining_map.get(invoice.id))
-    bank_account = settings_service.get_settings().get("seller_bank_account")
+    company_bank = settings_service.get_settings().get("seller_bank_account")
+    bank_account = resolve_seller_bank_account_for_render(
+        schema,
+        company_bank_account=company_bank,
+    )
     html = render_invoice_html(schema, seller_bank_account=bank_account)
     return HTMLResponse(content=html)
 
@@ -272,7 +280,11 @@ def get_invoice_pdf(
     invoice = invoice_service.get_invoice(invoice_id)
     remaining_map = invoice_service.compute_remaining_amounts([invoice])
     schema = InvoiceResponse.from_domain(invoice, remaining_amount=remaining_map.get(invoice.id))
-    bank_account = settings_service.get_settings().get("seller_bank_account")
+    company_bank = settings_service.get_settings().get("seller_bank_account")
+    bank_account = resolve_seller_bank_account_for_render(
+        schema,
+        company_bank_account=company_bank,
+    )
     pdf_bytes = render_invoice_pdf(schema, seller_bank_account=bank_account)
     filename = f"faktura-{schema.number_local or schema.id}.pdf"
     return Response(

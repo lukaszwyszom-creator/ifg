@@ -108,6 +108,22 @@ def _seller_bank_line(seller_bank_account: str | None) -> str:
     return f"<p>Rachunek bankowy: {_esc(formatted)}</p>"
 
 
+def resolve_seller_bank_account_for_render(
+    invoice: InvoiceResponse,
+    *,
+    company_bank_account: str | None = None,
+) -> str | None:
+    """Rachunek sprzedawcy na PDF/podglądzie — zależny od kierunku faktury."""
+    if invoice.direction == "purchase":
+        seller = invoice.seller_snapshot or {}
+        for key in ("bank_account", "bankAccount", "nr_rb", "NrRB"):
+            raw = seller.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        return None
+    return company_bank_account
+
+
 def _payment_section(invoice: InvoiceResponse) -> str:
     total_gross = _as_decimal(invoice.total_gross)
     remaining = _as_decimal(invoice.remaining_amount)
