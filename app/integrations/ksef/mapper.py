@@ -11,6 +11,7 @@ from lxml import etree
 from app.domain.enums import InvoiceType, PaymentMethod
 from app.domain.models.invoice import Invoice, _is_valid_nip
 from app.integrations.ksef.exceptions import KSeFMappingError
+from app.services.bank_account import normalize_bank_account
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,15 @@ def _format_adres_l1(snapshot: dict) -> str:
     if street_line and city_line:
         return f"{street_line}, {city_line}"
     return street_line or city_line or "-"
+
+
+def _seller_bank_account_from_snapshot(snapshot: dict) -> str | None:
+    for key in ("bank_account", "bankAccount", "nr_rb", "NrRB"):
+        raw = snapshot.get(key)
+        if isinstance(raw, str) and raw.strip():
+            normalized = normalize_bank_account(raw.strip())
+            return normalized or raw.strip()
+    return None
 
 
 class FA3Mapper:
@@ -251,6 +261,11 @@ class FA3Mapper:
         method = invoice.payment_method if isinstance(invoice.payment_method, PaymentMethod) else PaymentMethod.TRANSFER
         fa_code = _PAYMENT_METHOD_FA3.get(method, _PAYMENT_METHOD_FA3[PaymentMethod.TRANSFER])
         _el(platnosc, "FormaPlatnosci", fa_code)
+
+        bank_account = _seller_bank_account_from_snapshot(invoice.seller_snapshot or {})
+        if bank_account:
+            rachunek = _el(platnosc, "RachunekBankowy")
+            _el(rachunek, "NrRB", bank_account)
 
     @staticmethod
     def _build_podmiot1(root: etree._Element, snapshot: dict) -> None:

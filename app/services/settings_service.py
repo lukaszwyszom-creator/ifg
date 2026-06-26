@@ -74,7 +74,7 @@ class SettingsService:
     def build_company_snapshot(self) -> dict:
         """Snapshot sprzedawcy do faktury sprzedaży (env + DB)."""
         merged = self.get_settings()
-        return {
+        snapshot = {
             "nip": str(merged.get("seller_nip") or "").strip(),
             "name": str(merged.get("seller_name") or "").strip(),
             "street": str(merged.get("seller_street") or "").strip(),
@@ -84,6 +84,10 @@ class SettingsService:
             "city": str(merged.get("seller_city") or "").strip(),
             "country": str(merged.get("seller_country") or "PL").strip() or "PL",
         }
+        bank_account = str(merged.get("seller_bank_account") or "").strip()
+        if bank_account:
+            snapshot["bank_account"] = bank_account
+        return snapshot
 
     def validate_company_snapshot(self, snapshot: dict | None = None) -> None:
         """Waliduje kompletność danych sprzedawcy przed fakturą sprzedaży / wysyłką."""

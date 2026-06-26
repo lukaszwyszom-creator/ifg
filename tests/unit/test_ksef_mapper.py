@@ -186,6 +186,30 @@ class TestInvoiceToXml:
         root = _parse_xml(xml)
         assert _text(root, "Fa", "Platnosc", "FormaPlatnosci") == "1"
 
+    def test_fa_platnosc_includes_nr_rb_from_seller_snapshot(self):
+        bank = "12345678901234567890123456"
+        inv = _make_invoice(
+            seller_snapshot={
+                "nip": "9670402857",
+                "name": "Sprzedawca Sp. z o.o.",
+                "street": "ul. Testowa",
+                "building_no": "1",
+                "postal_code": "00-001",
+                "city": "Warszawa",
+                "country": "PL",
+                "bank_account": bank,
+            }
+        )
+        xml = KSeFMapper.invoice_to_xml(inv)
+        root = _parse_xml(xml)
+        assert _text(root, "Fa", "Platnosc", "RachunekBankowy", "NrRB") == bank
+        KSeFMapper.validate_xml_against_xsd(xml)
+
+    def test_fa_platnosc_omits_nr_rb_without_bank_in_snapshot(self):
+        xml = KSeFMapper.invoice_to_xml(_make_invoice())
+        root = _parse_xml(xml)
+        assert _find(root, "Fa", "Platnosc", "RachunekBankowy") is None
+
     def test_fa_sale_date(self):
         xml = KSeFMapper.invoice_to_xml(_make_invoice(
             issue_date=date(2026, 3, 15),
