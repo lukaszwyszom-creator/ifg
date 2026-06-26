@@ -39,4 +39,16 @@ Oczekiwanie po sync: `max(issue_date) >= 2026-06-12`.
 
 ## Wynik deploy / DB
 
-_(uzupełnione po wdrożeniu)_
+- **Deploy:** wykonany (DS723+, commit `90ba3fd`, api/worker zrestartowane)
+- **Sync:** job `ea5bf164` — **failed** (`Brak aktywnej sesji KSeF dla NIP 9670402857`)
+- **DB po deploy (bez udanego sync):**
+
+```sql
+SELECT MAX(issue_date), MAX(created_at), COUNT(*)
+FROM invoices WHERE direction = 'purchase';
+
+ max_issue_date |        max_created_at         | purchase_count
+ 2026-06-05     | 2026-06-17 19:28:47.931507+02 |             51
+```
+
+Wymagane: aktywna sesja KSeF w UI, potem ponowny sync zakupów.

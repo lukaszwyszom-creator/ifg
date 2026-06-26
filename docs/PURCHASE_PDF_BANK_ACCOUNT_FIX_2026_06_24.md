@@ -12,13 +12,14 @@ Podgląd/PDF faktury **zakupu** pokazywał rachunek bankowy Ikony (ustawienia fi
 
 ## Commit
 
-_(po commit)_
+`834e4aa` — `fix(pdf): omit company bank account on purchase invoice preview`
 
 ## Deploy
 
-Backend api — bez zmian frontend-react.
+DS723+: `git pull`, build + restart **api** (bez frontend-react).
 
 ## Weryfikacja
 
-- `pytest tests/unit/test_pdf_service.py` — 9 passed
-- Prod: podgląd/PDF faktury zakupu bez linii „Rachunek bankowy” (gdy brak konta w snapshot)
+- `pytest tests/unit/test_pdf_service.py` — **9 passed**
+- Prod: podgląd/PDF faktury `direction=purchase` — brak linii „Rachunek bankowy” gdy snapshot sprzedawcy nie ma `bank_account`
+- Prod: faktura `direction=sale` — rachunek Ikony z ustawień nadal widoczny

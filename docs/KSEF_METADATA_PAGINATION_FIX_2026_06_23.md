@@ -2,34 +2,52 @@
 
 ## Zmiana
 
-- `page_offset += 1` (numer strony, nie offset rekordów)
-- `sortOrder=Asc` w params metadata query
-- probe: help `--page-offset` wyjaśnia numer strony
+| Plik | Diff |
+|------|------|
+| `app/integrations/ksef/client.py` | `page_offset += 1`; `sortOrder=Asc` w params |
+| `scripts/ksef_metadata_probe.py` | help `--page-offset`: numer strony 0,1,2… |
+
+Root cause: OpenAPI MF — `pageOffset` to numer strony, nie offset rekordów.
+
+Migracja DB: **brak**.
 
 ## Commit
 
-_(uzupełnione po commit)_
+`2c5591f` — `fix(ksef): use page number not record offset for metadata pagination`
 
 ## Deploy DS723+
 
-```bash
-cd /volume1/docker/ifg_v2/ifg_standalone
-git pull
-sudo docker compose -f docker/docker-compose.prod.yml --env-file .env.production build api worker
-sudo docker compose -f docker/docker-compose.prod.yml --env-file .env.production up -d api worker
-```
-
-Migracja DB: **brak**. Backup przed migracją: N/A.
+- `git pull` → OK
+- `docker compose build api worker` → OK
+- `docker compose up -d api worker` → OK
 
 ## Sync zakupów
 
-_(uzupełnione po deploy)_
+Job `dd5d2849-c8ee-473d-8369-ea22c7aebb2a` — **failed**
 
-## SELECT purchase
-
-```sql
-SELECT MAX(issue_date), MAX(created_at), COUNT(*)
-FROM invoices WHERE direction = 'purchase';
+```
+Brak aktywnej sesji KSeF dla NIP 9670402857.
 ```
 
-_(wynik poniżej)_
+Brak aktywnej sesji w DB — sync nie wszedł w metadata query. Wymagane połączenie KSeF w UI przed ponownym sync.
+
+## SELECT purchase (po deploy)
+
+```
+ max_issue_date |        max_created_at         | purchase_count
+ 2026-06-05     | 2026-06-17 19:28:47.931507+02 |             51
+```
+
+Bez zmian względem stanu sprzed sync (sesja nieaktywna).
+
+## Weryfikacja paginacji (po aktywnej sesji)
+
+Probe strona 1:
+
+```bash
+python scripts/ksef_metadata_probe.py --env production --auth fresh --nip 9670402857 \
+  --subject Subject2 --date-type PermanentStorage \
+  --date-from 2026-03-25 --date-to 2026-06-23 --page-offset 1 --page-size 50
+```
+
+Oczekiwanie: ref > 0 jeśli `hasMore=true` na stronie 0.
