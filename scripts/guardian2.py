@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import subprocess
 import sys
@@ -14,16 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
 
-_guardian_spec = importlib.util.spec_from_file_location(
-    "guardian", ROOT / "scripts" / "guardian.py"
-)
-assert _guardian_spec and _guardian_spec.loader
-_guardian = importlib.util.module_from_spec(_guardian_spec)
-sys.modules["guardian"] = _guardian
-_guardian_spec.loader.exec_module(_guardian)
+from ifg_guardian import compat as _guardian
 
 COMPOSE_FILE = _guardian.COMPOSE_FILE
 DEFAULT_REMOTE_HOST = _guardian.DEFAULT_REMOTE_HOST
@@ -32,7 +25,7 @@ parse_compose_service_states = _guardian.parse_compose_service_states
 service_state_is_healthy = _guardian.service_state_is_healthy
 service_state_is_restarting = _guardian.service_state_is_restarting
 service_state_is_running = _guardian.service_state_is_running
-TARGET_BRANCH = "production"
+from ifg_guardian.config import TARGET_BRANCH
 COMMIT_MSG = "fix: harden KSeF async sync deploy flow"
 REMOTE_NPM_PATH = "/usr/local/bin:/opt/bin:/opt/homebrew/bin"
 NPM_NOT_FOUND_MSG = "npm not found on DS723+ non-interactive SSH session"
