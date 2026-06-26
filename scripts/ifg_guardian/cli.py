@@ -12,11 +12,16 @@ from ifg_guardian.core.git import resolve_ds723_host
 from ifg_guardian.modules.api_mobile import run_api_guardian
 from ifg_guardian.modules.deploy import run_deploy_check
 from ifg_guardian.modules.doctor import run_doctor
+from ifg_guardian.modules.ifg_deploy_run import run_ifg_deploy_run
+from ifg_guardian.modules.ifg_doctor import run_ifg_doctor
+from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
 from ifg_guardian.modules.frontend import run_frontend_check
 from ifg_guardian.modules.ksef import run_ksef_check, run_ksef_sync
 from ifg_guardian.modules.production import run_prod_health, run_prod_recover
-from ifg_guardian.modules.repo import run_repo_audit, run_repo_clean_dry_run, run_repo_status, run_repo_sync
-from ifg_guardian.modules.warehouse import run_warehouse_check
+from ifg_guardian.modules.repo import run_repo_clean_dry_run, run_repo_status, run_repo_sync
+from ifg_guardian.modules.repo_audit import run_repo_audit
+from ifg_guardian.modules.plugins import run_plugin_list
+from ifg_guardian.modules.workflow import run_workflow
 
 LEGACY_FLAGS = {
     "--deploy-check",
@@ -53,7 +58,7 @@ def _handle_legacy(argv: list[str]) -> int | None:
     """Map legacy flags to v3 commands. Returns None if not legacy mode."""
     if not argv:
         return None
-    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "version", "-h", "--help"):
+    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "version", "-h", "--help"):
         return None
     if not any(a in LEGACY_FLAGS or a.startswith("--remote") for a in argv):
         if not any(a.startswith("-") for a in argv):
@@ -119,6 +124,9 @@ def build_parser() -> argparse.ArgumentParser:
     repo_status.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     repo_audit = repo_sub.add_parser("audit", help="Classify changes + risk report")
     repo_audit.add_argument("--fetch", action="store_true")
+    repo_audit.add_argument("--dry-run", action="store_true", help="Simulate mutating intents (e.g. fetch)")
+    repo_audit.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
+    repo_audit.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
     repo_audit.add_argument("--report", default=None, help="Report path (default: docs/guardian/REPO_AUDIT_*.md)")
     repo_clean = repo_sub.add_parser("clean", help="Dry-run housekeeping preview")
     repo_clean.add_argument("--dry-run", action="store_true", default=True)
@@ -161,8 +169,51 @@ def build_parser() -> argparse.ArgumentParser:
     wh_sub = wh.add_subparsers(dest="action", required=True)
     wh_sub.add_parser("check", help="Warehouse files presence")
 
-    sub.add_parser("doctor", help="Run aggregate read-only checks")
+    sub.add_parser("doctor", help="Run aggregate read-only checks (legacy → ifg.doctor)")
     sub.add_parser("version", help="Show Guardian version")
+
+    ifg = sub.add_parser("ifg", help="IFG domain workflows")
+    ifg_sub = ifg.add_subparsers(dest="action", required=True)
+    ifg_doc = ifg_sub.add_parser("doctor", help="IFG environment readiness diagnosis")
+    ifg_doc.add_argument("--fetch", action="store_true", help="git fetch before repo checks")
+    ifg_doc.add_argument("--dry-run", action="store_true", help="Simulate remote/mutating checks")
+    ifg_doc.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
+    ifg_doc.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
+    ifg_doc.add_argument("--remote-host", default=None)
+    ifg_doc.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_doc.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DOCTOR_*.md)")
+
+    ifg_rel = ifg_sub.add_parser("release", help="IFG release workflows")
+    ifg_rel_sub = ifg_rel.add_subparsers(dest="release_action", required=True)
+    ifg_plan = ifg_rel_sub.add_parser("plan", help="Build release plan (read-only)")
+    ifg_plan.add_argument("--fetch", action="store_true", help="git fetch before doctor dependency")
+    ifg_plan.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
+    ifg_plan.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
+    ifg_plan.add_argument("--remote-host", default=None)
+    ifg_plan.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_plan.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_RELEASE_PLAN_*.md)")
+
+    ifg_dep = ifg_sub.add_parser("deploy", help="IFG deploy workflows")
+    ifg_dep_sub = ifg_dep.add_subparsers(dest="deploy_action", required=True)
+    ifg_dep_run = ifg_dep_sub.add_parser("run", help="Run IFG deploy (LIVE requires --yes)")
+    ifg_dep_run.add_argument("--dry-run", action="store_true", help="Simulate deploy pipeline")
+    ifg_dep_run.add_argument("--yes", action="store_true", help="Confirm LIVE deploy")
+    ifg_dep_run.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
+    ifg_dep_run.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
+    ifg_dep_run.add_argument("--remote-host", default=None)
+    ifg_dep_run.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_dep_run.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DEPLOY_RUN_*.md)")
+
+    wf = sub.add_parser("workflow", help="Workflow engine commands")
+    wf_sub = wf.add_subparsers(dest="action", required=True)
+    wf_run = wf_sub.add_parser("run", help="Run a registered workflow")
+    wf_run.add_argument("workflow_id", help="Workflow id (e.g. core.ping)")
+    wf_run.add_argument("--dry-run", action="store_true", help="Simulate mutating intents")
+    wf_run.add_argument("--plan", action="store_true", help="Plan mode (same pipeline as dry-run)")
+
+    plugin = sub.add_parser("plugin", help="Plugin management")
+    plugin_sub = plugin.add_subparsers(dest="action", required=True)
+    plugin_sub.add_parser("list", help="List registered plugins")
 
     return parser
 
@@ -201,8 +252,17 @@ def main(argv: list[str] | None = None) -> int:
                 remote_path=args.remote_path,
             )
         if args.action == "audit":
+            if args.json and args.markdown:
+                print("Use either --json or --markdown, not both.", file=sys.stderr)
+                return 2
+            output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
             report = Path(args.report) if args.report else None
-            return run_repo_audit(do_fetch=args.fetch, report_path=report)
+            return run_repo_audit(
+                do_fetch=args.fetch,
+                dry_run=args.dry_run,
+                output_format=output_format,
+                report_path=report,
+            )
         if args.action == "clean":
             return run_repo_clean_dry_run()
 
@@ -235,6 +295,56 @@ def main(argv: list[str] | None = None) -> int:
 
     if domain == "doctor":
         return run_doctor(do_fetch=False)
+
+    if domain == "ifg" and args.action == "doctor":
+        if args.json and args.markdown:
+            print("Use either --json or --markdown, not both.", file=sys.stderr)
+            return 2
+        output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+        report = Path(args.report) if args.report else None
+        return run_ifg_doctor(
+            do_fetch=args.fetch,
+            dry_run=args.dry_run,
+            output_format=output_format,
+            report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
+    if domain == "ifg" and args.action == "release" and args.release_action == "plan":
+        if args.json and args.markdown:
+            print("Use either --json or --markdown, not both.", file=sys.stderr)
+            return 2
+        output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+        report = Path(args.report) if args.report else None
+        return run_ifg_release_plan(
+            do_fetch=args.fetch,
+            output_format=output_format,
+            report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
+    if domain == "ifg" and args.action == "deploy" and args.deploy_action == "run":
+        if args.json and args.markdown:
+            print("Use either --json or --markdown, not both.", file=sys.stderr)
+            return 2
+        output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+        report = Path(args.report) if args.report else None
+        return run_ifg_deploy_run(
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+            output_format=output_format,
+            report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
+    if domain == "workflow" and args.action == "run":
+        return run_workflow(args.workflow_id, dry_run=args.dry_run, plan=args.plan)
+
+    if domain == "plugin" and args.action == "list":
+        return run_plugin_list()
 
     if domain == "version":
         print(f"IFG Guardian {__version__}")

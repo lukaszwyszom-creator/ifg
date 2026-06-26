@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from guardian_platform.core.runtime.context import CommandContext
+from guardian_platform.profiles.ifg.config.defaults import DEFAULT_REMOTE_PATH, resolve_remote_host
+from guardian_platform.profiles.ifg.doctor.runner import run_ifg_doctor
+
+
+def run_doctor(ctx: CommandContext) -> int:
+    report_path = Path(ctx.extra["report_path"]) if ctx.extra.get("report_path") else None
+    return run_ifg_doctor(
+        do_fetch=bool(ctx.extra.get("do_fetch")),
+        dry_run=ctx.dry_run,
+        output_format=ctx.output_format,
+        report_path=report_path,
+        remote_host=resolve_remote_host(ctx.extra.get("remote_host")),
+        remote_path=ctx.extra.get("remote_path") or DEFAULT_REMOTE_PATH,
+    )

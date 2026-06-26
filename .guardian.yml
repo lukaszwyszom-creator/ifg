@@ -1,0 +1,13 @@
+schema: guardian_project_v1
+
+platform:
+  version: "0.1"
+
+profiles:
+  active:
+    - ifg
+    - psag_scaffold
+
+project:
+  root: .
+  reports_dir: docs/guardian

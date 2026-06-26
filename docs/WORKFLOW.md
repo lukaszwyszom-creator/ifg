@@ -1,10 +1,82 @@
 # IFG — workflow rozwoju, produkcji i mobile-expo
 
+## Guardian V1 — oficjalny cykl deploymentu
+
+Od Guardian V1 canonical path deployu IFG to **Workflow Engine**, nie pojedyncze skrypty bash.
+
+```bash
+python3 scripts/guardian.py   # entry point
+```
+
+### Pełny cykl (Mac mini, branch `production`)
+
+```bash
+# 1. Diagnoza środowiska (read-only)
+guardian ifg doctor
+
+# 2. Plan wydania — co zostanie wykonane (read-only)
+guardian ifg release plan
+
+# 3. Symulacja deployu — zero mutacji
+guardian ifg deploy run --dry-run
+
+# 4. LIVE deploy — wymaga --yes + doctor READY/READY_WITH_WARNINGS
+guardian ifg deploy run --yes
+```
+
+Raporty: terminal + `docs/guardian/IFG_*.md` + `.guardian/workflows/<id>/transaction.json`.
+
+### Diagram cyklu Guardian
+
+```mermaid
+flowchart LR
+  DOCTOR[ifg doctor] --> PLAN[ifg release plan]
+  PLAN --> DRY[ifg deploy run --dry-run]
+  DRY --> LIVE[ifg deploy run --yes]
+  LIVE --> HEALTH[health + logs]
+```
+
+### Warunki LIVE deploy
+
+| Warunek | Wymaganie |
+|---------|-----------|
+| Branch | `production` |
+| Doctor | `READY` lub `READY_WITH_WARNINGS` |
+| Blockers | brak (BLOCKED / CRITICAL risk → stop) |
+| Potwierdzenie | `--yes` |
+| Frontend | budowany na Mac mini (`npm run build`) |
+| Dist | rsync → DS723+ (NAS nie kompiluje FE) |
+| Migracje | `alembic upgrade head` po backup pg_dump (gdy wymagane) |
+
+### Komendy pomocnicze (read-only)
+
+```bash
+guardian repo audit --fetch          # klasyfikacja zmian + ryzyko
+guardian repo status --fetch --remote ds723
+guardian deploy check                # legacy: Mac vs NAS (read-only)
+guardian prod health                 # kontenery + /health
+guardian frontend check
+```
+
+### Recovery i backup (placeholder — Guardian V2)
+
+```bash
+# V1: recovery nadal przez guardian2 (do migracji w V2)
+guardian prod recover --yes          # → guardian2 recover-prod
+
+# Backup przed migracją: wykonywany automatycznie przez deploy LIVE
+# (pg_dump via SSH przed alembic upgrade head)
+```
+
+Manualny rollback kodu/dist — patrz sekcja [Procedura rollbacku](#procedura-rollbacku).
+
+---
+
 ## Architektura środowisk
 
 | Środowisko | Rola | Dozwolone | Zabronione |
 |------------|------|-----------|------------|
-| **Mac mini** | Development | backend, frontend-react, testy, build, mobile-expo | deploy produkcyjny bez testów |
+| **Mac mini** | Development | backend, frontend-react, testy, build, Guardian | deploy produkcyjny bez testów / bez doctor |
 | **DS723+** | Produkcja 24/7 | `git pull production`, docker up, migracje | edycja kodu, npm build, eksperymenty |
 | **mobile-expo** | Klient iPhone (Mac mini) | HTTP → API IFG | zmiany w backend/frontend-react/docker prod |
 
@@ -16,6 +88,8 @@
 ├── frontend-react/dist/     ← build z Mac mini (rsync)
 └── docker/docker-compose.prod.yml
 ```
+
+Konfiguracja SSH/deploy: `scripts/ds723.env`.
 
 ---
 
@@ -68,15 +142,20 @@ ifg_standalone/
 │   ├── docker-compose.yml       dev (Mac mini)
 │   └── docker-compose.prod.yml  prod (DS723+)
 ├── tests/
-├── scripts/             deploy, testy, logi
+├── scripts/
+│   ├── guardian.py              Guardian CLI entry
+│   ├── ifg_guardian/            Guardian V1 framework
+│   ├── deploy-ds723.sh          legacy deploy (fallback)
+│   └── ds723.env                konfiguracja DS723+
 ├── mobile-expo/         Expo + TypeScript (iPhone)
 └── docs/
-    └── WORKFLOW.md
+    ├── WORKFLOW.md
+    └── GUARDIAN_V1_RELEASE.md
 ```
 
 ---
 
-## Diagram workflow
+## Diagram workflow (środowiska)
 
 ```mermaid
 flowchart TB
@@ -85,6 +164,7 @@ flowchart TB
     MAIN[main]
     PROD_BRANCH[production]
     TEST[test-ifg.sh]
+    GUARDIAN[Guardian ifg doctor / plan / deploy]
     BUILD[npm run build frontend-react]
     MOBILE[feature/mobile-expo]
   end
@@ -104,7 +184,8 @@ flowchart TB
   MAIN --> GH_MAIN
   MAIN -->|merge po testach| PROD_BRANCH
   PROD_BRANCH --> GH_PROD
-  PROD_BRANCH --> TEST --> BUILD
+  PROD_BRANCH --> TEST --> GUARDIAN
+  GUARDIAN --> BUILD
   BUILD -->|rsync dist| PULL
   GH_PROD --> PULL --> DOCKER --> DIST
   MOBILE -.->|HTTP /api/v1| DOCKER
@@ -119,34 +200,50 @@ flowchart TB
 
 - [ ] Merge `main` → `production` wykonany i wypchnięty
 - [ ] `bash scripts/test-ifg.sh` — OK
-- [ ] `bash scripts/preflight-ds723.sh` — OK (opcjonalnie przed deployem)
+- [ ] `guardian ifg doctor` — READY lub READY_WITH_WARNINGS
+- [ ] `guardian ifg release plan` — brak blockerów CRITICAL
+- [ ] `guardian ifg deploy run --dry-run` — pipeline zgodny z oczekiwaniami
 - [ ] `.env.production` na DS723+ kompletny (`REGON_API_KEY`, `JWT_SECRET_KEY`, `DATABASE_URL`)
 - [ ] Lokalny branch = `production`
 
-### Kroki
+### Kroki (Guardian V1 — zalecane)
 
 ```bash
 git checkout production
 git pull origin production
 
+bash scripts/test-ifg.sh
+
+guardian ifg doctor
+guardian ifg release plan
+guardian ifg deploy run --dry-run
+guardian ifg deploy run --yes
+```
+
+Guardian LIVE wykonuje:
+
+1. snapshot RollbackPoint (commit, images, alembic)
+2. git pull (local + remote DS723+)
+3. frontend build (Mac mini, jeśli wymagane wg planu)
+4. rsync dist → DS723+
+5. docker compose build api worker (jeśli wymagane)
+6. pg_dump backup + alembic upgrade head (jeśli wymagane)
+7. docker compose up -d
+8. /health + docker logs
+
+### Fallback (legacy)
+
+```bash
 bash scripts/deploy-ds723.sh
 ```
 
-Skrypt `deploy-ds723.sh`:
-
-1. weryfikuje branch `production`
-2. uruchamia `test-ifg.sh` (pytest + frontend build)
-3. buduje `frontend-react/dist/` na Mac mini
-4. `rsync` dist → DS723+ (NAS **nie** kompiluje frontendu)
-5. `git pull origin production` na DS723+
-6. `docker compose build api` + `up -d api worker`
-7. `alembic upgrade head`
-8. `healthcheck.sh`
+Skrypt bash pozostaje jako fallback do czasu pełnego sunset w Guardian V2.
 
 ### Po deployu
 
 ```bash
-bash scripts/preflight-ds723.sh
+guardian prod health
+bash scripts/preflight-ds723.sh    # opcjonalnie
 bash scripts/logs-api.sh 50 --no-follow   # opcjonalnie
 ```
 
@@ -155,6 +252,8 @@ Test manualny: logowanie UI, REGON (NIP), KSeF sesja.
 ---
 
 ## Procedura rollbacku
+
+Guardian V1 zapisuje **RollbackPoint** w transakcji deploy (commit, images, alembic) — automatyczny rollback w V2.
 
 ### Szybki rollback (kod)
 
@@ -182,7 +281,8 @@ rsync -avz --delete -e "ssh -p 32122" dist/ zdalny_admin@ds723:/volume1/docker/i
 
 ### Rollback bazy (ostrożnie)
 
-Przy migracji wstecz tylko jeśli `alembic downgrade` był testowany lokalnie.
+Przy migracji wstecz tylko jeśli `alembic downgrade` był testowany lokalnie.  
+Backup pre-migrate: `backups/pre_migrate_*.sql` na DS723+ (tworzony przez Guardian LIVE).
 
 ---
 
@@ -207,10 +307,11 @@ cd mobile-expo && npm install && npm run ios
 
 ## Skrypty (`scripts/`)
 
-| Skrypt | Gdzie | Opis |
-|--------|-------|------|
+| Skrypt / narzędzie | Gdzie | Opis |
+|--------------------|-------|------|
+| `guardian.py ifg …` | Mac mini | **Guardian V1 — canonical deploy** |
 | `test-ifg.sh` | Mac mini | pytest + frontend build |
-| `deploy-ds723.sh` | Mac mini | pełny deploy `production` → DS723+ |
+| `deploy-ds723.sh` | Mac mini | legacy deploy (fallback) |
 | `preflight-ds723.sh` | Mac mini | branch, REGON key, dist, health |
 | `healthcheck.sh` | Mac mini | docker ps + `/health` |
 | `logs-api.sh` | Mac mini | logi API |
@@ -232,11 +333,11 @@ Konfiguracja DS723+: edytuj `scripts/ds723.env`.
 
 | Ryzyko | Mitigacja |
 |--------|-----------|
-| Różnice `feature/ifg-agent-v1` vs `main` | Porównaj diff przed merge; uruchom pełne testy |
+| Różnice `feature/ifg-agent-v1` vs `main` | Porównaj diff przed merge; uruchom pefullne testy |
 | Pusty `REGON_API_KEY` w `.env.production` ifg_v2 | `preflight-ds723.sh` przed deployem |
 | Stare skrypty ze złymi ścieżkami (`homes/...`) | Używaj `scripts/ds723.env` (ifg_v2) |
 | Worker restart loop | Osobny fix po ustabilizowaniu branchy |
-| Frontend dist niezsynchronizowany | Deploy zawsze przez `deploy-ds723.sh` (rsync) |
+| Frontend dist niezsynchronizowany | Deploy przez Guardian (`ifg deploy run --yes`) |
 
 ### Kroki przejścia
 
@@ -265,10 +366,12 @@ Konfiguracja DS723+: edytuj `scripts/ds723.env`.
    git pull origin production
    ```
 
-5. **Pierwszy deploy nowym procesem**
+5. **Pierwszy deploy Guardian V1**
    ```bash
-   bash scripts/deploy-ds723.sh
-   bash scripts/preflight-ds723.sh
+   guardian ifg doctor
+   guardian ifg deploy run --dry-run
+   guardian ifg deploy run --yes
+   guardian prod health
    ```
 
 6. **Oznacz `feature/ifg-agent-v1` jako zamknięty** (archiwum / delete po 2 tygodniach stabilnej produkcji)
@@ -280,3 +383,10 @@ Konfiguracja DS723+: edytuj `scripts/ds723.env`.
 **`production`** — jedyny branch dozwolony na NAS.
 
 Tymczasowo (do zakończenia migracji): **`feature/ifg-agent-v1`** lub **`production`** po kroku 3–4 powyżej.
+
+---
+
+## Powiązana dokumentacja
+
+- [GUARDIAN_V1_RELEASE.md](GUARDIAN_V1_RELEASE.md) — architektura, checklist, roadmap V2
+- [GUARDIAN_WORKFLOW_ENGINE.md](GUARDIAN_WORKFLOW_ENGINE.md) — specyfikacja engine
