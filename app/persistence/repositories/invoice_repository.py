@@ -142,6 +142,46 @@ class InvoiceRepository:
         )
         return bool(self.session.execute(stmt).scalar())
 
+    def count_ksef_purchases_in_issue_range(
+        self,
+        date_from: date,
+        date_to: date,
+        buyer_nip: str | None = None,
+    ) -> int:
+        """Liczba faktur zakupowych z numerem KSeF w zakresie issue_date (audyt sync)."""
+        return len(
+            self.list_ksef_purchase_refs_in_issue_range(
+                date_from,
+                date_to,
+                buyer_nip=buyer_nip,
+            )
+        )
+
+    def list_ksef_purchase_refs_in_issue_range(
+        self,
+        date_from: date,
+        date_to: date,
+        buyer_nip: str | None = None,
+    ) -> list[str]:
+        """Numery KSeF faktur zakupowych w zakresie issue_date (opcjonalnie filtr NIP nabywcy)."""
+        stmt = select(InvoiceORM.ksef_reference_number).where(
+            InvoiceORM.direction == "purchase",
+            InvoiceORM.ksef_reference_number.isnot(None),
+            InvoiceORM.issue_date >= date_from,
+            InvoiceORM.issue_date <= date_to,
+        )
+        if buyer_nip:
+            normalized = buyer_nip.replace("-", "").replace(" ", "")
+            buyer_nip_expr = func.replace(
+                func.replace(InvoiceORM.buyer_snapshot_json["nip"].astext, "-", ""),
+                " ",
+                "",
+            )
+            stmt = stmt.where(buyer_nip_expr == normalized)
+
+        rows = self.session.execute(stmt.order_by(InvoiceORM.issue_date.asc())).scalars().all()
+        return [ref for ref in rows if isinstance(ref, str) and ref]
+
     def get_next_sequence_number(self, year: int, month: int) -> int:
         """Zlicza faktury w danym miesiącu i zwraca następny numer sekwencyjny."""
         from datetime import date as _date

@@ -1,6 +1,7 @@
 """Paginacja metadata KSeF — zakupy Subject2."""
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 from app.integrations.ksef.client import KSeFClient, RetryConfig
@@ -53,6 +54,22 @@ def _run_metadata_query(
 
 
 class TestMetadataPagination:
+    def test_three_pages_return_120_refs(self) -> None:
+        client = _make_client()
+        refs = _run_metadata_query(
+            client,
+            pages_by_date_type={
+                "PermanentStorage": {
+                    0: {"hasMore": True, "invoices": _refs(50)},
+                    1: {"hasMore": True, "invoices": _refs(50, start=50)},
+                    2: {"hasMore": False, "invoices": _refs(20, start=100)},
+                },
+                "Invoicing": {},
+                "Issue": {},
+            },
+        )
+        assert len(refs) == 120
+
     def test_two_pages_return_70_refs(self) -> None:
         client = _make_client()
         refs = _run_metadata_query(
@@ -60,7 +77,7 @@ class TestMetadataPagination:
             pages_by_date_type={
                 "PermanentStorage": {
                     0: {"hasMore": True, "invoices": _refs(50)},
-                    50: {"hasMore": False, "invoices": _refs(20, start=50)},
+                    1: {"hasMore": False, "invoices": _refs(20, start=50)},
                 },
                 "Invoicing": {},
                 "Issue": {},
@@ -75,7 +92,7 @@ class TestMetadataPagination:
             pages_by_date_type={
                 "PermanentStorage": {
                     0: {"hasMore": False, "invoices": _refs(50)},
-                    50: {"hasMore": False, "invoices": _refs(20, start=50)},
+                    1: {"hasMore": False, "invoices": _refs(20, start=50)},
                 },
                 "Invoicing": {},
                 "Issue": {},
@@ -90,13 +107,54 @@ class TestMetadataPagination:
             pages_by_date_type={
                 "PermanentStorage": {
                     0: {"hasMore": True, "invoices": _refs(50)},
-                    50: {"hasMore": False, "invoices": []},
+                    1: {"hasMore": False, "invoices": []},
                 },
                 "Invoicing": {},
                 "Issue": {},
             },
         )
         assert len(refs) == 50
+
+    def test_empty_page_after_has_more_logs_pagination_error(self, caplog) -> None:
+        import logging
+
+        from app.services.ksef_purchase_sync_audit import PurchaseSyncAudit
+
+        client = _make_client()
+        audit = PurchaseSyncAudit(nip="1234567890", date_from=date(2026, 3, 23), date_to=date(2026, 6, 21))
+        caplog.set_level(logging.ERROR)
+
+        def _fake_request(method, url, *, headers=None, params=None, json=None, **kw):
+            assert method == "POST"
+            offset = int((params or {}).get("pageOffset", 0))
+            if offset == 0:
+                payload = {"hasMore": True, "invoices": _refs(50)}
+            else:
+                payload = {"hasMore": False, "invoices": []}
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = payload
+            return resp
+
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        ctx.request.side_effect = _fake_request
+
+        with patch("httpx.Client", return_value=ctx), patch.object(client, "_pace_purchase_request"), patch.object(
+            client, "_mark_purchase_request"
+        ):
+            refs = client._query_purchase_metadata_refs(
+                access_token="tok",
+                date_from="2026-03-23",
+                date_to="2026-06-21",
+                audit=audit,
+            )
+
+        assert len(refs) == 50
+        assert audit.incomplete is True
+        assert any("hasMore=true" in err for err in audit.pagination_errors)
+        assert any("PAGINATION_ERROR" in r.message for r in caplog.records)
 
     def test_permanent_storage_and_invoicing_union_deduped(self) -> None:
         client = _make_client()

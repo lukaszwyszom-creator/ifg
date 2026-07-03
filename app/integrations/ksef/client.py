@@ -381,6 +381,8 @@ class KSeFClient:
         invoicing_date_from: str,
         invoicing_date_to: str,
         subject_type: str = "subject2",
+        *,
+        audit=None,
     ) -> QueryReceivedInvoicesResult:
         """Pobiera faktury zakupowe (odebrane) z KSeF za podany zakres dat.
 
@@ -398,6 +400,7 @@ class KSeFClient:
                 access_token=access_token,
                 date_from=invoicing_date_from,
                 date_to=invoicing_date_to,
+                audit=audit,
             )
             if metadata_refs is not None:
                 logger.info(
@@ -409,6 +412,7 @@ class KSeFClient:
                 return self._download_metadata_purchase_invoices(
                     access_token=access_token,
                     invoice_refs=metadata_refs,
+                    audit=audit,
                 )
 
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -651,12 +655,15 @@ class KSeFClient:
         access_token: str,
         date_from: str,
         date_to: str,
+        *,
+        audit=None,
     ) -> list[str] | None:
         """Publiczny wrapper: lista ksefNumber z POST /invoices/query/metadata."""
         return self._query_purchase_metadata_refs(
             access_token=access_token,
             date_from=date_from,
             date_to=date_to,
+            audit=audit,
         )
 
     def get_purchase_invoice_xml(
@@ -673,6 +680,7 @@ class KSeFClient:
         access_token: str,
         date_from: str,
         date_to: str,
+        audit=None,
     ) -> list[str] | None:
         """Zwraca listę ksefNumber z POST /invoices/query/metadata lub None gdy endpoint niedostępny."""
         headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
@@ -686,6 +694,7 @@ class KSeFClient:
             page_offset = 0
             pages_fetched = 0
             date_type_refs: list[str] = []
+            previous_has_more = False
 
             while pages_fetched < _METADATA_MAX_PAGES:
                 current_offset = page_offset
@@ -734,6 +743,17 @@ class KSeFClient:
                 page_is_full = len(page_refs) >= _METADATA_PAGE_SIZE
                 page_date_min, page_date_max = _metadata_ref_date_range(page_refs)
 
+                if audit is not None:
+                    audit.record_metadata_page(
+                        page_offset=current_offset,
+                        date_type=date_type,
+                        received=len(page_refs),
+                        has_more=has_more,
+                        is_truncated=is_truncated,
+                        response_payload=data,
+                        page_refs=page_refs,
+                    )
+
                 logger.info(
                     "KSeF metadata page subjectType=%s dateType=%s pageOffset=%d "
                     "pageSize=%d page_refs=%d hasMore=%s isTruncated=%s "
@@ -753,10 +773,28 @@ class KSeFClient:
                 )
 
                 if not page_refs:
+                    if previous_has_more or has_more:
+                        msg = (
+                            f"metadata pagination stopped on empty page while hasMore=true "
+                            f"dateType={date_type} pageOffset={current_offset}"
+                        )
+                        logger.error("KSeF %s", msg)
+                        if audit is not None:
+                            audit.record_pagination_error(msg)
                     break
 
                 date_type_refs.extend(page_refs)
                 pages_fetched += 1
+                previous_has_more = has_more
+
+                if is_truncated:
+                    msg = (
+                        f"metadata isTruncated=true requires dateRange shift (not implemented) "
+                        f"dateType={date_type} pageOffset={current_offset} refs_on_page={len(page_refs)}"
+                    )
+                    logger.error("KSeF %s", msg)
+                    if audit is not None:
+                        audit.record_pagination_error(msg)
 
                 if has_more or page_is_full:
                     if not has_more and page_is_full:
@@ -773,12 +811,13 @@ class KSeFClient:
                 break
 
             if pages_fetched >= _METADATA_MAX_PAGES:
-                logger.error(
-                    "KSeF metadata pagination stopped at max_pages=%d dateType=%s total_refs=%d",
-                    _METADATA_MAX_PAGES,
-                    date_type,
-                    len(date_type_refs),
+                msg = (
+                    f"metadata pagination stopped at max_pages={_METADATA_MAX_PAGES} "
+                    f"dateType={date_type} total_refs={len(date_type_refs)}"
                 )
+                logger.error("KSeF %s", msg)
+                if audit is not None:
+                    audit.record_pagination_error(msg)
 
             if date_type_refs:
                 date_type_seen: set[str] = set()
@@ -811,6 +850,8 @@ class KSeFClient:
                 len(all_refs),
                 len(unique),
             )
+        if audit is not None:
+            audit.finalize_metadata(unique)
         return unique
 
     def _download_metadata_purchase_invoices(
@@ -818,6 +859,7 @@ class KSeFClient:
         *,
         access_token: str,
         invoice_refs: list[str],
+        audit=None,
     ) -> QueryReceivedInvoicesResult:
         """Subject2 + metadata: oficjalny GET /invoices/ksef/{ksefNumber} → raw XML."""
         results: list[ReceivedInvoiceResult] = []
@@ -830,7 +872,12 @@ class KSeFClient:
                     ksef_reference_number=ref,
                     xml_bytes=xml_bytes,
                 ))
+                if audit is not None:
+                    audit.record_xml_downloaded(ref)
             except KSeFRateLimitDeferredError:
+                if audit is not None:
+                    audit.rate_limited = True
+                    audit.incomplete = True
                 raise
             except KSeFClientError as exc:
                 if exc.status_code == 429:
@@ -840,9 +887,13 @@ class KSeFClient:
                     )
                 else:
                     download_errors.append(f"{ref}: download error: {str(exc)[:120]}")
+                if audit is not None:
+                    audit.record_skipped_error(ref)
                 logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
             except Exception as exc:  # noqa: BLE001
                 download_errors.append(f"{ref}: download error: {str(exc)[:120]}")
+                if audit is not None:
+                    audit.record_skipped_error(ref)
                 logger.warning("KSeF: błąd pobierania faktury %s: %s", ref, exc)
         if rate_limited:
             logger.warning(
@@ -851,6 +902,9 @@ class KSeFClient:
                 len(results),
                 len(download_errors),
             )
+            if audit is not None:
+                audit.rate_limited = True
+                audit.incomplete = True
         return QueryReceivedInvoicesResult(
             invoices=results,
             download_errors=download_errors,
