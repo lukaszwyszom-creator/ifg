@@ -20,7 +20,6 @@ from app.integrations.ksef.client import (
     KSeFClient,
     KSeFClientError,
     KSeFRateLimitDeferredError,
-    QueryReceivedInvoicesResult,
 )
 from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
 from app.persistence.models.ksef_session import KSeFSessionORM
@@ -42,6 +41,15 @@ _MAX_ERROR_SAMPLES = 5
 _RATE_LIMIT_WARNING = (
     "KSeF ograniczył tempo pobierania faktur (HTTP 429). Część faktur nie została pobrana."
 )
+_PURCHASE_SYNC_NIP_LOCKS_GUARD = threading.Lock()
+_purchase_sync_nip_locks: dict[str, threading.Lock] = {}
+
+
+def _purchase_sync_lock_for(nip: str) -> threading.Lock:
+    with _PURCHASE_SYNC_NIP_LOCKS_GUARD:
+        if nip not in _purchase_sync_nip_locks:
+            _purchase_sync_nip_locks[nip] = threading.Lock()
+        return _purchase_sync_nip_locks[nip]
 
 
 def _normalize_session_nip(nip: str | None) -> str:
@@ -390,6 +398,31 @@ class KSeFSessionService:
         )
         return window.date_from, window.date_to
 
+    def find_active_purchase_sync_background_job(
+        self,
+        nip: str,
+        *,
+        exclude_job_id: UUID | None = None,
+    ):
+        """Zwraca pending/processing job sync zakupów dla NIP (opcjonalnie z wyłączeniem bieżącego)."""
+        from app.persistence.models.background_job import BackgroundJob
+
+        normalized = _normalize_session_nip(nip)
+        if not normalized:
+            return None
+        stmt = (
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.job_type == "sync_purchase_invoices",
+                BackgroundJob.status.in_(["pending", "processing"]),
+                BackgroundJob.payload_json["nip"].astext == normalized,
+            )
+            .limit(1)
+        )
+        if exclude_job_id is not None:
+            stmt = stmt.where(BackgroundJob.id != exclude_job_id)
+        return self.session.execute(stmt).scalar_one_or_none()
+
     def sync_purchase_invoices(
         self,
         *,
@@ -401,9 +434,26 @@ class KSeFSessionService:
         incremental: bool = False,
         actor_user_id: UUID | None = None,
         resume_state: dict | None = None,
+        exclude_job_id: UUID | None = None,
     ) -> dict:
         """Synchronizuje faktury zakupowe KSeF → lokalna baza z raportem parzystości."""
         resolved_nip = self._resolve_seller_nip(nip)
+        active_job = self.find_active_purchase_sync_background_job(
+            resolved_nip,
+            exclude_job_id=exclude_job_id,
+        )
+        if active_job is not None:
+            raise ConflictError(
+                f"Synchronizacja zakupów KSeF już trwa dla NIP {resolved_nip} "
+                f"(job_id={active_job.id}, status={active_job.status})."
+            )
+
+        nip_lock = _purchase_sync_lock_for(resolved_nip)
+        if not nip_lock.acquire(blocking=False):
+            raise ConflictError(
+                f"Synchronizacja zakupów KSeF już trwa dla NIP {resolved_nip}."
+            )
+
         resolved_days_back = (
             days_back if days_back is not None else settings.ksef_purchase_sync_days_back
         )
@@ -430,6 +480,8 @@ class KSeFSessionService:
             date_to=resolved_to,
         )
         audit.record_window(window)
+        prev_defer = self.ksef_client.defer_purchase_rate_limit
+        self.ksef_client.defer_purchase_rate_limit = True
         try:
             counts = self.sync_received_invoices(
                 nip=resolved_nip,
@@ -509,6 +561,9 @@ class KSeFSessionService:
                 audit.emit_full_report()
             sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, str(exc))
             raise
+        finally:
+            self.ksef_client.defer_purchase_rate_limit = prev_defer
+            nip_lock.release()
 
     def _finalize_purchase_sync_audit(
         self,
@@ -537,114 +592,22 @@ class KSeFSessionService:
         resume_state: dict | None = None,
         audit: PurchaseSyncAudit | None = None,
     ) -> dict:
-        """Pobiera faktury zakupowe z KSeF za podany zakres dat i zapisuje nowe do bazy.
-
-        Wymaga aktywnej sesji KSeF dla podanego NIP.
-        Pomija faktury już istniejące w bazie (identyfikacja po ksefReferenceNumber).
-        Zwraca słownik: {received, saved, skipped_existing, skipped_parse, subject_type, error_samples}.
-        """
+        """Pobiera faktury zakupowe z KSeF (incremental + resume przy HTTP 429)."""
         if self.invoice_repository is None:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
 
         ctx = self.get_session_context(nip)
-        use_incremental = bool(resume_state) or (
-            getattr(self.ksef_client, "defer_purchase_rate_limit", False) is True
-        )
-        if use_incremental:
-            if audit is not None:
-                audit.sync_path = "incremental"
-            return self._sync_received_invoices_incremental(
-                nip=nip,
-                ctx=ctx,
-                date_from=date_from,
-                date_to=date_to,
-                actor_user_id=actor_user_id,
-                resume_state=resume_state,
-                audit=audit,
-            )
-
         if audit is not None:
-            audit.sync_path = "bulk_metadata"
-
-        received: list = []
-        query_result: QueryReceivedInvoicesResult | None = None
-        subject_type_used: str | None = None
-        for subject_type in ("subject2", "subject1", "subject3"):
-            try:
-                batch = self.ksef_client.query_received_invoices(
-                    access_token=ctx.access_token,
-                    session_reference=ctx.session_reference,
-                    symmetric_key=ctx.symmetric_key,
-                    iv=ctx.initialization_vector,
-                    invoicing_date_from=date_from.isoformat(),
-                    invoicing_date_to=date_to.isoformat(),
-                    subject_type=subject_type,
-                    audit=audit,
-                )
-            except KSeFClientError as exc:
-                raise ExternalServiceError(f"Błąd synchronizacji z KSeF: {exc}") from exc
-
-            if isinstance(batch, list):
-                query_result = QueryReceivedInvoicesResult(invoices=batch)
-            else:
-                query_result = batch
-
-            result_count = query_result.metadata_refs_count or len(query_result.invoices)
-            logger.info(
-                "KSeF purchases sync subjectType=%s result_count=%d date_from=%s date_to=%s",
-                subject_type,
-                result_count,
-                date_from,
-                date_to,
-            )
-            subject_type_used = subject_type
-            if query_result.invoices or query_result.metadata_refs_count:
-                received = query_result.invoices
-                break
-
-        saved = 0
-        skipped_existing = 0
-        skipped_parse = 0
-        error_samples: list[str] = []
-        rate_limited = bool(query_result and query_result.rate_limited)
-        if query_result:
-            for err in query_result.download_errors:
-                skipped_parse += 1
-                if len(error_samples) < _MAX_ERROR_SAMPLES:
-                    error_samples.append(err)
-            if query_result.rate_limited and audit is not None:
-                audit.rate_limited = True
-                audit.incomplete = True
-        for result in received:
-            outcome = self._process_purchase_invoice_xml(
-                ksef_reference_number=result.ksef_reference_number,
-                xml_bytes=result.xml_bytes,
-                actor_user_id=actor_user_id,
-                error_samples=error_samples,
-                audit=audit,
-            )
-            if outcome == "saved":
-                saved += 1
-            elif outcome == "skipped_existing":
-                skipped_existing += 1
-            else:
-                skipped_parse += 1
-
-        received_count = (
-            query_result.metadata_refs_count
-            if query_result and query_result.metadata_refs_count
-            else len(received)
+            audit.sync_path = "incremental"
+        return self._sync_received_invoices_incremental(
+            nip=nip,
+            ctx=ctx,
+            date_from=date_from,
+            date_to=date_to,
+            actor_user_id=actor_user_id,
+            resume_state=resume_state,
+            audit=audit,
         )
-        return {
-            "received": received_count,
-            "saved": saved,
-            "skipped_existing": skipped_existing,
-            "skipped_parse": skipped_parse,
-            "subject_type": subject_type_used,
-            "error_samples": error_samples,
-            "rate_limited": rate_limited,
-            "warning": _RATE_LIMIT_WARNING if rate_limited else None,
-        }
 
     def _sync_received_invoices_incremental(
         self,
@@ -675,24 +638,19 @@ class KSeFSessionService:
                 audit=audit,
             )
             if metadata_refs is None:
-                prev_defer = self.ksef_client.defer_purchase_rate_limit
-                self.ksef_client.defer_purchase_rate_limit = False
-                try:
-                    return self.sync_received_invoices(
-                        nip=nip,
-                        date_from=date_from,
-                        date_to=date_to,
-                        actor_user_id=actor_user_id,
-                        resume_state=None,
-                    )
-                finally:
-                    self.ksef_client.defer_purchase_rate_limit = prev_defer
+                raise ExternalServiceError(
+                    "Endpoint metadata KSeF niedostępny — synchronizacja zakupów wymaga "
+                    "POST /invoices/query/metadata."
+                )
             refs = metadata_refs
             subject_type_used = "subject2"
             start_offset = 0
         elif audit is not None and audit.invoice_ids_received == 0:
             audit.invoice_ids_received = len(refs)
             audit.metadata_returned = len(refs)
+
+        if audit is not None and audit.metadata_returned == 0 and refs:
+            audit.finalize_metadata(refs)
 
         logger.info(
             "KSeF purchases incremental sync subjectType=%s refs=%d offset=%d date_from=%s date_to=%s",
@@ -705,6 +663,12 @@ class KSeFSessionService:
 
         for idx in range(start_offset, len(refs)):
             ref = refs[idx]
+            if self.invoice_repository.exists_by_ksef_number(ref):
+                if audit is not None:
+                    audit.record_skipped_existing(ref)
+                skipped_existing += 1
+                self.session.flush()
+                continue
             try:
                 xml_bytes = self.ksef_client.get_purchase_invoice_xml(ctx.access_token, ref)
                 if audit is not None:

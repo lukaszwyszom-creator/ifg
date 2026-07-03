@@ -5,7 +5,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ExternalServiceError
+from app.core.exceptions import ConflictError, ExternalServiceError
 from app.integrations.ksef.client import KSeFRateLimitDeferredError
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
@@ -48,6 +48,7 @@ class SyncPurchaseInvoicesJobHandler:
 
     def handle(self, payload: dict) -> dict:
         from datetime import date
+        from uuid import UUID
 
         job_id = payload.get("job_id", "?")
         nip: str = payload["nip"]
@@ -55,8 +56,13 @@ class SyncPurchaseInvoicesJobHandler:
         date_to = date.fromisoformat(payload["date_to"])
         actor_user_id = payload.get("actor_user_id")
 
-        from uuid import UUID
         actor_id = UUID(actor_user_id) if actor_user_id else None
+        job_uuid: UUID | None = None
+        if job_id and job_id != "?":
+            try:
+                job_uuid = UUID(str(job_id))
+            except ValueError:
+                job_uuid = None
 
         logger.info("KSEF_ASYNC_SYNC_WORKER_START job_id=%s nip=%s", job_id, nip)
         ksef_client = self._ksef_session_service.ksef_client
@@ -68,6 +74,7 @@ class SyncPurchaseInvoicesJobHandler:
                 date_to=date_to,
                 actor_user_id=actor_id,
                 resume_state=payload.get("resume"),
+                exclude_job_id=job_uuid,
             )
 
             counts = {
@@ -79,19 +86,18 @@ class SyncPurchaseInvoicesJobHandler:
                 "warning": report.get("warning"),
             }
 
-            if report.get("rate_limit_deferred"):
+            resume = report.get("resume_state") or payload.get("resume")
+
+            if report.get("rate_limit_deferred") or counts["rate_limited"]:
                 raise JobRateLimitDeferredError(
                     report.get("warning")
                     or f"KSeF rate limit podczas sync zakupów (job_id={job_id})",
-                    report.get("retry_after_seconds", _DEFAULT_RATE_LIMIT_DEFER_SECONDS),
-                    resume=report.get("resume_state"),
+                    report.get(
+                        "retry_after_seconds",
+                        _DEFAULT_RATE_LIMIT_DEFER_SECONDS,
+                    ),
+                    resume=resume,
                     partial_result=counts,
-                )
-
-            if counts["rate_limited"]:
-                raise JobRateLimitDeferredError(
-                    f"KSeF rate limit podczas sync zakupów (job_id={job_id})",
-                    _DEFAULT_RATE_LIMIT_DEFER_SECONDS,
                 )
 
             logger.info(
@@ -104,12 +110,15 @@ class SyncPurchaseInvoicesJobHandler:
             return counts
         except JobRateLimitDeferredError:
             raise
+        except ConflictError:
+            raise
         except ExternalServiceError as exc:
             cause = exc.__cause__
             if isinstance(cause, KSeFRateLimitDeferredError):
                 raise JobRateLimitDeferredError(
                     str(exc),
                     cause.retry_after_seconds,
+                    resume=payload.get("resume"),
                 ) from exc
             logger.error(
                 "KSEF_ASYNC_SYNC_WORKER_ERROR job_id=%s error=%s",

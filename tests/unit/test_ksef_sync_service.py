@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.exceptions import ExternalServiceError
-from app.integrations.ksef.client import KSeFClientError, QueryReceivedInvoicesResult, ReceivedInvoiceResult
+from app.integrations.ksef.client import KSeFClientError, ReceivedInvoiceResult
 from app.services.ksef_session_service import KSeFSessionService
 from app.services.ksef_sync_service import KSeFSyncService
 
@@ -28,6 +28,15 @@ class _FakeInvoiceRepository:
         self.add_calls += 1
         return invoice
 
+    def list_ksef_purchase_refs_in_issue_range(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        buyer_nip: str | None = None,
+    ) -> list[str]:
+        return [ref for ref, _ in self.rows]
+
 
 def _make_ksef_service_with_repo(repo: _FakeInvoiceRepository) -> KSeFSessionService:
     svc = KSeFSessionService(
@@ -45,7 +54,18 @@ def _make_ksef_service_with_repo(repo: _FakeInvoiceRepository) -> KSeFSessionSer
             initialization_vector=b"i" * 16,
         )
     )
+    svc.ksef_client.defer_purchase_rate_limit = True
     return svc
+
+
+def _setup_incremental_metadata_and_xml(
+    service: KSeFSessionService,
+    refs_xml: dict[str, bytes],
+) -> None:
+    service.ksef_client.query_purchase_metadata_refs.return_value = list(refs_xml.keys())
+    service.ksef_client.get_purchase_invoice_xml.side_effect = (
+        lambda _token, ref: refs_xml[ref]
+    )
 
 
 def test_sync_received_invoices_does_not_delete_existing_data_on_error() -> None:
@@ -53,12 +73,12 @@ def test_sync_received_invoices_does_not_delete_existing_data_on_error() -> None
     repo.rows.append(("KSEF-EXISTING", "ksef_import"))
 
     service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.side_effect = KSeFClientError(
+    service.ksef_client.query_purchase_metadata_refs.side_effect = KSeFClientError(
         "KSeF odpowiedział statusem 404",
         status_code=404,
     )
 
-    with pytest.raises(ExternalServiceError):
+    with pytest.raises(KSeFClientError):
         service.sync_received_invoices(
             nip="1234567890",
             date_from=date(2026, 5, 1),
@@ -74,9 +94,7 @@ def test_sync_received_invoices_reimport_does_not_duplicate_existing_invoice() -
     repo.rows.append(("KSEF-1", "ksef_import"))
 
     service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.return_value = [
-        SimpleNamespace(ksef_reference_number="KSEF-1", xml_bytes=b"<xml/>")
-    ]
+    service.ksef_client.query_purchase_metadata_refs.return_value = ["KSEF-1"]
 
     counts = service.sync_received_invoices(
         nip="1234567890",
@@ -89,15 +107,12 @@ def test_sync_received_invoices_reimport_does_not_duplicate_existing_invoice() -
     assert counts["skipped_existing"] == 1
     assert counts["skipped_parse"] == 0
     assert repo.rows == [("KSEF-1", "ksef_import")]
+    service.ksef_client.get_purchase_invoice_xml.assert_not_called()
 
 
 def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence() -> None:
     repo = _FakeInvoiceRepository()
-    service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.return_value = [
-        SimpleNamespace(
-            ksef_reference_number="KSEF-NEW",
-            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
 <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
   <Podmiot1>
     <DaneIdentyfikacyjne>
@@ -128,9 +143,9 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
     </FaWiersz>
   </Fa>
 </Faktura>
-""".encode("utf-8"),
-        )
-    ]
+""".encode("utf-8")
+    service = _make_ksef_service_with_repo(repo)
+    _setup_incremental_metadata_and_xml(service, {"KSEF-NEW": xml})
 
     counts = service.sync_received_invoices(
         nip="1234567890",
@@ -148,11 +163,7 @@ def test_sync_received_invoices_stores_vendor_number_from_xml_not_ifg_sequence()
 
 def test_sync_received_invoices_skips_zero_line_items_when_totals_nonzero() -> None:
     repo = _FakeInvoiceRepository()
-    service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.return_value = [
-        SimpleNamespace(
-            ksef_reference_number="KSEF-ZERO-LINES",
-            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
 <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
   <Podmiot1>
     <DaneIdentyfikacyjne>
@@ -181,9 +192,9 @@ def test_sync_received_invoices_skips_zero_line_items_when_totals_nonzero() -> N
     </FaWiersz>
   </Fa>
 </Faktura>
-""".encode("utf-8"),
-        )
-    ]
+""".encode("utf-8")
+    service = _make_ksef_service_with_repo(repo)
+    _setup_incremental_metadata_and_xml(service, {"KSEF-ZERO-LINES": xml})
 
     counts = service.sync_received_invoices(
         nip="1234567890",
@@ -199,11 +210,7 @@ def test_sync_received_invoices_skips_zero_line_items_when_totals_nonzero() -> N
 
 def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
     repo = _FakeInvoiceRepository()
-    service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.return_value = [
-        SimpleNamespace(
-            ksef_reference_number="KSEF-P11A",
-            xml_bytes="""<?xml version="1.0" encoding="UTF-8"?>
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
 <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
   <Podmiot1>
     <DaneIdentyfikacyjne>
@@ -234,9 +241,9 @@ def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
     </FaWiersz>
   </Fa>
 </Faktura>
-""".encode("utf-8"),
-        )
-    ]
+""".encode("utf-8")
+    service = _make_ksef_service_with_repo(repo)
+    _setup_incremental_metadata_and_xml(service, {"KSEF-P11A": xml})
 
     counts = service.sync_received_invoices(
         nip="1234567890",
@@ -254,14 +261,16 @@ def test_sync_received_invoices_persists_gross_line_variant_p11a() -> None:
     assert item.gross_total == Decimal("270.00")
 
 
-def test_sync_received_invoices_propagates_rate_limit_warning_and_error_samples() -> None:
+def test_sync_received_invoices_defers_on_429_instead_of_skipped_error() -> None:
+    from app.integrations.ksef.client import KSeFRateLimitDeferredError
+
     repo = _FakeInvoiceRepository()
     service = _make_ksef_service_with_repo(repo)
-    service.ksef_client.query_received_invoices.return_value = QueryReceivedInvoicesResult(
-        invoices=[],
-        download_errors=["KSEF-RL-FAIL: rate limit (429) — KSeF ograniczył tempo pobierania"],
-        rate_limited=True,
-        metadata_refs_count=1,
+    refs = [f"KSEF-REF-{idx:03d}" for idx in range(3)]
+    service.ksef_client.query_purchase_metadata_refs.return_value = refs
+    service.ksef_client.get_purchase_invoice_xml.side_effect = KSeFRateLimitDeferredError(
+        "429",
+        retry_after_seconds=90.0,
     )
 
     counts = service.sync_received_invoices(
@@ -270,12 +279,10 @@ def test_sync_received_invoices_propagates_rate_limit_warning_and_error_samples(
         date_to=date(2026, 5, 10),
     )
 
-    assert counts["received"] == 1
-    assert counts["saved"] == 0
-    assert counts["skipped_parse"] == 1
+    assert counts["rate_limit_deferred"] is True
     assert counts["rate_limited"] is True
-    assert counts["warning"]
-    assert any("429" in sample for sample in counts["error_samples"])
+    assert counts["resume_state"]["current_offset"] == 0
+    assert counts["skipped_parse"] == 0
 
 
 def test_ksef_sync_service_marks_running_success_and_returns_status() -> None:

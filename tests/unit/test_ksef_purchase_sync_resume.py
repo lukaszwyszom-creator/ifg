@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -18,6 +18,7 @@ if not hasattr(SQLiteTypeCompiler, "visit_UUID"):
     SQLiteTypeCompiler.visit_UUID = lambda self, type_, **kw: "CHAR(36)"  # type: ignore[attr-defined]
 
 from app.integrations.ksef.client import KSeFRateLimitDeferredError
+from app.core.exceptions import ConflictError
 from app.persistence.base import Base
 from app.persistence.models import (  # noqa: F401
     AuditLog,
@@ -87,6 +88,15 @@ class _FakeInvoiceRepository:
         self.rows.append((invoice.ksef_reference_number, source_system))
         self.add_calls += 1
         return invoice
+
+    def list_ksef_purchase_refs_in_issue_range(
+        self,
+        date_from: date,
+        date_to: date,
+        *,
+        buyer_nip: str | None = None,
+    ) -> list[str]:
+        return [ref for ref, _ in self.rows]
 
 
 def _make_incremental_service(repo: _FakeInvoiceRepository) -> KSeFSessionService:
@@ -381,3 +391,176 @@ def test_enqueue_blocks_second_sync_job_for_same_nip(db: Session) -> None:
     ).scalar_one_or_none()
     assert blocked is not None
     assert blocked.id == first_id
+
+
+def test_incremental_sync_429_at_ref_17_saves_offset_17() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_incremental_service(repo)
+    refs = _refs(20)
+    service.ksef_client.query_purchase_metadata_refs.return_value = refs
+
+    def _download(_token: str, ref: str) -> bytes:
+        idx = refs.index(ref)
+        if idx >= 17:
+            raise KSeFRateLimitDeferredError(
+                f"429 for {ref}",
+                retry_after_seconds=120.0,
+            )
+        return _minimal_purchase_xml(ref)
+
+    service.ksef_client.get_purchase_invoice_xml.side_effect = _download
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    assert counts["rate_limit_deferred"] is True
+    assert counts["resume_state"]["current_offset"] == 17
+    assert counts["resume_state"]["invoice_refs"] == refs
+    assert repo.add_calls == 17
+
+
+def test_incremental_sync_skips_get_xml_for_existing_refs() -> None:
+    repo = _FakeInvoiceRepository()
+    refs = _refs(5)
+    for ref in refs:
+        repo.rows.append((ref, "ksef_import"))
+
+    service = _make_incremental_service(repo)
+    service.ksef_client.query_purchase_metadata_refs.return_value = refs
+
+    counts = service.sync_received_invoices(
+        nip="1234567890",
+        date_from=date(2026, 5, 1),
+        date_to=date(2026, 5, 10),
+    )
+
+    service.ksef_client.get_purchase_invoice_xml.assert_not_called()
+    assert counts["skipped_existing"] == 5
+    assert counts["saved"] == 0
+
+
+def test_sync_purchase_invoices_uses_incremental_path_not_bulk() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_incremental_service(repo)
+    refs = _refs(2)
+    service.ksef_client.query_purchase_metadata_refs.return_value = refs
+    service.ksef_client.get_purchase_invoice_xml.side_effect = (
+        lambda _t, ref: _minimal_purchase_xml(ref)
+    )
+    service._resolve_seller_nip = MagicMock(return_value="9670402857")  # type: ignore[method-assign]
+    service.find_active_purchase_sync_background_job = MagicMock(return_value=None)  # type: ignore[method-assign]
+
+    mock_session = service.session
+    sync_state = MagicMock()
+    sync_state.state_json = {}
+    with (
+        patch("app.services.ksef_session_service.KSeFSyncStateRepository") as repo_cls,
+        patch("app.services.ksef_session_service.settings") as mock_settings,
+    ):
+        mock_settings.ksef_purchase_sync_days_back = 90
+        mock_settings.ksef_purchase_sync_overlap_days = 2
+        mock_settings.ksef_purchase_sync_full_days = 365
+        mock_settings.seller_nip = "9670402857"
+        sync_repo = repo_cls.return_value
+        sync_repo.get_or_create.return_value = sync_state
+
+        report = service.sync_purchase_invoices(
+            nip="9670402857",
+            date_from=date(2026, 6, 1),
+            date_to=date(2026, 7, 3),
+        )
+
+    assert report["status"] == "ok"
+    sync_repo.mark_success.assert_called_once()
+    service.ksef_client.query_purchase_metadata_refs.assert_called_once()
+
+
+def test_sync_purchase_invoices_deferred_does_not_mark_success() -> None:
+    repo = _FakeInvoiceRepository()
+    service = _make_incremental_service(repo)
+    refs = _refs(3)
+    service.ksef_client.query_purchase_metadata_refs.return_value = refs
+    service.ksef_client.get_purchase_invoice_xml.side_effect = KSeFRateLimitDeferredError(
+        "429",
+        retry_after_seconds=60.0,
+    )
+    service._resolve_seller_nip = MagicMock(return_value="9670402857")  # type: ignore[method-assign]
+    service.find_active_purchase_sync_background_job = MagicMock(return_value=None)  # type: ignore[method-assign]
+
+    sync_state = MagicMock()
+    sync_state.state_json = {}
+    with (
+        patch("app.services.ksef_session_service.KSeFSyncStateRepository") as repo_cls,
+        patch("app.services.ksef_session_service.settings") as mock_settings,
+    ):
+        mock_settings.ksef_purchase_sync_days_back = 90
+        mock_settings.ksef_purchase_sync_overlap_days = 2
+        mock_settings.ksef_purchase_sync_full_days = 365
+        mock_settings.seller_nip = "9670402857"
+        sync_repo = repo_cls.return_value
+        sync_repo.get_or_create.return_value = sync_state
+
+        report = service.sync_purchase_invoices(
+            nip="9670402857",
+            date_from=date(2026, 6, 1),
+            date_to=date(2026, 7, 3),
+        )
+
+    assert report["status"] == "deferred"
+    sync_repo.mark_success.assert_not_called()
+    sync_repo.mark_error.assert_called()
+
+
+def test_sync_purchase_invoices_blocks_parallel_sync_for_same_nip() -> None:
+    service = _make_incremental_service(_FakeInvoiceRepository())
+    service._resolve_seller_nip = MagicMock(return_value="9670402857")  # type: ignore[method-assign]
+    active_job = MagicMock()
+    active_job.id = uuid.uuid4()
+    active_job.status = "processing"
+    service.find_active_purchase_sync_background_job = MagicMock(return_value=active_job)  # type: ignore[method-assign]
+
+    with pytest.raises(ConflictError, match="już trwa"):
+        service.sync_purchase_invoices(nip="9670402857")
+
+
+def test_handler_rate_limited_always_carries_resume_when_available() -> None:
+    ksef_session_service = MagicMock()
+    ksef_session_service.ksef_client = MagicMock()
+    resume = {
+        "invoice_refs": _refs(5),
+        "current_offset": 3,
+        "current_reference": "KSEF-REF-003",
+    }
+    ksef_session_service.sync_purchase_invoices.return_value = {
+        "status": "ok",
+        "created": 2,
+        "ksef_returned": 5,
+        "skipped_existing": 0,
+        "errors": 0,
+        "rate_limited": True,
+        "rate_limit_deferred": False,
+        "warning": "429",
+    }
+
+    handler = SyncPurchaseInvoicesJobHandler(
+        session=MagicMock(),
+        invoice_repository=MagicMock(),
+        job_repository=MagicMock(),
+        ksef_session_service=ksef_session_service,
+    )
+
+    with pytest.raises(JobRateLimitDeferredError) as exc_info:
+        handler.handle(
+            {
+                "job_id": str(uuid.uuid4()),
+                "nip": "9670402857",
+                "date_from": "2026-06-01",
+                "date_to": "2026-07-03",
+                "resume": resume,
+            }
+        )
+
+    assert exc_info.value.resume == resume
