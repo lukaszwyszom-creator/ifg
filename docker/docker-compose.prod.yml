@@ -21,6 +21,13 @@
 #   - frontend React build montowany do kontenera API
 #   - brak expose portu DB na host
 #   - restart: unless-stopped
+#
+# Container Manager / Compose project:
+#   name: ifg (Synology Container Manager → Project `ifg`)
+#   Wolumen DB i sieć są przypięte do istniejących zasobów projektu `docker`
+#   (docker_postgres_data, docker_ifg_prod) — wymagane przy migracji nazwy projektu.
+
+name: ifg
 
 services:
   api:
@@ -91,7 +98,10 @@ services:
 
 volumes:
   postgres_data:
+    name: docker_postgres_data
+    external: true
 
 networks:
   ifg_prod:
-    driver: bridge
+    name: docker_ifg_prod
+    external: true
