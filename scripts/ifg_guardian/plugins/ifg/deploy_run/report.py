@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction

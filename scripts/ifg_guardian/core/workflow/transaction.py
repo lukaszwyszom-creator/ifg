@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
 from ifg_guardian.core.workflow.mode import ExecutionMode

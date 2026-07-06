@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ifg_guardian.core.time_compat import UTC
 
 from ifg_guardian.core.preflight.models import DeploymentDecision, PreflightReport, PreflightStatus
 

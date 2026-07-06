@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ifg_guardian.core.time_compat import UTC
 from time import perf_counter
 
 from ifg_guardian.config import COMPOSE_FILE, TARGET_BRANCH

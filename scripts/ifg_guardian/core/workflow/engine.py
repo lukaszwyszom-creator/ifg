@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import socket
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ifg_guardian.core.time_compat import UTC
 from pathlib import Path
 from time import perf_counter
 
