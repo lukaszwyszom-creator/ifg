@@ -51,3 +51,6 @@ tmp/
 
 # Local mockups
 tmp/
+
+# Guardian runtime artifacts (local state, reports cache)
+.guardian/
