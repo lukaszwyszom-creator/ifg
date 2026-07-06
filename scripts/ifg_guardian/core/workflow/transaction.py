@@ -75,6 +75,7 @@ class WorkflowTransaction:
     dependencies: dict[str, Any] = field(default_factory=dict)
     release_plan: dict[str, Any] = field(default_factory=dict)
     deploy_run: dict[str, Any] = field(default_factory=dict)
+    cutover_run: dict[str, Any] = field(default_factory=dict)
 
     def mark_started(self) -> None:
         self.started_at = datetime.now(UTC)
@@ -145,6 +146,7 @@ class WorkflowTransaction:
             "dependencies": dict(self.dependencies),
             "release_plan": dict(self.release_plan),
             "deploy_run": dict(self.deploy_run),
+            "cutover_run": dict(self.cutover_run),
         }
 
     @classmethod
@@ -212,6 +214,7 @@ class WorkflowTransaction:
             dependencies=dict(data.get("dependencies", {})),
             release_plan=dict(data.get("release_plan", {})),
             deploy_run=dict(data.get("deploy_run", {})),
+            cutover_run=dict(data.get("cutover_run", {})),
         )
 
 

@@ -12,6 +12,7 @@ from ifg_guardian.core.git import resolve_ds723_host
 from ifg_guardian.modules.api_mobile import run_api_guardian
 from ifg_guardian.modules.deploy import run_deploy_check
 from ifg_guardian.modules.doctor import run_doctor
+from ifg_guardian.modules.ifg_container_cutover import run_ifg_container_cutover, run_ifg_container_cutover_rollback
 from ifg_guardian.modules.ifg_deploy_run import run_ifg_deploy_run
 from ifg_guardian.modules.ifg_doctor import run_ifg_doctor
 from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
@@ -204,6 +205,31 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_dep_run.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     ifg_dep_run.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DEPLOY_RUN_*.md)")
 
+    ifg_cut = ifg_sub.add_parser("cutover", help="Container Manager cutover (project ifg)")
+    ifg_cut_sub = ifg_cut.add_subparsers(dest="cutover_action", required=True)
+    ifg_cut_run = ifg_cut_sub.add_parser("run", help="Run cutover workflow (LIVE requires --yes)")
+    ifg_cut_run.add_argument("--dry-run", action="store_true", help="Simulate all stages")
+    ifg_cut_run.add_argument("--yes", action="store_true", help="Confirm LIVE cutover")
+    ifg_cut_run.add_argument(
+        "--confirm-functional",
+        action="store_true",
+        help="Operator attests functional IFG tests passed (required for --cleanup)",
+    )
+    ifg_cut_run.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove legacy docker-* after full validation",
+    )
+    ifg_cut_run.add_argument("--json", action="store_true", help="Markdown report to stdout")
+    ifg_cut_run.add_argument("--remote-host", default=None)
+    ifg_cut_run.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_cut_run.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_CONTAINER_CUTOVER_*.md)")
+    ifg_cut_rb = ifg_cut_sub.add_parser("rollback", help="Rollback to pre-cutover compose project docker")
+    ifg_cut_rb.add_argument("--dry-run", action="store_true")
+    ifg_cut_rb.add_argument("--yes", action="store_true", help="Confirm LIVE rollback")
+    ifg_cut_rb.add_argument("--remote-host", default=None)
+    ifg_cut_rb.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+
     wf = sub.add_parser("workflow", help="Workflow engine commands")
     wf_sub = wf.add_subparsers(dest="action", required=True)
     wf_run = wf_sub.add_parser("run", help="Run a registered workflow")
@@ -336,6 +362,28 @@ def main(argv: list[str] | None = None) -> int:
             assume_yes=args.yes,
             output_format=output_format,
             report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
+    if domain == "ifg" and args.action == "cutover" and args.cutover_action == "run":
+        output_format = "markdown" if args.json else "terminal"
+        report = Path(args.report) if args.report else None
+        return run_ifg_container_cutover(
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+            confirm_functional=args.confirm_functional,
+            cleanup=args.cleanup,
+            output_format=output_format,
+            report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
+    if domain == "ifg" and args.action == "cutover" and args.cutover_action == "rollback":
+        return run_ifg_container_cutover_rollback(
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
             remote_host=host,
             remote_path=args.remote_path,
         )
