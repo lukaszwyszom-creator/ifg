@@ -34,6 +34,8 @@ class TestDeployCommandRouter:
         [
             ("git pull origin production", DeployCommandKind.LOCAL_GIT),
             ("cd frontend-react && npm run build", DeployCommandKind.LOCAL_NPM),
+            ("ifg_guardian_frontend_artifact_gate local", DeployCommandKind.ARTIFACT_GATE_LOCAL),
+            ("ifg_guardian_frontend_artifact_gate remote", DeployCommandKind.ARTIFACT_GATE_REMOTE),
             ("rsync -av dist/ host:/path/", DeployCommandKind.RSYNC),
             ("docker compose -f docker/docker-compose.prod.yml build api worker", DeployCommandKind.DOCKER_BUILD),
             ("docker compose -f docker/docker-compose.prod.yml up -d", DeployCommandKind.COMPOSE_UP),
@@ -94,6 +96,26 @@ class TestDockerExecutor:
 
 
 class TestComposeExecutor:
+    def test_up_blocked_without_artifacts(self, tmp_path: Path):
+        ctx = DeployExecutorContext(remote_host="ds723", remote_path="/volume1/repo")
+        compose = ComposeExecutor(root=tmp_path, deploy_context=ctx)
+        intent = LocalExecIntent(
+            command=["/bin/sh", "-c", "docker compose -f docker/docker-compose.prod.yml up -d"],
+            mutating=True,
+        )
+        with patch.object(SSHExecutor, "run_remote") as remote:
+            remote.return_value = MagicMock(
+                ok=False,
+                output="ARTIFACT_GATE_STATUS=NO_GO\n",
+                error="exit 1",
+                data={},
+                intent=intent,
+            )
+            result = compose.execute_up(intent, intent.command[2])
+        assert not result.ok
+        assert result.data.get("artifact_gate") == "NO_GO"
+        assert remote.call_count == 1
+
     def test_up_and_ps(self, tmp_path: Path):
         ctx = DeployExecutorContext(remote_host="ds723", remote_path="/volume1/repo")
         compose = ComposeExecutor(root=tmp_path, deploy_context=ctx)
@@ -103,12 +125,14 @@ class TestComposeExecutor:
         )
         with patch.object(SSHExecutor, "run_remote") as remote:
             remote.side_effect = [
+                MagicMock(ok=True, output="ARTIFACT_GATE_STATUS=GO\n", error="", data={}, intent=intent),
                 MagicMock(ok=True, output="up ok", error="", data={}, intent=intent),
                 MagicMock(ok=True, output="api running", error="", data={}, intent=intent),
             ]
             result = compose.execute_up(intent, intent.command[2])
         assert result.ok
         assert result.data.get("containers") == "api running"
+        assert remote.call_count == 3
 
 
 class TestHTTPExecutor:

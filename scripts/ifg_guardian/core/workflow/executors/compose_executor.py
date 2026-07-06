@@ -6,6 +6,7 @@ from ifg_guardian.core.workflow.executors.context import DeployExecutorContext
 from ifg_guardian.core.workflow.executors.ssh_executor import SSHExecutor
 from ifg_guardian.core.workflow.intents import LocalExecIntent
 from ifg_guardian.core.workflow.results import IntentResult
+from ifg_guardian.core.frontend_artifacts import parse_artifact_gate_output, remote_artifact_verify_script
 
 
 class ComposeExecutor:
@@ -16,6 +17,17 @@ class ComposeExecutor:
 
     def execute_up(self, intent: LocalExecIntent, shell_cmd: str) -> IntentResult:
         cfg = self._ssh.deploy_context.config()
+        gate_result = self._ssh.run_remote(remote_artifact_verify_script(cfg.repo), label="artifact_gate_pre_compose")
+        gate = parse_artifact_gate_output(gate_result.output)
+        if not gate_result.ok or not gate.is_go:
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=gate_result.output,
+                error=gate.message or "Artifact Verification Gate NO_GO — compose up blocked",
+                data={"artifact_gate": "NO_GO", "executor": "compose"},
+            )
+
         script = (
             f'docker compose -f "{cfg.compose_file}" --env-file "{cfg.env_file}" '
             f"up -d --remove-orphans api worker\n"

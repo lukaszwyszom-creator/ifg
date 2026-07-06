@@ -18,6 +18,7 @@ from ifg_guardian.plugins.ifg.container_cutover.remote import (
     cleanup_script,
     compose_config_gate_script,
     cutover_up_script,
+    frontend_build_script,
     git_pull_script,
     legacy_containers_script,
     parse_legacy_containers,
@@ -25,6 +26,7 @@ from ifg_guardian.plugins.ifg.container_cutover.remote import (
     rollback_command_text,
     validate_compose_config,
 )
+from ifg_guardian.core.frontend_artifacts import parse_artifact_gate_output, remote_artifact_verify_script
 from ifg_guardian.plugins.ifg.container_cutover.service import get_cutover_state
 from ifg_guardian.reporting import default_report_path, write_report
 
@@ -209,6 +211,59 @@ class LegacyContainersStage(_CutoverStage):
         return StageResult(status=StageStatus.PASS, message=msg)
 
 
+class FrontendBuildStage(Stage):
+    id = "frontend_build"
+    label = "Build frontend on DS723+ (npm run build)"
+    mutating = True
+
+    def build_plan(self, ctx: WorkflowContext) -> StagePlan:
+        return StagePlan(intents=[NoOpIntent(reason=self.id)], on_fail="halt")
+
+    def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
+        state = get_cutover_state(ctx)
+        if _dry_run(ctx):
+            return StageResult(status=StageStatus.PASS, message="[dry-run] frontend build simulated")
+
+        ssh = _ssh(ctx)
+        cfg = ssh.deploy_context.config()
+        result = ssh.run_remote(frontend_build_script(cfg), label="cutover_frontend_build")
+        if not result.ok:
+            return StageResult(
+                status=StageStatus.FAIL,
+                message=f"frontend build failed: {result.error or result.output}",
+            )
+        return StageResult(status=StageStatus.PASS, message="frontend build OK on DS723+")
+
+
+class FrontendArtifactGateStage(_CutoverStage):
+    id = "frontend_artifact_gate"
+    label = "Artifact Verification Gate (index.html + assets)"
+
+    def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
+        state = get_cutover_state(ctx)
+        if _dry_run(ctx):
+            state.frontend_artifacts_ok = True
+            state.artifact_gate_status = "GO"
+            return StageResult(status=StageStatus.PASS, message="[dry-run] artifact gate simulated GO")
+
+        ssh = _ssh(ctx)
+        cfg = ssh.deploy_context.config()
+        result = ssh.run_remote(remote_artifact_verify_script(cfg.repo), label="frontend_artifact_gate")
+        gate = parse_artifact_gate_output(result.output)
+        state.artifact_gate_status = gate.status
+        state.frontend_artifacts_ok = gate.is_go
+
+        if not result.ok or not gate.is_go:
+            return StageResult(
+                status=StageStatus.FAIL,
+                message=f"Artifact Verification Gate NO_GO — {gate.message}",
+            )
+        return StageResult(
+            status=StageStatus.PASS,
+            message=f"Artifact Verification Gate GO ({gate.js_count} JS bundle(s))",
+        )
+
+
 class CutoverUpStage(Stage):
     id = "cutover_up"
     label = "Start project ifg (compose up -d)"
@@ -221,6 +276,11 @@ class CutoverUpStage(Stage):
         state = get_cutover_state(ctx)
         if state.safety_gate and state.safety_gate != "GO":
             return StageResult(status=StageStatus.FAIL, message="cutover blocked — Safety Gate not GO")
+        if not _dry_run(ctx) and not state.frontend_artifacts_ok:
+            return StageResult(
+                status=StageStatus.FAIL,
+                message="cutover blocked — Artifact Verification Gate not GO",
+            )
 
         ssh = _ssh(ctx)
         cfg = ssh.deploy_context.config()
@@ -354,7 +414,10 @@ class SummaryStage(_CutoverStage):
         state.summary = {
             "mode": "DRY-RUN" if state.dry_run else "LIVE",
             "backup_file": state.backup_file,
+            "compose_config_ok": state.compose_config_ok,
             "safety_gate": state.safety_gate,
+            "artifact_gate": state.artifact_gate_status,
+            "frontend_artifacts_ok": state.frontend_artifacts_ok,
             "cutover_executed": state.cutover_executed,
             "health_ok": state.health_ok,
             "guardian_verify_ok": state.guardian_verify_ok,

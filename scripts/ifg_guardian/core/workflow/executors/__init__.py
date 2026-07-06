@@ -110,6 +110,46 @@ class IntentExecutor:
         if kind == DeployCommandKind.RSYNC:
             return self._ssh.execute_rsync(intent, shell_cmd)
 
+        if kind == DeployCommandKind.ARTIFACT_GATE_LOCAL:
+            from ifg_guardian.core.frontend_artifacts import verify_local_dist
+
+            self.deploy_context.record(shell_cmd)
+            gate = verify_local_dist(self.root)
+            if gate.is_go:
+                return IntentResult(
+                    intent=intent,
+                    ok=True,
+                    output=gate.message,
+                    data={"artifact_gate": gate.status, "js_count": gate.js_count},
+                )
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=gate.message,
+                error=f"Artifact Verification Gate {gate.status}",
+                data={"artifact_gate": gate.status},
+            )
+
+        if kind == DeployCommandKind.ARTIFACT_GATE_REMOTE:
+            from ifg_guardian.core.frontend_artifacts import parse_artifact_gate_output, remote_artifact_verify_script
+
+            cfg = self.deploy_context.config()
+            self.deploy_context.record(shell_cmd)
+            result = self._ssh.run_remote(remote_artifact_verify_script(cfg.repo), label="artifact_gate_remote")
+            result.intent = intent
+            gate = parse_artifact_gate_output(result.output)
+            if result.ok and gate.is_go:
+                result.data["artifact_gate"] = gate.status
+                result.data["js_count"] = gate.js_count
+                return result
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=result.output or gate.message,
+                error=gate.message or result.error or "Artifact Verification Gate NO_GO",
+                data={"artifact_gate": "NO_GO"},
+            )
+
         if kind == DeployCommandKind.DOCKER_BUILD:
             return self._docker.execute_build(intent, shell_cmd)
 

@@ -11,6 +11,8 @@ class CutoverRunState:
     backup_file: str = ""
     compose_config_ok: bool = False
     safety_gate: str = ""
+    frontend_artifacts_ok: bool = False
+    artifact_gate_status: str = ""
     cutover_executed: bool = False
     health_ok: bool = False
     guardian_verify_ok: bool = False
@@ -27,6 +29,8 @@ class CutoverRunState:
             "backup_file": self.backup_file,
             "compose_config_ok": self.compose_config_ok,
             "safety_gate": self.safety_gate,
+            "frontend_artifacts_ok": self.frontend_artifacts_ok,
+            "artifact_gate_status": self.artifact_gate_status,
             "cutover_executed": self.cutover_executed,
             "health_ok": self.health_ok,
             "guardian_verify_ok": self.guardian_verify_ok,
@@ -45,6 +49,8 @@ class CutoverRunState:
             backup_file=str(data.get("backup_file", "")),
             compose_config_ok=bool(data.get("compose_config_ok")),
             safety_gate=str(data.get("safety_gate", "")),
+            frontend_artifacts_ok=bool(data.get("frontend_artifacts_ok")),
+            artifact_gate_status=str(data.get("artifact_gate_status", "")),
             cutover_executed=bool(data.get("cutover_executed")),
             health_ok=bool(data.get("health_ok")),
             guardian_verify_ok=bool(data.get("guardian_verify_ok")),

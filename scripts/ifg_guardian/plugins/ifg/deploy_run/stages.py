@@ -14,7 +14,7 @@ from ifg_guardian.core.workflow.stage import BuildReason, Stage, StagePlan, Stag
 from ifg_guardian.core.workflow.state import WorkflowState
 from ifg_guardian.core.workflow.transaction import ArtifactRecord
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployRunState, DeployStepStatus, RollbackPoint
-from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, detect_blockers
+from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, compose_blocked_by_step_failure, detect_blockers
 from ifg_guardian.plugins.ifg.deploy_run.report import render_json, render_markdown
 from ifg_guardian.plugins.ifg.deploy_run.service import get_deploy_state, get_release_plan_dependency
 from ifg_guardian.reporting import default_report_path, write_report
@@ -209,11 +209,17 @@ class SimulateExecutionStage(Stage):
         executed_count = 0
         failed_count = 0
         intent_index = 0
-        step_started = perf_counter()
+        block_compose = False
 
         for step in state.steps:
             if step.skipped or not step.required:
                 step.status = DeployStepStatus.SKIPPED
+                continue
+
+            if block_compose and step.action == "compose up":
+                step.status = DeployStepStatus.BLOCKED
+                step.error = "blocked — Artifact Verification Gate or prior step failed"
+                state.warnings.append("compose up blocked by artifact gate")
                 continue
 
             if step.command and intent_index < len(results.intent_results):
@@ -239,6 +245,8 @@ class SimulateExecutionStage(Stage):
                     step.status = DeployStepStatus.FAILED
                     failed_count += 1
                     state.warnings.append(f"{step.action} failed: {result.error or result.output}")
+                    if compose_blocked_by_step_failure(step.action):
+                        block_compose = True
             else:
                 step.status = DeployStepStatus.SKIPPED
 

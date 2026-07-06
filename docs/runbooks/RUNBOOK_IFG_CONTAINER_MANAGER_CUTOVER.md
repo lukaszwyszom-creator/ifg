@@ -58,12 +58,14 @@ Migracja stacku IFG z projektu Compose **`docker`** na projekt **`ifg`** (Synolo
 2. git pull
 3. compose config (gate)
 4. Preflight (Exited, nie rm)
-5. Start projektu ifg
-6. Health
-7. Guardian verify
-8. Test funkcjonalny IFG
-9. docker rm docker-*  ← DOPIERO TUTAJ
-10. Container Manager UI check
+5. Frontend build (DS723+: npm run build)
+6. Artifact Verification Gate (index.html + assets/*.js)
+7. Start projektu ifg
+8. Health
+9. Guardian verify
+10. Test funkcjonalny IFG
+11. docker rm docker-*  ← DOPIERO TUTAJ
+12. Container Manager UI check
 ```
 
 ---
@@ -177,6 +179,35 @@ sudo docker network inspect docker_ifg_prod --format '{{.Name}}' 2>/dev/null || 
 **Nie wykonuj:** `docker rm docker-api-1 docker-worker-1 docker-db-1` — to **rollback asset**.
 
 **NO-GO** jeśli `docker-api-1` **Running** (zatrzymaj przed Start).
+
+---
+
+## Krok 4b — Frontend build (obowiązkowy)
+
+`frontend-react/dist/` **nie jest** w Git. Przed `compose up` wymagany build na hoście DS723+:
+
+```bash
+cd /volume1/docker/ifg_v2/ifg_standalone/frontend-react
+npm run build
+```
+
+**NO-GO** jeśli build się nie powiedzie.
+
+---
+
+## Krok 4c — Artifact Verification Gate (obowiązkowy)
+
+Przed startem kontenerów zweryfikuj artefakty:
+
+```bash
+cd /volume1/docker/ifg_v2/ifg_standalone
+test -f frontend-react/dist/index.html || echo "NO_GO: brak index.html"
+test -d frontend-react/dist/assets || echo "NO_GO: brak assets/"
+ls frontend-react/dist/assets/*.js >/dev/null 2>&1 || echo "NO_GO: brak assets/*.js"
+```
+
+Guardian (`ifg cutover run`) wykonuje ten gate automatycznie jako etap `frontend_artifact_gate`.
+**NO-GO** → nie przechodź do Kroku 5 (`compose up`).
 
 ---
 
@@ -388,6 +419,8 @@ Wydrukuj / odhaczaj podczas cutover:
 [ ] Krok 2: git pull OK
 [ ] Krok 3: compose config gate PASS (docker_postgres_data external)
 [ ] Krok 4: docker-* Exited, NIE usunięte
+[ ] Krok 4b: npm run build frontend OK
+[ ] Krok 4c: Artifact Gate GO (index.html + assets/*.js)
 [ ] Krok 5: compose up -d OK, ifg-* Running
 [ ] Krok 6: health + pg_isready + COUNT invoices OK
 [ ] Krok 7: guardian deploy check OK
@@ -409,7 +442,7 @@ Zamiast ręcznych kroków SSH użyj workflow `ifg.container.cutover`:
 # Symulacja (bez mutacji)
 python3 scripts/guardian.py ifg cutover run --dry-run
 
-# Cutover LIVE: backup → pull → gates → up → health → guardian verify
+# Cutover LIVE: backup → pull → gates → frontend build → artifact gate → up → health → guardian verify
 python3 scripts/guardian.py ifg cutover run --yes
 
 # Po testach funkcjonalnych: cleanup legacy docker-*

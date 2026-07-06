@@ -27,7 +27,7 @@ from ifg_guardian.modules.ifg_deploy_run import (  # noqa: E402
     run_ifg_deploy_run,
 )
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployStepStatus  # noqa: E402
-from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, detect_blockers  # noqa: E402
+from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, compose_blocked_by_step_failure, detect_blockers  # noqa: E402
 from ifg_guardian.plugins.ifg.release_plan.execution_plan import build_execution_plan  # noqa: E402
 from ifg_guardian.plugins.ifg.release_plan.models import (  # noqa: E402
     BuildDecision,
@@ -83,7 +83,9 @@ class TestPipelineBuilder:
         assert actions == [
             "git pull",
             "frontend build",
+            "artifact verify local",
             "dist sync",
+            "artifact verify",
             "docker build",
             "alembic upgrade",
             "compose up",
@@ -93,9 +95,32 @@ class TestPipelineBuilder:
         required = [s.action for s in pipeline if s.required and not s.skipped]
         assert "git pull" in required
         assert "frontend build" in required
+        assert "artifact verify local" in required
         assert "dist sync" in required
+        assert "artifact verify" in required
         assert "docker build" in required
         assert "alembic upgrade" not in required
+
+    def test_frontend_artifacts_mandatory_even_when_doctor_skips(self):
+        decisions = [
+            BuildDecision("Frontend Build", False, "skipped by doctor", "LOW"),
+            BuildDecision("Backend Build", False, "none", "LOW"),
+            BuildDecision("Worker Build", False, "none", "LOW"),
+            BuildDecision("Compose Restart", False, "none", "LOW"),
+            BuildDecision("Migration Required", False, "at head", "LOW"),
+            BuildDecision("Static Files", False, "unchanged", "LOW"),
+        ]
+        plan = ReleasePlanState(build_decisions=decisions)
+        plan.execution_plan = build_execution_plan(decisions)
+        pipeline = build_deploy_pipeline(plan)
+        for action in ("frontend build", "artifact verify local", "dist sync", "artifact verify"):
+            step = next(s for s in pipeline if s.action == action)
+            assert step.required and not step.skipped
+
+    def test_compose_blocked_on_gate_failure(self):
+        assert compose_blocked_by_step_failure("artifact verify")
+        assert compose_blocked_by_step_failure("frontend build")
+        assert not compose_blocked_by_step_failure("health check")
 
     def test_blockers_on_critical_risk(self):
         plan = _sample_release_plan(critical=True)
@@ -225,9 +250,9 @@ class TestDeployWorkflowIntegration:
 
         deploy = deploy_from_context(ctx)
         assert deploy.dry_run is True
-        assert len(deploy.steps) == 8
+        assert len(deploy.steps) == 10
         simulated = [s for s in deploy.steps if s.status == DeployStepStatus.SIMULATED]
-        assert len(simulated) >= 5
+        assert len(simulated) >= 6
 
 
 class TestLiveDeploy:

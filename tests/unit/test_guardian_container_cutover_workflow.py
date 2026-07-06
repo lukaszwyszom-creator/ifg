@@ -22,7 +22,7 @@ class TestCutoverWorkflowRegistry:
             assert wf is not None
             assert wf.mutating is True
             assert wf.requires_yes is True
-            assert len(wf.stages) == 12
+            assert len(wf.stages) == 14
         finally:
             runtime.shutdown()
 

@@ -9,6 +9,8 @@ class DeployCommandKind(str, Enum):
     LOCAL_GIT = "local_git"
     LOCAL_NPM = "local_npm"
     RSYNC = "rsync"
+    ARTIFACT_GATE_LOCAL = "artifact_gate_local"
+    ARTIFACT_GATE_REMOTE = "artifact_gate_remote"
     DOCKER_BUILD = "docker_build"
     COMPOSE_UP = "compose_up"
     COMPOSE_LOGS = "compose_logs"
@@ -30,6 +32,10 @@ def classify_deploy_command(shell_cmd: str) -> DeployCommandKind:
         return DeployCommandKind.LOCAL_NPM
     if normalized.startswith("rsync"):
         return DeployCommandKind.RSYNC
+    if "ifg_guardian_frontend_artifact_gate local" in normalized:
+        return DeployCommandKind.ARTIFACT_GATE_LOCAL
+    if "ifg_guardian_frontend_artifact_gate remote" in normalized:
+        return DeployCommandKind.ARTIFACT_GATE_REMOTE
     if re.search(r"docker compose .* build", normalized):
         return DeployCommandKind.DOCKER_BUILD
     if re.search(r"docker compose .* up", normalized):

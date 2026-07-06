@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from ifg_guardian.core.deploy_config import DS723Config
+from ifg_guardian.core.frontend_artifacts import remote_artifact_verify_script, remote_frontend_build_script
 
 ENV_FILE = ".env.production"
 OLD_PROJECT = "docker"
@@ -90,7 +91,14 @@ def parse_legacy_containers(output: str) -> tuple[bool, str]:
 
 
 def cutover_up_script(cfg: DS723Config) -> str:
-    return f"{compose_base(cfg)} up -d\n"
+    return (
+        remote_artifact_verify_script(cfg.repo)
+        + f"{compose_base(cfg)} up -d\n"
+    )
+
+
+def frontend_build_script(cfg: DS723Config) -> str:
+    return remote_frontend_build_script(cfg.repo)
 
 
 def post_health_script(cfg: DS723Config) -> str:

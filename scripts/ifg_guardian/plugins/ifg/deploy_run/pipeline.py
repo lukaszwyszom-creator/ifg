@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 from ifg_guardian.config import COMPOSE_FILE, DEFAULT_REMOTE_PATH, TARGET_BRANCH
+from ifg_guardian.core.frontend_artifacts import (
+    ARTIFACT_GATE_LOCAL_CMD,
+    ARTIFACT_GATE_REMOTE_CMD,
+    build_rsync_dist_command,
+)
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployStep
 from ifg_guardian.plugins.ifg.release_plan.models import DeploymentRisk, ReleasePlanState
+
+# Steps that must pass before compose up is allowed.
+_COMPOSE_BLOCKING_ACTIONS = frozenset({
+    "frontend build",
+    "artifact verify local",
+    "dist sync",
+    "artifact verify",
+})
 
 
 def _plan_step_map(plan: ReleasePlanState) -> dict[str, object]:
@@ -37,30 +50,54 @@ def build_deploy_pipeline(plan: ReleasePlanState, *, remote_path: str = DEFAULT_
     order += 1
 
     fe_step = steps_map.get("frontend build")
-    fe_required = fe_step.required if fe_step else _decision_required(plan, "Frontend Build")
     pipeline.append(
         DeployStep(
             order=order,
             action="frontend build",
             description=fe_step.description if fe_step else "Build frontend",
-            reason=fe_step.description if fe_step else "from release plan",
-            required=fe_required,
-            skipped=not fe_required,
+            reason="Mandatory — dist is not in git; API bind-mount requires host artifacts",
+            required=True,
+            skipped=False,
             command="cd frontend-react && npm run build",
         )
     )
     order += 1
 
-    static_required = _decision_required(plan, "Static Files") or fe_required
+    pipeline.append(
+        DeployStep(
+            order=order,
+            action="artifact verify local",
+            description="Artifact Verification Gate (local dist before sync)",
+            reason="index.html and assets/*.js must exist before rsync",
+            required=True,
+            skipped=False,
+            command=ARTIFACT_GATE_LOCAL_CMD,
+        )
+    )
+    order += 1
+
     pipeline.append(
         DeployStep(
             order=order,
             action="dist sync",
             description="Sync frontend-react/dist to DS723+",
-            reason="Static assets must match local build before compose restart",
-            required=static_required,
-            skipped=not static_required,
-            command=f"rsync -av frontend-react/dist/ {remote_path}/frontend-react/dist/",
+            reason="Static assets must be on DS723+ before compose restart",
+            required=True,
+            skipped=False,
+            command=build_rsync_dist_command(remote_path=remote_path),
+        )
+    )
+    order += 1
+
+    pipeline.append(
+        DeployStep(
+            order=order,
+            action="artifact verify",
+            description="Artifact Verification Gate (remote DS723+)",
+            reason="index.html and assets/*.js must exist on host before compose up",
+            required=True,
+            skipped=False,
+            command=ARTIFACT_GATE_REMOTE_CMD,
         )
     )
     order += 1
@@ -108,14 +145,16 @@ def build_deploy_pipeline(plan: ReleasePlanState, *, remote_path: str = DEFAULT_
 
     restart_step = steps_map.get("restart")
     compose_required = restart_step.required if restart_step else _decision_required(plan, "Compose Restart")
+    if not compose_required:
+        compose_required = True
     pipeline.append(
         DeployStep(
             order=order,
             action="compose up",
             description=restart_step.description if restart_step else "Restart compose stack",
-            reason=restart_step.description if restart_step else "from release plan",
+            reason="Start api/worker after artifact gate GO (compose executor re-verifies)",
             required=compose_required,
-            skipped=not compose_required,
+            skipped=False,
             command=f"docker compose -f {COMPOSE_FILE} up -d",
         )
     )
@@ -163,3 +202,7 @@ def detect_blockers(plan: ReleasePlanState) -> list[str]:
         if item.startswith("CRITICAL:"):
             blockers.append(item)
     return blockers
+
+
+def compose_blocked_by_step_failure(action: str) -> bool:
+    return action in _COMPOSE_BLOCKING_ACTIONS
