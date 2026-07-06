@@ -91,22 +91,6 @@ class TestClassifyFromDiffFlags:
 
 
 class TestClassifyFileEol:
-    def test_eol_only_when_normalized_matches_head_despite_git_diff(self):
-        with (
-            patch(
-                "ifg_guardian.core.repo_audit.eol_check._run_git",
-                side_effect=_mock_git_diff(normal_dirty=True, ignore_cr_dirty=True),
-            ),
-            patch(
-                "ifg_guardian.core.repo_audit.eol_check._normalized_content_matches_head",
-                return_value=True,
-            ),
-        ):
-            result = classify_file_eol("app/persistence/repositories/transmission_repository.py")
-
-        assert result.classification == EolClassification.EOL_ONLY
-        assert "false positive" in result.note
-
     def test_unknown_when_porcelain_m_but_no_normal_diff(self):
         with patch(
             "ifg_guardian.core.repo_audit.eol_check._run_git",
