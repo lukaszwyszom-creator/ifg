@@ -21,6 +21,7 @@ from ifg_guardian.modules.ksef import run_ksef_check, run_ksef_sync
 from ifg_guardian.modules.production import run_prod_health, run_prod_recover
 from ifg_guardian.modules.repo import run_repo_clean_dry_run, run_repo_status, run_repo_sync
 from ifg_guardian.modules.repo_audit import run_repo_audit
+from ifg_guardian.modules.repo_eol_check import run_repo_eol_check
 from ifg_guardian.modules.plugins import run_plugin_list
 from ifg_guardian.modules.workflow import run_workflow
 
@@ -129,6 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
     repo_audit.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
     repo_audit.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
     repo_audit.add_argument("--report", default=None, help="Report path (default: docs/guardian/REPO_AUDIT_*.md)")
+    repo_eol = repo_sub.add_parser("eol-check", help="EOL-only vs logical diff check (repo.eol_check)")
+    repo_eol.add_argument("--json", action="store_true", help="JSON output")
+    repo_eol.add_argument("--markdown", action="store_true", help="Markdown to stdout")
+    repo_eol.add_argument("--report", default=None, help="Report path (default: docs/guardian/EOL_CHECK_*.md)")
     repo_clean = repo_sub.add_parser("clean", help="Dry-run housekeeping preview")
     repo_clean.add_argument("--dry-run", action="store_true", default=True)
 
@@ -286,6 +291,16 @@ def main(argv: list[str] | None = None) -> int:
             return run_repo_audit(
                 do_fetch=args.fetch,
                 dry_run=args.dry_run,
+                output_format=output_format,
+                report_path=report,
+            )
+        if args.action == "eol-check":
+            if args.json and args.markdown:
+                print("Use either --json or --markdown, not both.", file=sys.stderr)
+                return 2
+            output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+            report = Path(args.report) if args.report else None
+            return run_repo_eol_check(
                 output_format=output_format,
                 report_path=report,
             )
