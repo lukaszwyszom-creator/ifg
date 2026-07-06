@@ -23,6 +23,7 @@
 | 2 | `f3b18cf` | `feat(guardian): add IFG Container Manager cutover workflow` |
 | 3 | `03fc758` | `docs(ifg): add Container Manager cutover runbook and GWO-IFG-002 reports` |
 | 4 | `f25c54b` | `chore: ignore guardian runtime artifacts and untrack frontend dist` |
+| 5 | `b260700` | `docs(ifg): record Container Manager cutover prep execution` |
 
 **Baza przed prep:** `9505adc` — `prep(docker): pin compose project ifg to existing prod volume and network` (już na `production` przed tą sesją).
 
@@ -33,8 +34,8 @@
 | Pole | Wartość |
 |------|---------|
 | Branch | `production` |
-| HEAD | `f25c54b6cfd88d31a24ae267308d22c68b5a15c2` |
-| Tracking | `production...origin/production [ahead 5]` |
+| HEAD | `b2607008e7b649e5a2609861bb9b2e63e66b9273` |
+| Tracking | `production...origin/production [ahead 6]` |
 | Branch WIP | `feature/ksef-transmission-wip` @ `d38a6ec` (lokalny, nie pushowany) |
 
 ---
@@ -138,7 +139,7 @@ PYTHONPATH=scripts .venv/bin/python -m ifg_guardian ifg cutover run --dry-run
 | Testy preflight + cutover | ✅ | 10/10 PASS |
 | Dry-run lokalny | ✅ | SUCCESS, Safety Gate GO |
 | Compose prep (`name: ifg`) | ✅ | `9505adc` na `production` |
-| Push do `origin/production` | ⏸️ | **Operator** — 5 commitów ahead, brak push w tej sesji |
+| Push do `origin/production` | ⏸️ | **Operator** — 6 commitów ahead, brak push w tej sesji |
 | `git pull` na DS723 | ⏸️ | Po push operatora |
 | LIVE cutover na DS723 | ❌ | Dopiero po pull + checklist funkcjonalny + `--yes` |
 
@@ -156,7 +157,7 @@ PYTHONPATH=scripts python3 -m ifg_guardian ifg cutover run --dry-run
 
 | Obszar | Werdykt | Uzasadnienie |
 |--------|---------|--------------|
-| **Prep lokalny `production`** | **GO** | 4 commity cutover-prep wykonane; testy i dry-run OK |
+| **Prep lokalny `production`** | **GO** | 5 commitów cutover-prep + raport wykonania; testy i dry-run OK |
 | **`git push` + DS723 `git pull`** | **GO** (warunkowy) | Gotowe technicznie; wymaga jawnego potwierdzenia operatora (nie wykonano push) |
 | **LIVE cutover** | **NO-GO** | Świadomie poza zakresem; wymaga push/pull, testów funkcjonalnych i `--yes` |
 | **Zmiany DS723+** | **N/A** | Nie dotykano |
@@ -198,7 +199,7 @@ PYTHONPATH=scripts python3 -m ifg_guardian ifg cutover run --dry-run
 
 | Plik | Status |
 |------|--------|
-| `docs/reports/2026-07-06_IFG_CONTAINER_CUTOVER_PREP_EXECUTION.md` | Utworzony (ten dokument) |
+| `docs/reports/2026-07-06_IFG_CONTAINER_CUTOVER_PREP_EXECUTION.md` | `b260700` |
 
 ### Pozostają nieśledzone (poza `production`)
 
