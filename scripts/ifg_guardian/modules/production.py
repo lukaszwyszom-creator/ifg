@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from ifg_guardian.config import DEFAULT_REMOTE_PATH
+from ifg_guardian.config import DEFAULT_REMOTE_PATH, ROOT
 from ifg_guardian.core.compose import compose_services_healthy, parse_compose_service_states, remote_compose_ps
+from ifg_guardian.core.execution_guard import enforce_mutating_live_orchestration
 from ifg_guardian.core.git import resolve_ds723_host
 from ifg_guardian.core.ssh import remote_git, ssh
 from ifg_guardian.modules.deploy import run_deploy_check
@@ -65,6 +66,12 @@ def run_prod_recover(*, dry_run: bool = False, assume_yes: bool = False, remote_
     import subprocess
     import sys
     from pathlib import Path
+
+    try:
+        enforce_mutating_live_orchestration(dry_run=dry_run, root=ROOT)
+    except RuntimeError as exc:
+        print(f"\n❌ prod recover blocked: {exc}")
+        return 1
 
     scripts = Path(__file__).resolve().parent.parent.parent
     cmd = [sys.executable, str(scripts / "guardian2.py"), "recover-prod"]

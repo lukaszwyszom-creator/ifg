@@ -436,10 +436,23 @@ Wydrukuj / odhaczaj podczas cutover:
 
 ## Guardian workflow (preferowane)
 
-Zamiast ręcznych kroków SSH użyj workflow `ifg.container.cutover`:
+### Stacja sterująca (obowiązkowe dla LIVE)
+
+| Host | Rola | Dozwolone komendy Guardian |
+|------|------|----------------------------|
+| **Mac mini** | Orchestration host | `ifg cutover run --yes`, `ifg deploy run --yes`, rollback LIVE |
+| **DS723+** | Execution target (SSH) | **nie** uruchamiaj mutujących workflow LIVE; dry-run tylko diagnostycznie |
+
+Guardian **Execution Guard** blokuje mutujące workflow produkcyjne uruchomione bezpośrednio na DS723+ (hostname, ścieżka prod `/volume1/docker/ifg_v2/ifg_standalone`). Komunikat NO_GO:
+
+> This workflow must be executed from the orchestration host (Mac mini). DS723+ is an execution target only. Run this command from Mac mini.
+
+**LIVE cutover** uruchamiaj **wyłącznie z Mac mini** (repo lokalne + SSH do DS723+). Kroki ręczne (backup SQL, `compose up`) nadal można wykonać shellowo na DS723+ zgodnie z sekcjami poniżej.
+
+Z Mac mini:
 
 ```bash
-# Symulacja (bez mutacji)
+# Symulacja (bez mutacji) — na Mac mini; na DS723+ tylko diagnostycznie
 python3 scripts/guardian.py ifg cutover run --dry-run
 
 # Cutover LIVE: backup → pull → gates → frontend build → artifact gate → up → health → guardian verify
@@ -448,7 +461,7 @@ python3 scripts/guardian.py ifg cutover run --yes
 # Po testach funkcjonalnych: cleanup legacy docker-*
 python3 scripts/guardian.py ifg cutover run --yes --confirm-functional --cleanup
 
-# Rollback
+# Rollback (z Mac mini)
 python3 scripts/guardian.py ifg cutover rollback --yes
 ```
 

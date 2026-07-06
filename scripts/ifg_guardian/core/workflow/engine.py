@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ifg_guardian.config import ROOT
+from ifg_guardian.core.execution_guard import enforce_execution_guard
 from ifg_guardian.core.workflow.context import WorkflowContext
 from ifg_guardian.core.workflow.definition import WorkflowDefinition
 from ifg_guardian.core.workflow.executors import DeployExecutorContext, IntentExecutor
@@ -55,6 +56,13 @@ class ExecutionEngine:
         )
         if initial_data:
             ctx.data.update(initial_data)
+
+        enforce_execution_guard(
+            workflow=workflow,
+            mode=mode,
+            root=self.root,
+            remote_path=ctx.data.get("remote_path"),
+        )
 
         state_machine.transition(WorkflowState.READY)
         transaction.mark_started()
@@ -155,6 +163,14 @@ class ExecutionEngine:
             plugin_registry=plugin_registry,
         )
         ctx.data.update(initial_data)
+
+        enforce_execution_guard(
+            workflow=workflow,
+            mode=mode,
+            root=self.root,
+            remote_path=ctx.data.get("remote_path"),
+        )
+
         state_machine.transition(WorkflowState.READY)
         transaction.mark_started()
         state_machine.transition(WorkflowState.RUNNING)

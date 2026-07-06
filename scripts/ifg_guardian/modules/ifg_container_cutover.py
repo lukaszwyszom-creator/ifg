@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ifg_guardian.config import DEFAULT_REMOTE_PATH, ROOT
+from ifg_guardian.core.execution_guard import enforce_mutating_live_orchestration
 from ifg_guardian.core.plugins.bootstrap import create_runtime
 from ifg_guardian.core.workflow.engine import ExecutionEngine
 from ifg_guardian.core.workflow.executors.context import DeployExecutorContext
@@ -137,6 +138,16 @@ def run_ifg_container_cutover_rollback(
     if not dry_run and not assume_yes:
         print("LIVE rollback requires --yes.")
         return 2
+
+    try:
+        enforce_mutating_live_orchestration(
+            dry_run=dry_run,
+            root=ROOT,
+            remote_path=remote_path,
+        )
+    except RuntimeError as exc:
+        print(f"\n❌ Container cutover rollback blocked: {exc}")
+        return 1
 
     deploy_ctx = DeployExecutorContext(remote_host=remote_host, remote_path=remote_path)
     ssh = SSHExecutor(root=ROOT, deploy_context=deploy_ctx)
