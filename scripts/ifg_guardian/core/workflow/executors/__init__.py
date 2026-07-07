@@ -87,11 +87,9 @@ class IntentExecutor:
                 return local_result
             cfg = self.deploy_context.config()
             remote_script = (
-                "git stash push -u -m \"guardian-deploy-autostash-$(date +%Y%m%d_%H%M%S)\" "
-                "2>/dev/null || true\n"
                 "git fetch origin\n"
                 f"git checkout {cfg.branch}\n"
-                f"git pull origin {cfg.branch}\n"
+                f"git reset --hard origin/{cfg.branch}\n"
             )
             remote = self._ssh.run_remote(remote_script, label="git_pull_remote")
             remote.intent = intent
