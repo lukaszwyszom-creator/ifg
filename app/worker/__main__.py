@@ -472,6 +472,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
+    if settings.ksef_auto_sync_enabled and not (settings.ksef_auth_token or "").strip():
+        raise SystemExit(
+            "KSEF_AUTO_SYNC_ENABLED=true wymaga KSEF_AUTH_TOKEN w ENV workera."
+        )
+
     logger.info("Worker startuje. poll_interval=%ss batch=%s", POLL_INTERVAL_SECONDS, BATCH_SIZE)
     while _running:
         try:

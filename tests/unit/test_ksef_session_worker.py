@@ -352,7 +352,7 @@ class TestMarkSessionExpired:
             ksef_client=MagicMock(),
             audit_service=MagicMock(),
         )
-        service._get_active_db_session = MagicMock(return_value=active_orm)
+        service._get_active_online_session = MagicMock(return_value=active_orm)
         return service
 
     def test_marks_active_session_as_expired(self):

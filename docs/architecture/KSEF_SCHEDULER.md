@@ -25,6 +25,21 @@ Worker loop
    - enqueue do `background_jobs`,
    - zapis `last_executed_slot` w `ksef_sync_states` (`scope=ksef_purchase_auto_scheduler`).
 6. Synchronizację wykonuje istniejący handler `sync_purchase_invoices`.
+7. Handler woła `sync_received_invoices()`, które używa `PurchaseAuthService.ensure_purchase_auth()` — **bez wymagania sesji online** (patrz `docs/architecture/KSEF_PURCHASE_AUTH.md`).
+
+## Purchase auth w auto-sync (GWO-IFG-0032)
+
+```
+Scheduler tick
+  → enqueue sync_purchase_invoices
+    → ensure_purchase_auth(nip)
+      ├─ ważny access token → sync
+      ├─ wygasły → refresh_access_token()
+      └─ refresh failed → get_tokens(KSEF_AUTH_TOKEN)
+    → sync_received_invoices (metadata + XML)
+```
+
+Operator **nie musi** klikać „Połącz” przed planowym sync zakupów. Wysyłka sprzedaży nadal wymaga `open_session()` / sesji online.
 
 ## Recovery (missed run)
 

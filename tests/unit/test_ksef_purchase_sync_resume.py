@@ -108,12 +108,12 @@ def _make_incremental_service(repo: _FakeInvoiceRepository) -> KSeFSessionServic
         audit_service=MagicMock(),
         invoice_repository=repo,
     )
-    svc.get_session_context = MagicMock(
+    svc.purchase_auth.ensure_purchase_auth = MagicMock(
         return_value=SimpleNamespace(
             access_token="tok",
-            session_reference="sess-ref",
-            symmetric_key=b"k" * 32,
-            initialization_vector=b"i" * 16,
+            nip="9670402857",
+            expires_at=None,
+            record_id=uuid.uuid4(),
         )
     )
     svc.ksef_client.defer_purchase_rate_limit = True

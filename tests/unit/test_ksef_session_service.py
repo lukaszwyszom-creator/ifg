@@ -48,7 +48,7 @@ class TestOpenSession:
         active = MagicMock()
         active.session_reference = "ref-123"
 
-        # Mock _get_active_session
+        # Mock _get_active_online_session
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active
         mock_session.execute.return_value = mock_result
@@ -97,6 +97,7 @@ class TestGetActiveSession:
         orm = MagicMock()
         orm.status = SESSION_ACTIVE
         orm.nip = "1234567890"
+        orm.session_reference = "ref-123"
         orm.expires_at = datetime.now(UTC) - timedelta(minutes=10)
 
         mock_result = MagicMock()
@@ -106,6 +107,25 @@ class TestGetActiveSession:
         with pytest.raises(NotFoundError, match="wygasła"):
             service.get_active_session("1234567890")
         assert orm.status == SESSION_EXPIRED
+
+
+class TestEnsureOnlineSession:
+    def test_requires_online_session_reference(self, service: KSeFSessionService, mock_session: MagicMock):
+        orm = MagicMock()
+        orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
+        orm.session_reference = None
+        orm.token_metadata_json = {
+            "access_token": "tok-123",
+            "refresh_token": "ref-tok",
+        }
+        orm.nip = "1234567890"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        with pytest.raises(NotFoundError, match="Brak aktywnej sesji"):
+            service.ensure_online_session("1234567890")
 
 
 class TestGetSessionToken:
@@ -161,6 +181,35 @@ class TestCloseSession:
         result = service.close_session("1234567890")
         assert result.status == SESSION_TERMINATED
         service.ksef_client.close_online_session.assert_called_once_with("tok", "ref")
+
+
+class TestSyncReceivedInvoicesUsesPurchaseAuth:
+    def test_delegates_to_purchase_auth(
+        self, service: KSeFSessionService, mock_session: MagicMock
+    ):
+        from datetime import date
+
+        repo = MagicMock()
+        repo.exists_by_ksef_number.return_value = True
+        repo.list_ksef_purchase_refs_in_issue_range.return_value = ["KSEF-1"]
+        service.invoice_repository = repo
+
+        auth_ctx = MagicMock()
+        auth_ctx.access_token = "purchase-tok"
+        service.purchase_auth.ensure_purchase_auth = MagicMock(return_value=auth_ctx)
+        service.ksef_client.query_purchase_metadata_refs.return_value = ["KSEF-1"]
+
+        counts = service.sync_received_invoices(
+            nip="1234567890",
+            date_from=date(2026, 5, 1),
+            date_to=date(2026, 5, 10),
+        )
+
+        service.purchase_auth.ensure_purchase_auth.assert_called_once_with(
+            "1234567890", actor_user_id=None
+        )
+        assert counts["skipped_existing"] == 1
+        service.ksef_client.get_purchase_invoice_xml.assert_not_called()
 
 
 class TestGetSessionById:

@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import uuid
 
 import pytest
 
@@ -46,12 +47,12 @@ def _make_ksef_service_with_repo(repo: _FakeInvoiceRepository) -> KSeFSessionSer
         audit_service=MagicMock(),
         invoice_repository=repo,
     )
-    svc.get_session_context = MagicMock(
+    svc.purchase_auth.ensure_purchase_auth = MagicMock(
         return_value=SimpleNamespace(
             access_token="tok",
-            session_reference="sess-ref",
-            symmetric_key=b"k" * 32,
-            initialization_vector=b"i" * 16,
+            nip="1234567890",
+            expires_at=None,
+            record_id=uuid.uuid4(),
         )
     )
     svc.ksef_client.defer_purchase_rate_limit = True

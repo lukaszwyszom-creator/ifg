@@ -31,17 +31,45 @@ from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_valid
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
+from app.services.ksef_purchase_auth_service import PurchaseAuthService
 from app.services.ksef_purchase_sync_audit import (
     PurchaseSyncAudit,
     resolve_purchase_sync_window_details,
 )
+from app.services.ksef_token_store import (
+    KEY_ACCESS_TOKEN,
+    KEY_IV,
+    KEY_REFRESH_TOKEN,
+    KEY_REFRESH_VALID,
+    KEY_SYMMETRIC_KEY,
+    SESSION_ACTIVE,
+    SESSION_AUTH_ACTIVE,
+    SESSION_EXPIRED,
+    SESSION_FAILED,
+    SESSION_TERMINATED,
+    TOKEN_CACHE_MARGIN,
+    as_utc_aware,
+    build_token_metadata,
+    is_online_session,
+    normalize_session_nip,
+)
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
-SESSION_ACTIVE = "active"
-SESSION_TERMINATED = "terminated"
-SESSION_EXPIRED = "expired"
-SESSION_FAILED = "failed"
+# Re-export for backward compatibility
+_normalize_session_nip = normalize_session_nip
+_as_utc_aware = as_utc_aware
+_TOKEN_CACHE_MARGIN = TOKEN_CACHE_MARGIN
+_KEY_ACCESS_TOKEN = KEY_ACCESS_TOKEN
+_KEY_REFRESH_TOKEN = KEY_REFRESH_TOKEN
+_KEY_REFRESH_VALID = KEY_REFRESH_VALID
+_KEY_SYMMETRIC_KEY = KEY_SYMMETRIC_KEY
+_KEY_IV = KEY_IV
+_PROBE_ERROR_THRESHOLD = 3
+_probe_cache_lock = threading.Lock()
+_probe_cache: dict[str, dict[str, str | int | None]] = {}
+
 _SCOPE_PURCHASE_INVOICES = "purchase_invoices"
 _MAX_ERROR_SAMPLES = 5
 _RATE_LIMIT_WARNING = (
@@ -56,35 +84,6 @@ def _purchase_sync_lock_for(nip: str) -> threading.Lock:
         if nip not in _purchase_sync_nip_locks:
             _purchase_sync_nip_locks[nip] = threading.Lock()
         return _purchase_sync_nip_locks[nip]
-
-
-def _normalize_session_nip(nip: str | None) -> str:
-    """Jeden format NIP (10 cyfr) dla lookup w ksef_sessions i seller_snapshot."""
-    raw = (nip or "").strip().upper()
-    if raw.startswith("PL"):
-        raw = raw[2:].strip()
-    return raw.replace("-", "").replace(" ", "")
-
-
-def _as_utc_aware(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-# Margines przed wygaśnięciem — token uznajemy za ważny jeśli trwa > MARGIN
-_TOKEN_CACHE_MARGIN = timedelta(seconds=30)
-
-# Klucze w token_metadata_json
-_KEY_ACCESS_TOKEN = "access_token"
-_KEY_REFRESH_TOKEN = "refresh_token"
-_KEY_REFRESH_VALID = "refresh_valid_until"
-_KEY_SYMMETRIC_KEY = "symmetric_key"
-_KEY_IV = "initialization_vector"
-_PROBE_ERROR_THRESHOLD = 3
-_probe_cache_lock = threading.Lock()
-_probe_cache: dict[str, dict[str, str | int | None]] = {}
 
 
 @dataclass
@@ -119,6 +118,7 @@ class KSeFSessionService:
         audit_service: AuditService,
         invoice_repository: InvoiceRepository | None = None,
         journal_service=None,
+        purchase_auth_service: PurchaseAuthService | None = None,
     ) -> None:
         self.session = session
         self.auth_provider = auth_provider
@@ -126,6 +126,12 @@ class KSeFSessionService:
         self.audit_service = audit_service
         self.invoice_repository = invoice_repository
         self._journal_service = journal_service
+        self.purchase_auth = purchase_auth_service or PurchaseAuthService(
+            session=session,
+            auth_provider=auth_provider,
+            audit_service=audit_service,
+            journal_service=journal_service,
+        )
         # cache tokenów — klucz: nip (str), wartość: _TokenCacheEntry
         self._token_cache: dict[str, _TokenCacheEntry] = {}
         self._cache_lock = threading.Lock()
@@ -145,12 +151,52 @@ class KSeFSessionService:
         if not auth_token:
             raise AppError("KSEF_AUTH_TOKEN nie jest skonfigurowany.")
 
-        active = self._get_active_db_session(nip)
+        active = self._get_active_online_session(nip)
         if active is not None:
             raise ConflictError(
                 f"Istnieje już aktywna sesja KSeF dla NIP {nip}: "
                 f"{active.session_reference}."
             )
+
+        auth_only = self.purchase_auth._find_purchase_auth_record(nip)
+        if auth_only is not None and auth_only.status == SESSION_AUTH_ACTIVE:
+            purchase_ctx = self.purchase_auth.ensure_purchase_auth(nip, actor_user_id=actor_user_id)
+            try:
+                online_session = self.ksef_client.open_online_session(purchase_ctx.access_token)
+            except KSeFClientError as exc:
+                raise ExternalServiceError(f"Błąd otwarcia sesji KSeF: {exc}") from exc
+            orm = auth_only
+            orm.session_reference = online_session.session_reference
+            orm.token_metadata_json = build_token_metadata(
+                access_token=purchase_ctx.access_token,
+                refresh_token=(orm.token_metadata_json or {}).get(KEY_REFRESH_TOKEN, ""),
+                refresh_valid_until=None,
+                symmetric_key=online_session.symmetric_key,
+                initialization_vector=online_session.initialization_vector,
+                existing=orm.token_metadata_json,
+            )
+            orm.status = SESSION_ACTIVE
+            orm.updated_at = datetime.now(UTC)
+            self.session.flush()
+            self._invalidate_cache(nip)
+            self.audit_service.record(
+                actor_user_id=actor_user_id,
+                actor_role="system",
+                event_type="ksef_session.opened",
+                entity_type="ksef_session",
+                entity_id=str(orm.id),
+                after={"status": SESSION_ACTIVE, "nip": nip, "upgraded_from": SESSION_AUTH_ACTIVE},
+            )
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.SESSION_OPEN,
+                    severity=KSeFSeverity.SUCCESS,
+                    status="success",
+                    short_description=f"Opened KSeF online session for NIP {nip} (upgraded purchase auth).",
+                    correlation_id=orm.id,
+                    metadata_json={"source": "session"},
+                )
+            return orm
 
         # 1. Uwierzytelnienie → access token + refresh token
         try:
@@ -173,16 +219,13 @@ class KSeFSessionService:
             environment=self.auth_provider.environment,
             auth_method="token",
             session_reference=online_session.session_reference,
-            token_metadata_json={
-                _KEY_ACCESS_TOKEN: ksef_session.access_token,
-                _KEY_REFRESH_TOKEN: ksef_session.refresh_token,
-                _KEY_REFRESH_VALID: (
-                    ksef_session.refresh_valid_until.isoformat()
-                    if ksef_session.refresh_valid_until else None
-                ),
-                _KEY_SYMMETRIC_KEY: base64.b64encode(online_session.symmetric_key).decode("ascii"),
-                _KEY_IV: base64.b64encode(online_session.initialization_vector).decode("ascii"),
-            },
+            token_metadata_json=build_token_metadata(
+                access_token=ksef_session.access_token,
+                refresh_token=ksef_session.refresh_token,
+                refresh_valid_until=ksef_session.refresh_valid_until,
+                symmetric_key=online_session.symmetric_key,
+                initialization_vector=online_session.initialization_vector,
+            ),
             status=SESSION_ACTIVE,
             expires_at=expires_at,
             created_at=now,
@@ -215,8 +258,9 @@ class KSeFSessionService:
         return orm
 
     def get_active_session(self, nip: str) -> KSeFSessionORM:
-        nip = _normalize_session_nip(nip)
-        orm = self._get_active_db_session(nip)
+        """Aktywna sesja online (wysyłka sprzedaży) — nie obejmuje samego purchase auth."""
+        nip = normalize_session_nip(nip)
+        orm = self._get_active_online_session(nip)
         if orm is None:
             raise NotFoundError(f"Brak aktywnej sesji KSeF dla NIP {nip}.")
 
@@ -239,19 +283,27 @@ class KSeFSessionService:
 
         return orm
 
+    def ensure_online_session(self, nip: str) -> KSeFSessionContext:
+        """Wymaga aktywnej sesji online FA(3) — używane przy wysyłce i pollingu sprzedaży."""
+        return self.get_session_context(nip)
+
     def get_session_context(self, nip: str) -> KSeFSessionContext:
-        """Zwraca pełny kontekst sesji potrzebny do wysyłki faktur.
+        """Zwraca pełny kontekst sesji online potrzebny do wysyłki faktur.
 
         Wynik access tokena jest cachowany (TTL = czas ważności − margines).
         """
-        nip = _normalize_session_nip(nip)
+        nip = normalize_session_nip(nip)
         with self._cache_lock:
             entry = self._token_cache.get(nip)
             if entry is not None and entry.is_valid():
-                # Cache ma tylko access_token — pełny kontekst musi być z DB
                 pass
 
         orm = self.get_active_session(nip)
+        if not is_online_session(orm):
+            raise NotFoundError(
+                f"Brak aktywnej sesji online KSeF dla NIP {nip}. "
+                "Otwórz sesję przez UI lub POST /api/v1/ksef-sessions/."
+            )
         metadata = orm.token_metadata_json or {}
         access_token = metadata.get(_KEY_ACCESS_TOKEN)
         symmetric_key_b64 = metadata.get(_KEY_SYMMETRIC_KEY)
@@ -315,7 +367,7 @@ class KSeFSessionService:
     def mark_session_expired(self, nip: str) -> None:
         """Oznacza aktywną sesję KSeF dla danego NIP jako wygasłą."""
         nip = _normalize_session_nip(nip)
-        orm = self._get_active_db_session(nip)
+        orm = self._get_active_online_session(nip)
         if orm is not None:
             orm.status = SESSION_EXPIRED
             orm.updated_at = datetime.now(UTC)
@@ -363,12 +415,28 @@ class KSeFSessionService:
             )
 
         try:
-            orm = self._get_active_db_session(nip)
+            orm = self._get_active_online_session(nip)
             if orm is None:
+                auth_record = self.purchase_auth._find_purchase_auth_record(nip)
+                if auth_record is None or auth_record.status != SESSION_AUTH_ACTIVE:
+                    return self._build_connection_status(
+                        ui_status="DISCONNECTED",
+                        reason="NO_SESSION",
+                        has_session=False,
+                    )
+                from app.services.ksef_token_store import access_token_valid
+
+                if not access_token_valid(auth_record):
+                    return self._build_connection_status(
+                        ui_status="DISCONNECTED",
+                        reason="SESSION_EXPIRED",
+                        has_session=False,
+                    )
                 return self._build_connection_status(
-                    ui_status="DISCONNECTED",
-                    reason="NO_SESSION",
-                    has_session=False,
+                    ui_status="CONNECTED",
+                    reason="PURCHASE_AUTH_ONLY",
+                    has_session=True,
+                    session_expires_at=_as_utc_aware(auth_record.expires_at),
                 )
 
             now = datetime.now(UTC)
@@ -727,12 +795,12 @@ class KSeFSessionService:
         if self.invoice_repository is None:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
 
-        ctx = self.get_session_context(nip)
+        auth_ctx = self.purchase_auth.ensure_purchase_auth(nip, actor_user_id=actor_user_id)
         if audit is not None:
             audit.sync_path = "incremental"
         return self._sync_received_invoices_incremental(
             nip=nip,
-            ctx=ctx,
+            access_token=auth_ctx.access_token,
             date_from=date_from,
             date_to=date_to,
             actor_user_id=actor_user_id,
@@ -745,7 +813,7 @@ class KSeFSessionService:
         self,
         *,
         nip: str,
-        ctx,
+        access_token: str,
         date_from: date,
         date_to: date,
         actor_user_id: UUID | None,
@@ -765,7 +833,7 @@ class KSeFSessionService:
 
         if not refs:
             metadata_refs = self.ksef_client.query_purchase_metadata_refs(
-                access_token=ctx.access_token,
+                access_token=access_token,
                 date_from=date_from.isoformat(),
                 date_to=date_to.isoformat(),
                 audit=audit,
@@ -815,7 +883,7 @@ class KSeFSessionService:
                 self.session.flush()
                 continue
             try:
-                xml_bytes = self.ksef_client.get_purchase_invoice_xml(ctx.access_token, ref)
+                xml_bytes = self.ksef_client.get_purchase_invoice_xml(access_token, ref)
                 if audit is not None:
                     audit.record_xml_downloaded(ref)
                 if self._journal_service is not None:
@@ -1035,8 +1103,8 @@ class KSeFSessionService:
     # PRIVATE HELPERS
     # -------------------------------------------------------------------------
 
-    def _get_active_db_session(self, nip: str) -> KSeFSessionORM | None:
-        normalized = _normalize_session_nip(nip)
+    def _get_active_online_session(self, nip: str) -> KSeFSessionORM | None:
+        normalized = normalize_session_nip(nip)
         if not normalized:
             return None
         stmt = (
@@ -1044,6 +1112,7 @@ class KSeFSessionService:
             .where(
                 KSeFSessionORM.nip == normalized,
                 KSeFSessionORM.status == SESSION_ACTIVE,
+                KSeFSessionORM.session_reference.is_not(None),
                 KSeFSessionORM.environment == self.auth_provider.environment,
             )
             .order_by(KSeFSessionORM.created_at.desc())
@@ -1052,17 +1121,21 @@ class KSeFSessionService:
         orm = self.session.execute(stmt).scalar_one_or_none()
         if orm is not None:
             return orm
-        # Fallback: starsze sesje bez dopasowanego environment w DB
         fallback = (
             select(KSeFSessionORM)
             .where(
                 KSeFSessionORM.nip == normalized,
                 KSeFSessionORM.status == SESSION_ACTIVE,
+                KSeFSessionORM.session_reference.is_not(None),
             )
             .order_by(KSeFSessionORM.created_at.desc())
             .limit(1)
         )
         return self.session.execute(fallback).scalar_one_or_none()
+
+    def _get_active_db_session(self, nip: str) -> KSeFSessionORM | None:
+        """Backward-compatible alias — zwraca wyłącznie sesję online."""
+        return self._get_active_online_session(nip)
 
     @staticmethod
     def _build_connection_status(
