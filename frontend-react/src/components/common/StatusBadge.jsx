@@ -13,6 +13,8 @@ const STATUS_MAP = {
   success:               { label: 'Sukces',          cls: 'success' },
   failed_permanent:      { label: 'Błąd stały',      cls: 'error'   },
   failed_retryable:      { label: 'Błąd (retry)',    cls: 'warning' },
+  failed_temporary:      { label: 'Błąd tymcz.',     cls: 'warning' },
+  processing:            { label: 'Przetwarzanie',   cls: 'neutral' },
   // Payment statuses
   unpaid:                { label: 'Nieopłacona',     cls: 'error'   },
   partially_paid:        { label: 'Częściowo',       cls: 'warning' },
@@ -20,6 +22,12 @@ const STATUS_MAP = {
   // Generic
   active:                { label: 'Aktywna',         cls: 'success' },
   expired:               { label: 'Wygasła',         cls: 'neutral' },
+  // KSeF severity
+  info:                  { label: 'INFO',            cls: 'info'    },
+  warning:               { label: 'WARNING',         cls: 'warning' },
+  error:                 { label: 'ERROR',           cls: 'error'   },
+  running:               { label: 'RUNNING',         cls: 'neutral' },
+  paused:                { label: 'PAUSED',          cls: 'neutral' },
 };
 
 export default function StatusBadge({ status }) {

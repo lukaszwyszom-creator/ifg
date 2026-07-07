@@ -1,8 +1,10 @@
 import client from './client';
 
 export const transmissionsApi = {
-  list: (page = 1, size = 20) =>
-    client.get('/transmissions/', { params: { page, size } }).then((r) => r.data),
+  list: (page = 1, size = 20, warningsOrErrorsOnly = false) =>
+    client
+      .get('/transmissions/', { params: { page, size, warnings_or_errors_only: warningsOrErrorsOnly } })
+      .then((r) => r.data),
 
   submit: (invoiceId) =>
     client.post(`/transmissions/submit/${invoiceId}`).then((r) => r.data),

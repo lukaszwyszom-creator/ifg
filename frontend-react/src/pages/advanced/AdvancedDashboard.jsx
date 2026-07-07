@@ -17,7 +17,7 @@ const TABS = [
   { id: 'open',          label: 'Otwarte'           },
   { id: 'settlements',   label: 'Rozrachunki'       },
   { id: 'vat',           label: 'Zestawienie VAT'   },
-  { id: 'transmissions', label: 'Transmisje KSeF'   },
+  { id: 'transmissions', label: 'Monitor KSeF'      },
 ];
 
 export default function AdvancedDashboard() {
