@@ -8,7 +8,7 @@ class TransmissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    invoice_id: UUID
+    invoice_id: UUID | None = None
     channel: str
     operation_type: str
     severity: str | None = None

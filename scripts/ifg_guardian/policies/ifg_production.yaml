@@ -1,0 +1,34 @@
+{
+  "version": "v1",
+  "default_deployment_profile": "single_production",
+  "profiles": {
+    "single_production": {
+      "staging_available": false
+    },
+    "enterprise": {
+      "staging_available": true
+    }
+  },
+  "critical_migration_tables": [
+    "invoices",
+    "transmissions",
+    "warehouse_layers",
+    "payments"
+  ],
+  "non_report_untracked_block_patterns": [
+    ".env",
+    "credentials",
+    "secret",
+    "key"
+  ],
+  "report_paths": [
+    "docs/reports/",
+    "docs/guardian/"
+  ],
+  "dirty_tree_policy": {
+    "block_message": "Production deployment blocked. Working tree contains uncommitted changes.",
+    "override_flag": "--allow-dirty-build",
+    "override_status": "READY_WITH_OVERRIDE",
+    "score_penalty": 25
+  }
+}

@@ -36,16 +36,25 @@ def _make_actor() -> AuthenticatedUser:
     return AuthenticatedUser(user_id=str(uuid4()), username="tester", role="administrator")
 
 
+_UNSET = object()
+
+
 def _make_transmission_orm(
     status: str = TransmissionStatus.SUCCESS,
     ksef_reference_number: str | None = None,
     upo_status: str | None = None,
+    *,
+    invoice_id: UUID | None | object = _UNSET,
+    operation_type: str = "submit",
 ) -> MagicMock:
     t = MagicMock()
     t.id = uuid4()
-    t.invoice_id = uuid4()
+    t.invoice_id = uuid4() if invoice_id is _UNSET else invoice_id
     t.channel = "ksef"
-    t.operation_type = "submit"
+    t.operation_type = operation_type
+    t.severity = "SUCCESS"
+    t.correlation_id = uuid4()
+    t.job_id = None
     t.status = status
     t.attempt_no = 1
     t.idempotency_key = str(uuid4())
@@ -54,6 +63,7 @@ def _make_transmission_orm(
     t.upo_status = upo_status
     t.error_code = None
     t.error_message = None
+    t.metadata_json = {"description": "test"}
     t.started_at = datetime.now(UTC)
     t.finished_at = datetime.now(UTC)
     t.created_at = datetime.now(UTC)
@@ -130,6 +140,29 @@ class TestGetTransmission:
         res = client.get(f"/api/v1/transmissions/{uuid4()}")
 
         assert res.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/transmissions/  —  lista z wpisami journal (invoice_id=NULL)
+# ---------------------------------------------------------------------------
+
+class TestListTransmissions:
+    def test_list_includes_journal_entry_with_null_invoice_id(self, client, mock_transmission_service):
+        journal = _make_transmission_orm(
+            status=TransmissionStatus.SUCCESS,
+            invoice_id=None,
+            operation_type="SESSION_RENEWED",
+        )
+        mock_transmission_service.list_all.return_value = ([journal], 1)
+
+        res = client.get("/api/v1/transmissions/", params={"page": 1, "size": 20})
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["total"] == 1
+        assert len(body["items"]) == 1
+        assert body["items"][0]["invoice_id"] is None
+        assert body["items"][0]["operation_type"] == "SESSION_RENEWED"
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
@@ -81,3 +82,45 @@ class TestPrecheckReport:
         assert "PRECHECK_REPORT" in md
         assert "| PASS |" in md
         assert "**GO**" in md
+
+
+class TestGitCleanDirtyTree:
+    def test_dirty_tree_fails_on_live_without_override(self, tmp_path: Path):
+        from ifg_guardian.core.preflight.checks import check_git_clean, DIRTY_TREE_BLOCK_MESSAGE
+
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@test"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "dirty.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "dirty.txt"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "dirty.txt").write_text("changed", encoding="utf-8")
+
+        ctx = PreflightContext(root=tmp_path, mode=ExecutionMode.LIVE, skip_remote=True)
+        result = check_git_clean(ctx)
+        assert result.status == PreflightStatus.FAIL
+        assert DIRTY_TREE_BLOCK_MESSAGE in result.description
+
+        decision = SafetyGate().evaluate(PreflightReport(checks=[result]))
+        assert decision.status == DeploymentDecisionStatus.NO_GO
+
+    def test_dirty_tree_warns_on_live_with_override(self, tmp_path: Path):
+        from ifg_guardian.core.preflight.checks import check_git_clean, DIRTY_TREE_OVERRIDE_WARNING
+
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@test"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "dirty.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "dirty.txt"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+        (tmp_path / "dirty.txt").write_text("changed", encoding="utf-8")
+
+        ctx = PreflightContext(
+            root=tmp_path,
+            mode=ExecutionMode.LIVE,
+            skip_remote=True,
+            allow_dirty_build=True,
+        )
+        result = check_git_clean(ctx)
+        assert result.status == PreflightStatus.WARNING
+        assert DIRTY_TREE_OVERRIDE_WARNING in result.description

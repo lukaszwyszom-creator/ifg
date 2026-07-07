@@ -29,6 +29,10 @@ from ifg_guardian.modules.ifg_deploy_run import (  # noqa: E402
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployStepStatus  # noqa: E402
 from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, compose_blocked_by_step_failure, detect_blockers  # noqa: E402
 from ifg_guardian.plugins.ifg.release_plan.execution_plan import build_execution_plan  # noqa: E402
+from ifg_guardian.plugins.ifg.release_evaluate.models import (  # noqa: E402
+    ReleaseDecisionStatus,
+    ReleaseEvaluateState,
+)
 from ifg_guardian.plugins.ifg.release_plan.models import (  # noqa: E402
     BuildDecision,
     DeploymentRisk,
@@ -61,6 +65,17 @@ def _sample_release_plan(*, critical: bool = False) -> ReleasePlanState:
     return plan
 
 
+def _sample_release_evaluate(
+    *,
+    decision: ReleaseDecisionStatus = ReleaseDecisionStatus.READY_WITH_WARNINGS,
+) -> ReleaseEvaluateState:
+    return ReleaseEvaluateState(
+        status=decision,
+        required_actions=["backup", "rebuild"],
+        warnings=["warn"],
+    )
+
+
 class TestWorkflowRegistry:
     def test_deploy_run_registered(self):
         runtime = create_runtime()
@@ -69,8 +84,8 @@ class TestWorkflowRegistry:
             assert wf is not None
             assert wf.plugin == "ifg"
             assert wf.mutating is True
-            assert wf.depends_on == ["ifg.release.plan"]
-            assert len(wf.stages) == 7
+            assert wf.depends_on == ["ifg.release.plan", "ifg.release.evaluate"]
+            assert len(wf.stages) == 9
         finally:
             runtime.shutdown()
 
@@ -173,7 +188,10 @@ class TestReportRendering:
             workflow_type="ifg.deploy.run",
             plugin="ifg",
             execution_mode=ExecutionMode.DRY_RUN,
-            dependencies={"ifg.release.plan": {"outcome": "SUCCESS"}},
+            dependencies={
+                "ifg.release.plan": {"outcome": "SUCCESS"},
+                "ifg.release.evaluate": {"outcome": "SUCCESS"},
+            },
         )
         tx.mark_started()
         tx.mark_ended(state=WorkflowState.SUCCESS)
@@ -217,16 +235,42 @@ class TestDeployWorkflowIntegration:
             mode=ExecutionMode.LIVE,
             state_machine=WorkflowStateMachine(initial=WorkflowState.SUCCESS),
         )
+        evaluate = _sample_release_evaluate()
+        eval_tx = WorkflowTransaction(
+            workflow_id="eval-wf",
+            workflow_type="ifg.release.evaluate",
+            plugin="ifg",
+            execution_mode=ExecutionMode.LIVE,
+        )
+        eval_tx.release_evaluate = evaluate.to_dict()
+        eval_tx.mark_started()
+        eval_tx.mark_ended(state=WorkflowState.SUCCESS)
+        eval_ctx = WorkflowContext(
+            root=tmp_path,
+            workflow=WorkflowDefinition(id="ifg.release.evaluate", label="evaluate"),
+            transaction=eval_tx,
+            mode=ExecutionMode.LIVE,
+            state_machine=WorkflowStateMachine(initial=WorkflowState.SUCCESS),
+        )
 
         original_deps = ExecutionEngine._run_dependencies
 
         def fake_deps(self, ctx, workflow, *, mode, initial_data, _stack=None):
             if workflow.id != "ifg.deploy.run":
                 return original_deps(self, ctx, workflow, mode=mode, initial_data=initial_data, _stack=_stack)
-            ctx.data["dependency_contexts"] = {"ifg.release.plan": plan_ctx}
+            ctx.data["dependency_contexts"] = {
+                "ifg.release.plan": plan_ctx,
+                "ifg.release.evaluate": eval_ctx,
+            }
             ctx.transaction.dependencies["ifg.release.plan"] = {
                 "workflow_id": "plan-wf",
                 "workflow_type": "ifg.release.plan",
+                "outcome": "SUCCESS",
+                "state": "SUCCESS",
+            }
+            ctx.transaction.dependencies["ifg.release.evaluate"] = {
+                "workflow_id": "eval-wf",
+                "workflow_type": "ifg.release.evaluate",
                 "outcome": "SUCCESS",
                 "state": "SUCCESS",
             }
@@ -246,6 +290,7 @@ class TestDeployWorkflowIntegration:
 
         assert ctx.state_machine.state == WorkflowState.SUCCESS
         assert "ifg.release.plan" in ctx.transaction.dependencies
+        assert "ifg.release.evaluate" in ctx.transaction.dependencies
         assert len(subprocess_calls) == 0
 
         deploy = deploy_from_context(ctx)
@@ -257,6 +302,7 @@ class TestDeployWorkflowIntegration:
 
 class TestLiveDeploy:
     def _mock_deps(self, plan: ReleasePlanState):
+        is_blocked = plan.deployment_risk == DeploymentRisk.CRITICAL
         plan_tx = WorkflowTransaction(
             workflow_id="plan-wf",
             workflow_type="ifg.release.plan",
@@ -274,16 +320,46 @@ class TestLiveDeploy:
             mode=ExecutionMode.LIVE,
             state_machine=WorkflowStateMachine(initial=WorkflowState.SUCCESS),
         )
+        evaluate = _sample_release_evaluate(
+            decision=ReleaseDecisionStatus.READY_WITH_WARNINGS
+            if not is_blocked
+            else ReleaseDecisionStatus.PRODUCTION_BLOCKED
+        )
+        eval_tx = WorkflowTransaction(
+            workflow_id="eval-wf",
+            workflow_type="ifg.release.evaluate",
+            plugin="ifg",
+            execution_mode=ExecutionMode.LIVE,
+        )
+        eval_tx.release_evaluate = evaluate.to_dict()
+        eval_tx.mark_started()
+        eval_tx.mark_ended(state=WorkflowState.SUCCESS)
+        eval_ctx = WorkflowContext(
+            root=Path("."),
+            workflow=WorkflowDefinition(id="ifg.release.evaluate", label="evaluate"),
+            transaction=eval_tx,
+            mode=ExecutionMode.LIVE,
+            state_machine=WorkflowStateMachine(initial=WorkflowState.SUCCESS),
+        )
 
         original_deps = ExecutionEngine._run_dependencies
 
         def fake_deps(self, ctx, workflow, *, mode, initial_data, _stack=None):
             if workflow.id != "ifg.deploy.run":
                 return original_deps(self, ctx, workflow, mode=mode, initial_data=initial_data, _stack=_stack)
-            ctx.data["dependency_contexts"] = {"ifg.release.plan": plan_ctx}
+            ctx.data["dependency_contexts"] = {
+                "ifg.release.plan": plan_ctx,
+                "ifg.release.evaluate": eval_ctx,
+            }
             ctx.transaction.dependencies["ifg.release.plan"] = {
                 "workflow_id": "plan-wf",
                 "workflow_type": "ifg.release.plan",
+                "outcome": "SUCCESS",
+                "state": "SUCCESS",
+            }
+            ctx.transaction.dependencies["ifg.release.evaluate"] = {
+                "workflow_id": "eval-wf",
+                "workflow_type": "ifg.release.evaluate",
                 "outcome": "SUCCESS",
                 "state": "SUCCESS",
             }
@@ -296,6 +372,7 @@ class TestLiveDeploy:
             ctx = execute_ifg_deploy_run(
                 dry_run=False,
                 assume_yes=True,
+                skip_preflight=True,
                 output_format="none",
                 root=tmp_path,
             )
@@ -303,21 +380,30 @@ class TestLiveDeploy:
         assert ctx.state_machine.state == WorkflowState.FAILED
         deploy = deploy_from_context(ctx)
         assert deploy.blockers
+        assert deploy.release_decision == ReleaseDecisionStatus.PRODUCTION_BLOCKED.value
         assert deploy.dry_run is False
 
     def test_live_executes_with_mocked_executors(self, tmp_path: Path):
         plan = _sample_release_plan()
         fake_result = MagicMock(ok=True, output="ok", simulated=False, error="", data={})
 
+        def git_side_effect(*args: str) -> str:
+            if len(args) >= 2 and args[0] == "status" and args[1] == "--porcelain":
+                return ""
+            if args[:2] == ("rev-parse", "--short") or args[:1] == ("rev-parse",):
+                return "abc1234"
+            return ""
+
         with (
             patch.object(ExecutionEngine, "_run_dependencies", self._mock_deps(plan)),
-            patch("ifg_guardian.plugins.ifg.deploy_run.stages.git", return_value="abc1234"),
+            patch("ifg_guardian.plugins.ifg.deploy_run.stages.git", side_effect=git_side_effect),
             patch.object(SSHExecutor, "capture_rollback_snapshot", return_value={"images_before": "img:1", "alembic_before": "rev1"}),
             patch.object(IntentExecutor, "execute", return_value=fake_result),
         ):
             ctx = execute_ifg_deploy_run(
                 dry_run=False,
                 assume_yes=True,
+                skip_preflight=True,
                 output_format="none",
                 root=tmp_path,
             )
@@ -325,6 +411,7 @@ class TestLiveDeploy:
         assert ctx.state_machine.state == WorkflowState.SUCCESS
         deploy = deploy_from_context(ctx)
         assert deploy.dry_run is False
+        assert deploy.release_decision == ReleaseDecisionStatus.READY_WITH_WARNINGS.value
         executed = [s for s in deploy.steps if s.status == DeployStepStatus.EXECUTED]
         assert len(executed) >= 5
         assert deploy.rollback_point.commit_before == "abc1234"

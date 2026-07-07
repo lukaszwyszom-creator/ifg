@@ -25,10 +25,13 @@ def execute_ifg_deploy_run(
     *,
     dry_run: bool = False,
     assume_yes: bool = False,
+    allow_dirty_build: bool = False,
+    skip_preflight: bool = False,
     output_format: str = "terminal",
     report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
     root: Path | None = None,
 ):
     if not dry_run and not assume_yes:
@@ -51,6 +54,9 @@ def execute_ifg_deploy_run(
                 "remote_host": remote_host,
                 "remote_path": remote_path,
                 "assume_yes": assume_yes,
+                "allow_dirty_build": allow_dirty_build,
+                "skip_preflight": skip_preflight,
+                "progress_enabled": progress_enabled,
             },
             plugin_registry=runtime.plugin_registry,
         )
@@ -68,10 +74,13 @@ def run_ifg_deploy_run(
     *,
     dry_run: bool = False,
     assume_yes: bool = False,
+    allow_dirty_build: bool = False,
+    skip_preflight: bool = False,
     output_format: str = "terminal",
     report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
 ) -> int:
     if not dry_run and not assume_yes:
         print(LIVE_REQUIRES_YES)
@@ -81,10 +90,13 @@ def run_ifg_deploy_run(
         ctx = execute_ifg_deploy_run(
             dry_run=dry_run,
             assume_yes=assume_yes,
+            allow_dirty_build=allow_dirty_build,
+            skip_preflight=skip_preflight,
             output_format=output_format,
             report_path=report_path,
             remote_host=remote_host,
             remote_path=remote_path,
+            progress_enabled=progress_enabled,
         )
     except RuntimeError as exc:
         print(f"\n❌ Deploy run failed: {exc}")

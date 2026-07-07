@@ -93,6 +93,14 @@ def check_git_branch(ctx: PreflightContext) -> PreflightCheckResult:
     )
 
 
+DIRTY_TREE_BLOCK_MESSAGE = (
+    "Production deployment blocked. Working tree contains uncommitted changes."
+)
+DIRTY_TREE_OVERRIDE_WARNING = (
+    "Production build from dirty working tree (--allow-dirty-build)."
+)
+
+
 def check_git_clean(ctx: PreflightContext) -> PreflightCheckResult:
     started = perf_counter()
     try:
@@ -114,13 +122,27 @@ def check_git_clean(ctx: PreflightContext) -> PreflightCheckResult:
         return _result("git.clean", "Git clean", PreflightStatus.PASS, "working tree clean", started=started)
 
     lines = [ln for ln in porcelain.splitlines() if ln.strip()][:5]
+    if ctx.mode == ExecutionMode.LIVE and not ctx.allow_dirty_build:
+        return _result(
+            "git.clean",
+            "Git clean",
+            PreflightStatus.FAIL,
+            DIRTY_TREE_BLOCK_MESSAGE,
+            started=started,
+            details={"sample": lines},
+        )
+
+    status = PreflightStatus.WARNING
+    description = DIRTY_TREE_OVERRIDE_WARNING if ctx.allow_dirty_build else (
+        f"uncommitted changes ({len(porcelain.splitlines())} line(s))"
+    )
     return _result(
         "git.clean",
         "Git clean",
-        PreflightStatus.WARNING,
-        f"uncommitted changes ({len(porcelain.splitlines())} line(s))",
+        status,
+        description,
         started=started,
-        details={"sample": lines},
+        details={"sample": lines, "allow_dirty_build": ctx.allow_dirty_build},
     )
 
 

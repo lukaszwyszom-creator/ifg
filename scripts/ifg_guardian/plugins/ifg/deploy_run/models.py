@@ -50,6 +50,10 @@ class DeployStep:
     duration_ms: int = 0
     output: str = ""
     error: str = ""
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    failure_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +69,10 @@ class DeployStep:
             "duration_ms": self.duration_ms,
             "output": self.output,
             "error": self.error,
+            "exit_code": self.exit_code,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "failure_reason": self.failure_reason,
         }
 
     @classmethod
@@ -82,12 +90,18 @@ class DeployStep:
             duration_ms=data.get("duration_ms", 0),
             output=data.get("output", ""),
             error=data.get("error", ""),
+            exit_code=data.get("exit_code"),
+            stdout=data.get("stdout", ""),
+            stderr=data.get("stderr", ""),
+            failure_reason=data.get("failure_reason", ""),
         )
 
 
 @dataclass
 class DeployRunState:
     release_plan_workflow_id: str = ""
+    release_evaluate_workflow_id: str = ""
+    release_decision: str = ""
     deployment_risk: str = ""
     doctor_status: str = ""
     blockers: list[str] = field(default_factory=list)
@@ -98,11 +112,15 @@ class DeployRunState:
     containers: str = ""
     health: str = ""
     warnings: list[str] = field(default_factory=list)
+    failed_step: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, Any] = field(default_factory=dict)
+    allow_dirty_build_override: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "release_plan_workflow_id": self.release_plan_workflow_id,
+            "release_evaluate_workflow_id": self.release_evaluate_workflow_id,
+            "release_decision": self.release_decision,
             "deployment_risk": self.deployment_risk,
             "doctor_status": self.doctor_status,
             "blockers": list(self.blockers),
@@ -113,13 +131,17 @@ class DeployRunState:
             "containers": self.containers,
             "health": self.health,
             "warnings": list(self.warnings),
+            "failed_step": dict(self.failed_step),
             "summary": dict(self.summary),
+            "allow_dirty_build_override": self.allow_dirty_build_override,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeployRunState:
         return cls(
             release_plan_workflow_id=data.get("release_plan_workflow_id", ""),
+            release_evaluate_workflow_id=data.get("release_evaluate_workflow_id", ""),
+            release_decision=data.get("release_decision", ""),
             deployment_risk=data.get("deployment_risk", ""),
             doctor_status=data.get("doctor_status", ""),
             blockers=list(data.get("blockers", [])),
@@ -130,5 +152,7 @@ class DeployRunState:
             containers=data.get("containers", ""),
             health=data.get("health", ""),
             warnings=list(data.get("warnings", [])),
+            failed_step=dict(data.get("failed_step", {})),
             summary=dict(data.get("summary", {})),
+            allow_dirty_build_override=bool(data.get("allow_dirty_build_override", False)),
         )

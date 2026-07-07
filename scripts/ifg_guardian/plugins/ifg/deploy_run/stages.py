@@ -4,7 +4,8 @@ from pathlib import Path
 from time import perf_counter
 
 from ifg_guardian.config import DEFAULT_REMOTE_PATH, TARGET_BRANCH
-from ifg_guardian.core.git import git
+from ifg_guardian.core.git import git, porcelain_is_dirty
+from ifg_guardian.core.preflight.checks import DIRTY_TREE_BLOCK_MESSAGE, DIRTY_TREE_OVERRIDE_WARNING
 from ifg_guardian.core.workflow.context import WorkflowContext
 from ifg_guardian.core.workflow.executors.context import DeployExecutorContext
 from ifg_guardian.core.workflow.intents import LocalExecIntent, NoOpIntent
@@ -14,9 +15,14 @@ from ifg_guardian.core.workflow.stage import BuildReason, Stage, StagePlan, Stag
 from ifg_guardian.core.workflow.state import WorkflowState
 from ifg_guardian.core.workflow.transaction import ArtifactRecord
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployRunState, DeployStepStatus, RollbackPoint
-from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, compose_blocked_by_step_failure, detect_blockers
+from ifg_guardian.plugins.ifg.deploy_run.pipeline import build_deploy_pipeline, compose_blocked_by_step_failure
 from ifg_guardian.plugins.ifg.deploy_run.report import render_json, render_markdown
-from ifg_guardian.plugins.ifg.deploy_run.service import get_deploy_state, get_release_plan_dependency
+from ifg_guardian.plugins.ifg.deploy_run.service import (
+    get_deploy_state,
+    get_release_evaluate_dependency,
+    get_release_plan_dependency,
+)
+from ifg_guardian.plugins.ifg.release_evaluate.models import ReleaseDecisionStatus
 from ifg_guardian.reporting import default_report_path, write_report
 
 
@@ -45,6 +51,25 @@ class InitStage(_DeployStage):
             )
 
         state = get_deploy_state(ctx)
+        allow_dirty = bool(ctx.data.get("allow_dirty_build"))
+        state.allow_dirty_build_override = allow_dirty
+
+        if not dry_run:
+            try:
+                porcelain = git("status", "--porcelain")
+            except RuntimeError as exc:
+                return StageResult(status=StageStatus.FAIL, message=f"cannot read git status: {exc}")
+
+            if porcelain_is_dirty(porcelain):
+                if allow_dirty:
+                    state.warnings.append(DIRTY_TREE_OVERRIDE_WARNING)
+                else:
+                    state.blockers = [DIRTY_TREE_BLOCK_MESSAGE]
+                    return StageResult(
+                        status=StageStatus.FAIL,
+                        message=DIRTY_TREE_BLOCK_MESSAGE,
+                    )
+
         if not dry_run:
             try:
                 local_commit = git("rev-parse", "--short", "HEAD")
@@ -131,6 +156,25 @@ class ReleasePlanStage(_DeployStage):
         )
 
 
+class ReleaseEvaluateStage(_DeployStage):
+    id = "release_evaluate"
+    label = "Load release evaluate decision"
+
+    def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
+        state = get_deploy_state(ctx)
+        evaluate = get_release_evaluate_dependency(ctx)
+        dep_ctx = ctx.data["dependency_contexts"]["ifg.release.evaluate"]
+        state.release_evaluate_workflow_id = dep_ctx.transaction.workflow_id
+        state.release_decision = evaluate.status.value
+        ctx.data["release_evaluate_state"] = evaluate
+        if evaluate.status == ReleaseDecisionStatus.READY_WITH_OVERRIDE:
+            state.allow_dirty_build_override = bool(ctx.data.get("allow_dirty_build"))
+        return StageResult(
+            status=StageStatus.PASS,
+            message=f"release evaluate loaded (decision={evaluate.status.value})",
+        )
+
+
 class BlockerStage(_DeployStage):
     id = "blocker"
     label = "Detect deployment blockers"
@@ -141,8 +185,33 @@ class BlockerStage(_DeployStage):
 
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         state = get_deploy_state(ctx)
-        plan = ctx.data["release_plan_state"]
-        state.blockers = detect_blockers(plan)
+        evaluate = ctx.data["release_evaluate_state"]
+        # Single source of deployment decision: release evaluate / policy engine.
+        if evaluate.status == ReleaseDecisionStatus.PRODUCTION_BLOCKED:
+            state.blockers = [
+                f"Release decision is {evaluate.status.value}",
+                *[f"Policy blocker: {b}" for b in evaluate.blockers[:5]],
+            ]
+        elif evaluate.status == ReleaseDecisionStatus.STAGING_ONLY:
+            state.blockers = [
+                "Release decision requires STAGING_ONLY before deploy run",
+            ]
+        elif evaluate.status == ReleaseDecisionStatus.READY_WITH_OVERRIDE:
+            if not bool(ctx.data.get("allow_dirty_build")):
+                state.blockers = [
+                    "Release decision requires explicit --allow-dirty-build for dirty working tree",
+                ]
+            else:
+                state.allow_dirty_build_override = True
+                state.warnings.append(DIRTY_TREE_OVERRIDE_WARNING)
+        else:
+            state.blockers = []
+
+        if evaluate.required_actions:
+            state.warnings.extend(
+                [f"ACTION_REQUIRED: {item}" for item in evaluate.required_actions]
+            )
+
         if state.blockers:
             status = StageStatus.FAIL if ctx.mode == ExecutionMode.LIVE else StageStatus.WARN
             return StageResult(
@@ -210,6 +279,7 @@ class SimulateExecutionStage(Stage):
         failed_count = 0
         intent_index = 0
         block_compose = False
+        state.failed_step = {}
 
         for step in state.steps:
             if step.skipped or not step.required:
@@ -229,6 +299,9 @@ class SimulateExecutionStage(Stage):
                 step.duration_ms = int((perf_counter() - started) * 1000)
                 step.output = result.output
                 step.error = result.error
+                step.exit_code = result.data.get("exit_code")
+                step.stdout = str(result.data.get("stdout", ""))
+                step.stderr = str(result.data.get("stderr", ""))
 
                 if result.simulated or dry_run:
                     step.status = DeployStepStatus.SIMULATED
@@ -244,7 +317,19 @@ class SimulateExecutionStage(Stage):
                 else:
                     step.status = DeployStepStatus.FAILED
                     failed_count += 1
+                    step.failure_reason = result.error or "step command failed"
                     state.warnings.append(f"{step.action} failed: {result.error or result.output}")
+                    if not state.failed_step:
+                        state.failed_step = {
+                            "step": step.action,
+                            "command": step.command,
+                            "exit_code": step.exit_code,
+                            "stdout": step.stdout,
+                            "stderr": step.stderr,
+                            "failure_reason": step.failure_reason,
+                            "root_cause": (step.stderr or step.error or step.output or "unknown").strip(),
+                            "duration_ms": step.duration_ms,
+                        }
                     if compose_blocked_by_step_failure(step.action):
                         block_compose = True
             else:
@@ -276,6 +361,7 @@ class SummaryStage(_DeployStage):
         state = get_deploy_state(ctx)
         state.summary = {
             "mode": "DRY-RUN" if state.dry_run else "LIVE",
+            "release_decision": state.release_decision,
             "deployment_risk": state.deployment_risk,
             "blockers": len(state.blockers),
             "steps_total": len(state.steps),

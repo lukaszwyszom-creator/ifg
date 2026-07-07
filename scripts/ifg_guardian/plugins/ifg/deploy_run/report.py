@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
@@ -26,7 +27,11 @@ def render_markdown(state: DeployRunState, *, transaction: WorkflowTransaction |
         f"**Deployment risk:** `{state.deployment_risk}`  ",
         f"**Doctor status:** `{state.doctor_status}`  ",
         f"**Release plan:** `{state.release_plan_workflow_id}`  ",
+        f"**Release evaluate:** `{state.release_evaluate_workflow_id}`  ",
+        f"**Release decision:** `{state.release_decision}`  ",
     ]
+    if state.allow_dirty_build_override:
+        lines.append("**Dirty tree override:** `YES` (--allow-dirty-build)  ")
     if transaction is not None:
         lines.append(f"**Workflow ID:** `{transaction.workflow_id}`  ")
         lines.append(f"**Duration:** {transaction.duration_ms} ms  ")
@@ -52,17 +57,44 @@ def render_markdown(state: DeployRunState, *, transaction: WorkflowTransaction |
             lines.append(f"- ⚠ {warning}")
 
     lines.extend(["", "## Execution pipeline", ""])
-    lines.append("| # | Action | Required | Status | Duration | Reason | Command |")
-    lines.append("|---|--------|----------|--------|----------|--------|---------|")
+    lines.append("| # | Action | Required | Status | Duration | Exit | Reason | Command |")
+    lines.append("|---|--------|----------|--------|----------|------|--------|---------|")
     for step in state.steps:
         req = "yes" if step.required else "no"
         status = step.status.value
         if step.skipped:
             status = "SKIPPED"
+        exit_code = "" if step.exit_code is None else str(step.exit_code)
         lines.append(
-            f"| {step.order} | {step.action} | {req} | {status} | {step.duration_ms}ms "
+            f"| {step.order} | {step.action} | {req} | {status} | {step.duration_ms}ms | {exit_code} "
             f"| {step.reason} | `{step.command}` |"
         )
+
+    if state.failed_step:
+        lines.extend(["", "## FAILED STEP", ""])
+        lines.append(f"**Step:** `{state.failed_step.get('step', '')}`")
+        lines.append("")
+        lines.append("**Command:**")
+        lines.append("")
+        lines.append(f"`{state.failed_step.get('command', '')}`")
+        lines.append("")
+        lines.append(f"**Exit Code:** `{state.failed_step.get('exit_code')}`")
+        lines.append("")
+        lines.append("**STDERR:**")
+        lines.append("")
+        lines.append("```")
+        lines.append(str(state.failed_step.get("stderr", "")).strip())
+        lines.append("```")
+        lines.append("")
+        lines.append("**STDOUT:**")
+        lines.append("")
+        lines.append("```")
+        lines.append(str(state.failed_step.get("stdout", "")).strip())
+        lines.append("```")
+        lines.append("")
+        lines.append(f"**Failure Reason:** {state.failed_step.get('failure_reason', '')}")
+        lines.append("")
+        lines.append(f"**ROOT CAUSE:** {state.failed_step.get('root_cause', '')}")
 
     if state.executed_commands:
         lines.extend(["", "## Executed commands", ""])
@@ -78,6 +110,11 @@ def render_markdown(state: DeployRunState, *, transaction: WorkflowTransaction |
     lines.extend(["", "## Summary", ""])
     for key, value in state.summary.items():
         lines.append(f"- **{key}:** {value}")
+
+    if transaction is not None:
+        timeline = transaction.audit.get("progress_timeline")
+        lines.extend(render_timeline_section(timeline))
+
     lines.append("")
     return "\n".join(lines)
 
@@ -101,6 +138,8 @@ def render_terminal(state: DeployRunState, *, transaction: WorkflowTransaction) 
         f"Deployment risk: {state.deployment_risk}",
         f"Doctor status: {state.doctor_status}",
         f"Release plan: {state.release_plan_workflow_id}",
+        f"Release evaluate: {state.release_evaluate_workflow_id}",
+        f"Release decision: {state.release_decision}",
         "",
         "Dependencies:",
     ]
@@ -136,12 +175,35 @@ def render_terminal(state: DeployRunState, *, transaction: WorkflowTransaction) 
             label = "OPTIONAL"
         lines.append(f"  {step.order}. [{label}] {step.action}")
         lines.append(f"      Why: {step.reason}")
+        if step.exit_code is not None:
+            lines.append(f"      Exit code: {step.exit_code}")
         if not step.skipped:
             verb = "Would run" if state.dry_run else "Ran"
             lines.append(f"      {verb}: {step.command}")
             if step.output and step.status in (DeployStepStatus.EXECUTED, DeployStepStatus.SIMULATED):
                 preview = step.output[:120].replace("\n", " ")
                 lines.append(f"      Output: {preview}")
+            if step.status == DeployStepStatus.FAILED:
+                lines.append(f"      Failure: {step.failure_reason or step.error}")
+
+    if state.failed_step:
+        lines.extend([
+            "",
+            "FAILED STEP:",
+            f"  {state.failed_step.get('step', '')}",
+            "",
+            "COMMAND:",
+            f"  {state.failed_step.get('command', '')}",
+            "",
+            "EXIT CODE:",
+            f"  {state.failed_step.get('exit_code')}",
+            "",
+            "STDERR:",
+            f"  {state.failed_step.get('stderr', '')}",
+            "",
+            "ROOT CAUSE:",
+            f"  {state.failed_step.get('root_cause', '')}",
+        ])
 
     lines.extend(["", "=" * 40])
     required = sum(1 for s in state.steps if s.required and not s.skipped)
@@ -164,8 +226,6 @@ def render_terminal(state: DeployRunState, *, transaction: WorkflowTransaction) 
 
 def exit_code_for_deploy(state: DeployRunState) -> int:
     if state.blockers:
-        return 1
-    if state.deployment_risk == "CRITICAL":
         return 1
     if any(s.status == DeployStepStatus.FAILED for s in state.steps):
         return 1

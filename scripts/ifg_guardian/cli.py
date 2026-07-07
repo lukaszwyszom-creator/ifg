@@ -15,6 +15,7 @@ from ifg_guardian.modules.doctor import run_doctor
 from ifg_guardian.modules.ifg_container_cutover import run_ifg_container_cutover, run_ifg_container_cutover_rollback
 from ifg_guardian.modules.ifg_deploy_run import run_ifg_deploy_run
 from ifg_guardian.modules.ifg_doctor import run_ifg_doctor
+from ifg_guardian.modules.ifg_release_evaluate import run_ifg_release_evaluate, run_ifg_release_explain
 from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
 from ifg_guardian.modules.frontend import run_frontend_check
 from ifg_guardian.modules.ksef import run_ksef_check, run_ksef_sync
@@ -24,6 +25,40 @@ from ifg_guardian.modules.repo_audit import run_repo_audit
 from ifg_guardian.modules.repo_eol_check import run_repo_eol_check
 from ifg_guardian.modules.plugins import run_plugin_list
 from ifg_guardian.modules.workflow import run_workflow
+
+PROGRESS_HELP = (
+    "Emit [GWO_PROGRESS] live progress logs to stderr "
+    "(default: enabled for long workflows such as deploy/recovery)"
+)
+
+
+def _add_progress_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=PROGRESS_HELP,
+    )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Fullscreen live terminal dashboard (requires rich; implies --progress)",
+    )
+
+
+def _run_with_display(run_fn, args, **kwargs) -> int:
+    if getattr(args, "dashboard", False):
+        if getattr(args, "progress", None) is False:
+            print("Cannot combine --dashboard with --no-progress.", file=sys.stderr)
+            return 2
+        from ifg_guardian.core.dashboard.session import run_with_live_dashboard
+
+        kwargs["progress_enabled"] = True
+        return run_with_live_dashboard(lambda: run_fn(**kwargs))
+
+    kwargs.update(_progress_kw(args))
+    return run_fn(**kwargs)
+
 
 LEGACY_FLAGS = {
     "--deploy-check",
@@ -60,7 +95,7 @@ def _handle_legacy(argv: list[str]) -> int | None:
     """Map legacy flags to v3 commands. Returns None if not legacy mode."""
     if not argv:
         return None
-    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "version", "-h", "--help"):
+    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "release", "version", "-h", "--help"):
         return None
     if not any(a in LEGACY_FLAGS or a.startswith("--remote") for a in argv):
         if not any(a.startswith("-") for a in argv):
@@ -178,6 +213,27 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Run aggregate read-only checks (legacy → ifg.doctor)")
     sub.add_parser("version", help="Show Guardian version")
 
+    rel = sub.add_parser("release", help="Release Engine decision workflows")
+    rel_sub = rel.add_subparsers(dest="action", required=True)
+    rel_eval = rel_sub.add_parser("evaluate", help="Evaluate deploy readiness (decision only)")
+    rel_eval.add_argument("--fetch", action="store_true", help="git fetch before doctor dependency")
+    rel_eval.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
+    rel_eval.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
+    rel_eval.add_argument("--remote-host", default=None)
+    rel_eval.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    rel_eval.add_argument("--report", default=None, help="Report path")
+    rel_eval.add_argument(
+        "--allow-dirty-build",
+        action="store_true",
+        help="Evaluate with explicit dirty-tree build override",
+    )
+    _add_progress_args(rel_eval)
+    rel_explain = rel_sub.add_parser("explain", help="Explain active release policy rules")
+    rel_explain.add_argument("--json", action="store_true", help="Print policy config as JSON")
+    rel_sub.add_parser("stage", help="Planned: stage workflow (not implemented yet)")
+    rel_sub.add_parser("approve", help="Planned: approval workflow (not implemented yet)")
+    rel_sub.add_parser("production", help="Planned: production workflow (not implemented yet)")
+
     ifg = sub.add_parser("ifg", help="IFG domain workflows")
     ifg_sub = ifg.add_subparsers(dest="action", required=True)
     ifg_doc = ifg_sub.add_parser("doctor", help="IFG environment readiness diagnosis")
@@ -188,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_doc.add_argument("--remote-host", default=None)
     ifg_doc.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     ifg_doc.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DOCTOR_*.md)")
+    _add_progress_args(ifg_doc)
 
     ifg_rel = ifg_sub.add_parser("release", help="IFG release workflows")
     ifg_rel_sub = ifg_rel.add_subparsers(dest="release_action", required=True)
@@ -198,17 +255,25 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_plan.add_argument("--remote-host", default=None)
     ifg_plan.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     ifg_plan.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_RELEASE_PLAN_*.md)")
+    _add_progress_args(ifg_plan)
 
     ifg_dep = ifg_sub.add_parser("deploy", help="IFG deploy workflows")
     ifg_dep_sub = ifg_dep.add_subparsers(dest="deploy_action", required=True)
     ifg_dep_run = ifg_dep_sub.add_parser("run", help="Run IFG deploy (LIVE requires --yes)")
     ifg_dep_run.add_argument("--dry-run", action="store_true", help="Simulate deploy pipeline")
+    ifg_dep_run.add_argument("--plan", action="store_true", help="Alias for --dry-run (no mutations)")
     ifg_dep_run.add_argument("--yes", action="store_true", help="Confirm LIVE deploy")
+    ifg_dep_run.add_argument(
+        "--allow-dirty-build",
+        action="store_true",
+        help="Allow production build/deploy from dirty working tree (logged override)",
+    )
     ifg_dep_run.add_argument("--json", action="store_true", help="JSON report from WorkflowTransaction")
     ifg_dep_run.add_argument("--markdown", action="store_true", help="Markdown report from WorkflowTransaction")
     ifg_dep_run.add_argument("--remote-host", default=None)
     ifg_dep_run.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     ifg_dep_run.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DEPLOY_RUN_*.md)")
+    _add_progress_args(ifg_dep_run)
 
     ifg_cut = ifg_sub.add_parser("cutover", help="Container Manager cutover (project ifg)")
     ifg_cut_sub = ifg_cut.add_subparsers(dest="cutover_action", required=True)
@@ -229,6 +294,7 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_cut_run.add_argument("--remote-host", default=None)
     ifg_cut_run.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
     ifg_cut_run.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_CONTAINER_CUTOVER_*.md)")
+    _add_progress_args(ifg_cut_run)
     ifg_cut_rb = ifg_cut_sub.add_parser("rollback", help="Rollback to pre-cutover compose project docker")
     ifg_cut_rb.add_argument("--dry-run", action="store_true")
     ifg_cut_rb.add_argument("--yes", action="store_true", help="Confirm LIVE rollback")
@@ -241,12 +307,18 @@ def build_parser() -> argparse.ArgumentParser:
     wf_run.add_argument("workflow_id", help="Workflow id (e.g. core.ping)")
     wf_run.add_argument("--dry-run", action="store_true", help="Simulate mutating intents")
     wf_run.add_argument("--plan", action="store_true", help="Plan mode (same pipeline as dry-run)")
+    _add_progress_args(wf_run)
 
     plugin = sub.add_parser("plugin", help="Plugin management")
     plugin_sub = plugin.add_subparsers(dest="action", required=True)
     plugin_sub.add_parser("list", help="List registered plugins")
 
     return parser
+
+
+def _progress_kw(args) -> dict:
+    progress = getattr(args, "progress", None)
+    return {"progress_enabled": progress} if progress is not None else {}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -337,13 +409,37 @@ def main(argv: list[str] | None = None) -> int:
     if domain == "doctor":
         return run_doctor(do_fetch=False)
 
+    if domain == "release":
+        if args.action == "evaluate":
+            if args.json and args.markdown:
+                print("Use either --json or --markdown, not both.", file=sys.stderr)
+                return 2
+            output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+            report = Path(args.report) if args.report else None
+            return _run_with_display(
+                run_ifg_release_evaluate,
+                args,
+                do_fetch=args.fetch,
+                output_format=output_format,
+                report_path=report,
+                remote_host=host,
+                remote_path=args.remote_path,
+                allow_dirty_build=args.allow_dirty_build,
+            )
+        if args.action == "explain":
+            return run_ifg_release_explain(output_format="json" if args.json else "terminal")
+        print(f"release {args.action} not implemented yet", file=sys.stderr)
+        return 2
+
     if domain == "ifg" and args.action == "doctor":
         if args.json and args.markdown:
             print("Use either --json or --markdown, not both.", file=sys.stderr)
             return 2
         output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
         report = Path(args.report) if args.report else None
-        return run_ifg_doctor(
+        return _run_with_display(
+            run_ifg_doctor,
+            args,
             do_fetch=args.fetch,
             dry_run=args.dry_run,
             output_format=output_format,
@@ -358,7 +454,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
         report = Path(args.report) if args.report else None
-        return run_ifg_release_plan(
+        return _run_with_display(
+            run_ifg_release_plan,
+            args,
             do_fetch=args.fetch,
             output_format=output_format,
             report_path=report,
@@ -372,9 +470,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         output_format = "json" if args.json else "markdown" if args.markdown else "terminal"
         report = Path(args.report) if args.report else None
-        return run_ifg_deploy_run(
-            dry_run=args.dry_run,
+        return _run_with_display(
+            run_ifg_deploy_run,
+            args,
+            dry_run=args.dry_run or args.plan,
             assume_yes=args.yes,
+            allow_dirty_build=args.allow_dirty_build,
             output_format=output_format,
             report_path=report,
             remote_host=host,
@@ -384,7 +485,9 @@ def main(argv: list[str] | None = None) -> int:
     if domain == "ifg" and args.action == "cutover" and args.cutover_action == "run":
         output_format = "markdown" if args.json else "terminal"
         report = Path(args.report) if args.report else None
-        return run_ifg_container_cutover(
+        return _run_with_display(
+            run_ifg_container_cutover,
+            args,
             dry_run=args.dry_run,
             assume_yes=args.yes,
             confirm_functional=args.confirm_functional,
@@ -404,7 +507,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if domain == "workflow" and args.action == "run":
-        return run_workflow(args.workflow_id, dry_run=args.dry_run, plan=args.plan)
+        return _run_with_display(
+            run_workflow,
+            args,
+            workflow_id=args.workflow_id,
+            dry_run=args.dry_run,
+            plan=args.plan,
+        )
 
     if domain == "plugin" and args.action == "list":
         return run_plugin_list()

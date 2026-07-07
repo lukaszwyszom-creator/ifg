@@ -78,3 +78,4 @@ class PreflightContext:
     env_file: str = ".env.production"
     target_branch: str = "production"
     skip_remote: bool = False
+    allow_dirty_build: bool = False

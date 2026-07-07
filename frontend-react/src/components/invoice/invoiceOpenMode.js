@@ -52,7 +52,7 @@ export function resolveKsefState(status, invoice = {}) {
     return {
       kind: 'rejected',
       label: 'Odrzucona',
-      tooltip: 'Faktura odrzucona przez KSeF – sprawdź zakładkę Transmisje KSeF po szczegóły błędu',
+      tooltip: 'Faktura odrzucona przez KSeF – sprawdź zakładkę Monitor KSeF po szczegóły błędu',
     };
   }
   if (UPO_STATUSES.has(normalized)) {

@@ -61,6 +61,7 @@ class PreflightEngine:
         remote_host: str | None = None,
         remote_path: str | None = None,
         skip_remote: bool = False,
+        allow_dirty_build: bool = False,
     ) -> PreflightContext:
         return PreflightContext(
             root=root,
@@ -71,4 +72,5 @@ class PreflightEngine:
             env_file=".env.production",
             target_branch=TARGET_BRANCH,
             skip_remote=skip_remote,
+            allow_dirty_build=allow_dirty_build,
         )

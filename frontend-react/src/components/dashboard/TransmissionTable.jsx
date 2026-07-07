@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { transmissionsApi } from '../../api/transmissions';
+import { resolveTransmissionLoadError } from '../../utils/transmissionLoadError';
 import Table from '../common/Table';
 import StatusBadge from '../common/StatusBadge';
 import Pagination from '../common/Pagination';
@@ -46,13 +47,14 @@ export default function TransmissionTable() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [actionMsg, setActionMsg] = useState('');
+  const [warningsOnly, setWarningsOnly] = useState(false);
   const pollRef = useRef(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     setError('');
     try {
-      const res = await transmissionsApi.list(page, 20);
+      const res = await transmissionsApi.list(page, 20, warningsOnly);
       setData(res);
       // Zaplanuj następne odświeżenie jeśli są aktywne transmisje
       const hasActive = res.items.some((t) => !TERMINAL.has(t.status));
@@ -60,17 +62,36 @@ export default function TransmissionTable() {
         clearTimeout(pollRef.current);
         pollRef.current = setTimeout(() => load(true), POLL_INTERVAL_MS);
       }
-    } catch {
-      setError('Błąd ładowania transmisji');
+    } catch (err) {
+      setError(resolveTransmissionLoadError(err));
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [page]);
+  }, [page, warningsOnly]);
 
   useEffect(() => {
     load();
     return () => clearTimeout(pollRef.current);
   }, [load]);
+
+  const counters = data.items.reduce((acc, row) => {
+    const sev = String(row.severity || '').toUpperCase();
+    if (sev === 'SUCCESS') acc.success += 1;
+    else if (sev === 'WARNING') acc.warning += 1;
+    else if (sev === 'ERROR') acc.error += 1;
+    else if (sev === 'RUNNING') acc.running += 1;
+    return acc;
+  }, { success: 0, warning: 0, error: 0, running: 0 });
+
+  const renderMetadata = (value) => {
+    if (!value || typeof value !== 'object') return <span className={styles.dash}>—</span>;
+    return (
+      <details>
+        <summary className={styles.metaSummary}>Szczegóły</summary>
+        <pre className={styles.metaPre}>{JSON.stringify(value, null, 2)}</pre>
+      </details>
+    );
+  };
 
   const columns = [
     {
@@ -80,9 +101,25 @@ export default function TransmissionTable() {
       render: (v) => <span className={styles.mono}>{formatTransmissionMarker(v)}</span>,
     },
     {
+      key: 'operation_type',
+      label: 'Operacja',
+      width: 170,
+      render: (v) => v
+        ? <span className={styles.badge}>{v}</span>
+        : <span className={styles.dash}>—</span>,
+    },
+    {
+      key: 'severity',
+      label: 'Severity',
+      width: 110,
+      render: (v) => v
+        ? <StatusBadge status={String(v).toLowerCase()} />
+        : <span className={styles.dash}>—</span>,
+    },
+    {
       key: 'invoice_number_local',
-      label: 'Nr faktury',
-      width: 140,
+      label: 'Faktura',
+      width: 160,
       render: (v) => v
         ? <span className={styles.mono}>{v}</span>
         : <span className={styles.dash}>—</span>,
@@ -102,7 +139,20 @@ export default function TransmissionTable() {
     {
       key: 'ksef_reference_number',
       label: 'Ref KSeF',
+      width: 170,
       render: (v) => v ? <span className={styles.mono}>{v}</span> : <span className={styles.dash}>—</span>,
+    },
+    {
+      key: 'job_id',
+      label: 'Job',
+      width: 130,
+      render: (v) => v ? <span className={styles.mono}>{String(v).slice(0, 8)}</span> : <span className={styles.dash}>—</span>,
+    },
+    {
+      key: 'correlation_id',
+      label: 'Correlation',
+      width: 130,
+      render: (v) => v ? <span className={styles.mono}>{String(v).slice(0, 8)}</span> : <span className={styles.dash}>—</span>,
     },
     {
       key: 'error_message',
@@ -110,6 +160,11 @@ export default function TransmissionTable() {
       render: (v) => v
         ? <span className={styles.errText} title={v}>{v.length > 50 ? v.slice(0, 50) + '…' : v}</span>
         : <span className={styles.dash}>—</span>,
+    },
+    {
+      key: 'metadata_json',
+      label: 'Metadata',
+      render: (v) => renderMetadata(v),
     },
     {
       key: '_actions',
@@ -129,15 +184,34 @@ export default function TransmissionTable() {
   return (
     <div>
       <div className={styles.toolbar}>
-        <span className={styles.title}>Transmisje KSeF</span>
-        <button
-          className="btn btn-ghost btn-sm"
-          disabled={loading}
-          onClick={() => load()}
-          title="Odśwież"
-        >
-          ↻ Odśwież
-        </button>
+        <span className={styles.title}>Monitor KSeF</span>
+        <div className={styles.actions}>
+          <label className={styles.filterToggle}>
+            <input
+              type="checkbox"
+              checked={warningsOnly}
+              onChange={(e) => {
+                setWarningsOnly(e.target.checked);
+                setPage(1);
+              }}
+            />
+            Tylko błędy i ostrzeżenia
+          </label>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled={loading}
+            onClick={() => load()}
+            title="Odśwież"
+          >
+            ↻ Odśwież
+          </button>
+        </div>
+      </div>
+      <div className={styles.counters}>
+        <span className={styles.counterSuccess}>Sukcesy: {counters.success}</span>
+        <span className={styles.counterWarning}>Ostrzeżenia: {counters.warning}</span>
+        <span className={styles.counterError}>Błędy: {counters.error}</span>
+        <span className={styles.counterRunning}>W toku: {counters.running}</span>
       </div>
 
       {error    && <div className="alert alert-error"   style={{ marginBottom: 10 }}>{error}</div>}
