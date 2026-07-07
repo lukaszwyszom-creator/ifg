@@ -32,6 +32,7 @@ from app.services.contractor_service import ContractorService
 from app.services.idempotency_service import IdempotencyService
 from app.services.invoice_service import InvoiceService
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.ksef_transmission_journal_service import KSeFTransmissionJournalService
 from app.services.ksef_sync_service import KSeFSyncService
 from app.services.payment_service import PaymentService
 from app.services.settings_service import SettingsService
@@ -125,9 +126,21 @@ def get_ksef_client() -> KSeFClient:
     )
 
 
+def get_ksef_transmission_journal_service(
+    session: Annotated[Session, Depends(get_db_session)],
+) -> KSeFTransmissionJournalService:
+    return KSeFTransmissionJournalService(
+        session=session,
+        transmission_repository=TransmissionRepository(session),
+    )
+
+
 def get_ksef_session_service(
     session: Annotated[Session, Depends(get_db_session)],
     audit_service: Annotated[AuditService, Depends(get_audit_service)],
+    journal_service: Annotated[
+        KSeFTransmissionJournalService, Depends(get_ksef_transmission_journal_service)
+    ],
 ) -> KSeFSessionService:
     return KSeFSessionService(
         session=session,
@@ -143,6 +156,7 @@ def get_ksef_session_service(
         ),
         audit_service=audit_service,
         invoice_repository=InvoiceRepository(session),
+        journal_service=journal_service,
     )
 
 
@@ -164,6 +178,9 @@ def get_transmission_service(
     ksef_session_service: Annotated[KSeFSessionService, Depends(get_ksef_session_service)],
     settings_service: Annotated[SettingsService, Depends(get_settings_service)],
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)],
+    journal_service: Annotated[
+        KSeFTransmissionJournalService, Depends(get_ksef_transmission_journal_service)
+    ],
 ) -> TransmissionService:
     return TransmissionService(
         session=session,
@@ -174,6 +191,7 @@ def get_transmission_service(
         ksef_session_service=ksef_session_service,
         settings_service=settings_service,
         invoice_service=invoice_service,
+        journal_service=journal_service,
     )
 
 

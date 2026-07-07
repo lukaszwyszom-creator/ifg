@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
-from app.domain.enums import InvoiceStatus, TransmissionStatus
+from app.domain.enums import KSeFOperationType, KSeFSeverity, InvoiceStatus, TransmissionStatus
 from app.domain.exceptions import InvalidInvoiceError, KSeFNotConnectedError
 from app.integrations.ksef.client import KSeFClient, KSeFClientError, KSeFSessionExpiredError
 from app.integrations.ksef.exceptions import KSeFMappingError
@@ -57,6 +57,8 @@ class SubmitInvoiceJobHandler:
 
     def _mark_processing(self, transmission, now: datetime) -> None:
         transmission.status = TransmissionStatus.PROCESSING
+        transmission.operation_type = KSeFOperationType.SALE_SEND.value
+        transmission.severity = KSeFSeverity.RUNNING.value
         transmission.started_at = now
 
     def _load_invoice_or_mark_permanent_failure(
@@ -143,6 +145,8 @@ class SubmitInvoiceJobHandler:
         now: datetime,
     ) -> None:
         transmission.status = TransmissionStatus.SUBMITTED
+        transmission.operation_type = KSeFOperationType.SALE_STATUS.value
+        transmission.severity = KSeFSeverity.INFO.value
         transmission.external_reference = send_result.reference_number
         transmission.xml_content = xml_bytes
         transmission.finished_at = datetime.now(UTC)
@@ -162,6 +166,8 @@ class SubmitInvoiceJobHandler:
     ) -> None:
         now = datetime.now(UTC)
         transmission.status = TransmissionStatus.FAILED_RETRYABLE
+        transmission.operation_type = KSeFOperationType.ERROR.value
+        transmission.severity = KSeFSeverity.WARNING.value
         transmission.error_code = error_code
         transmission.error_message = error_message[:512]
         transmission.finished_at = now
@@ -180,6 +186,8 @@ class SubmitInvoiceJobHandler:
     ) -> None:
         now = datetime.now(UTC)
         transmission.status = TransmissionStatus.FAILED_PERMANENT
+        transmission.operation_type = KSeFOperationType.ERROR.value
+        transmission.severity = KSeFSeverity.ERROR.value
         transmission.error_code = error_code
         transmission.error_message = error_message[:512]
         transmission.finished_at = now
@@ -211,6 +219,8 @@ class SubmitInvoiceJobHandler:
         retry_at = now + backoff
         transmission.attempt_no += 1
         transmission.status = TransmissionStatus.FAILED_TEMPORARY
+        transmission.operation_type = KSeFOperationType.RETRY.value
+        transmission.severity = KSeFSeverity.PAUSED.value
         transmission.next_retry_at = retry_at
         transmission.error_code = error_code
         transmission.error_message = error_message
@@ -303,6 +313,8 @@ class SubmitInvoiceJobHandler:
 
         now = datetime.now(UTC)
         transmission.status = TransmissionStatus.FAILED_PERMANENT
+        transmission.operation_type = KSeFOperationType.ERROR.value
+        transmission.severity = KSeFSeverity.ERROR.value
         transmission.error_code = error_code
         transmission.error_message = str(exc)
         transmission.finished_at = now
@@ -324,6 +336,8 @@ class SubmitInvoiceJobHandler:
 
         now = datetime.now(UTC)
         transmission.status = TransmissionStatus.FAILED_PERMANENT
+        transmission.operation_type = KSeFOperationType.ERROR.value
+        transmission.severity = KSeFSeverity.ERROR.value
         transmission.error_code = "INTERNAL_ERROR"
         transmission.error_message = str(exc)[:512]
         transmission.finished_at = now

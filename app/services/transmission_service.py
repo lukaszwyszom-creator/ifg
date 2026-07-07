@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import AuthenticatedUser
-from app.domain.enums import InvoiceStatus, InvoiceType, TransmissionStatus
+from app.domain.enums import (
+    InvoiceStatus,
+    InvoiceType,
+    KSeFOperationType,
+    KSeFSeverity,
+    TransmissionStatus,
+)
 from app.domain.exceptions import (
     InvalidInvoiceError,
     InvalidStatusTransitionError,
@@ -57,6 +63,7 @@ class TransmissionService:
         ksef_session_service=None,
         settings_service: SettingsService | None = None,
         invoice_service: InvoiceService | None = None,
+        journal_service=None,
     ) -> None:
         self.session = session
         self._transmission_repo = transmission_repository
@@ -66,6 +73,7 @@ class TransmissionService:
         self._ksef_session_service = ksef_session_service
         self._settings_service = settings_service
         self._invoice_service = invoice_service
+        self._journal_service = journal_service
 
     @staticmethod
     def sync_invoice_from_terminal_transmission(
@@ -289,7 +297,9 @@ class TransmissionService:
             id=uuid4(),
             invoice_id=invoice_id,
             channel="ksef",
-            operation_type="submit",
+            operation_type=KSeFOperationType.SALE_SEND.value,
+            severity=KSeFSeverity.RUNNING.value,
+            correlation_id=invoice_id,
             status=TransmissionStatus.QUEUED,
             attempt_no=1,
             idempotency_key=idempotency_key,
@@ -437,6 +447,16 @@ class TransmissionService:
             entity_id=str(transmission_id),
             after={"attempt_no": transmission.attempt_no},
         )
+        if self._journal_service is not None:
+            self._journal_service.log_event(
+                operation_type=KSeFOperationType.RETRY,
+                severity=KSeFSeverity.WARNING,
+                status=TransmissionStatus.QUEUED.value,
+                short_description="Manual retry transmission queued.",
+                invoice_id=transmission.invoice_id,
+                correlation_id=transmission.correlation_id,
+                metadata_json={"source": "manual"},
+            )
 
         return transmission
 

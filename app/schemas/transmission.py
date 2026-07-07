@@ -11,6 +11,9 @@ class TransmissionResponse(BaseModel):
     invoice_id: UUID
     channel: str
     operation_type: str
+    severity: str | None = None
+    correlation_id: UUID | None = None
+    job_id: UUID | None = None
     status: str
     attempt_no: int
     idempotency_key: str | None = None
@@ -19,6 +22,7 @@ class TransmissionResponse(BaseModel):
     upo_status: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    metadata_json: dict | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime

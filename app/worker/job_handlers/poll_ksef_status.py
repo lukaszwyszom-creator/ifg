@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
-from app.domain.enums import TransmissionStatus
+from app.domain.enums import KSeFOperationType, KSeFSeverity, TransmissionStatus
 from app.integrations.ksef.client import KSeFClient, KSeFClientError
 from app.persistence.models.background_job import BackgroundJob
 from app.persistence.repositories.invoice_repository import InvoiceRepository
@@ -88,6 +88,8 @@ class PollKSeFStatusJobHandler:
                 exc,
             )
             transmission.status = TransmissionStatus.WAITING_STATUS
+            transmission.operation_type = KSeFOperationType.SALE_STATUS.value
+            transmission.severity = KSeFSeverity.PAUSED.value
             self._schedule_retry(transmission_id, reference_number)
             return
         except Exception as exc:
@@ -96,6 +98,8 @@ class PollKSeFStatusJobHandler:
                 transmission_id,
             )
             transmission.status = TransmissionStatus.WAITING_STATUS
+            transmission.operation_type = KSeFOperationType.SALE_STATUS.value
+            transmission.severity = KSeFSeverity.PAUSED.value
             self._schedule_retry(transmission_id, reference_number)
             return
 
@@ -110,6 +114,8 @@ class PollKSeFStatusJobHandler:
                     transmission_id,
                 )
             transmission.status = TransmissionStatus.SUCCESS
+            transmission.operation_type = KSeFOperationType.SALE_STATUS.value
+            transmission.severity = KSeFSeverity.SUCCESS.value
             transmission.ksef_reference_number = status_result.ksef_reference_number
             transmission.finished_at = datetime.now(UTC)
 
@@ -128,6 +134,8 @@ class PollKSeFStatusJobHandler:
         elif code in _PERMANENT_ERROR_CODES:
             # KSeF odrzucil fakture — blad permanentny
             transmission.status = TransmissionStatus.FAILED_PERMANENT
+            transmission.operation_type = KSeFOperationType.ERROR.value
+            transmission.severity = KSeFSeverity.ERROR.value
             transmission.error_code = str(code)
             transmission.error_message = status_result.processing_description
             transmission.finished_at = datetime.now(UTC)
@@ -141,6 +149,8 @@ class PollKSeFStatusJobHandler:
         else:
             # Faktura jest jeszcze w kolejce KSeF — czekamy
             transmission.status = TransmissionStatus.WAITING_STATUS
+            transmission.operation_type = KSeFOperationType.SALE_STATUS.value
+            transmission.severity = KSeFSeverity.PAUSED.value
             self._schedule_retry(transmission_id, reference_number)
             return
 
@@ -182,6 +192,8 @@ class PollKSeFStatusJobHandler:
                 "poll_ksef_status: brak numeru KSeF — pomijam pobranie UPO."
             )
             transmission.upo_status = "failed"
+            transmission.operation_type = KSeFOperationType.UPO_DOWNLOAD.value
+            transmission.severity = KSeFSeverity.WARNING.value
             return
 
         if not upo_url:
@@ -190,6 +202,8 @@ class PollKSeFStatusJobHandler:
                 ksef_reference_number,
             )
             transmission.upo_status = "failed"
+            transmission.operation_type = KSeFOperationType.UPO_DOWNLOAD.value
+            transmission.severity = KSeFSeverity.WARNING.value
             return
 
         try:
@@ -201,6 +215,8 @@ class PollKSeFStatusJobHandler:
                 exc,
             )
             transmission.upo_status = "failed"
+            transmission.operation_type = KSeFOperationType.UPO_DOWNLOAD.value
+            transmission.severity = KSeFSeverity.ERROR.value
             return
 
         if not upo_bytes:
@@ -209,10 +225,14 @@ class PollKSeFStatusJobHandler:
                 ksef_reference_number,
             )
             transmission.upo_status = "failed"
+            transmission.operation_type = KSeFOperationType.UPO_DOWNLOAD.value
+            transmission.severity = KSeFSeverity.WARNING.value
             return
 
         transmission.upo_xml = upo_bytes
         transmission.upo_status = "fetched"
+        transmission.operation_type = KSeFOperationType.UPO_DOWNLOAD.value
+        transmission.severity = KSeFSeverity.SUCCESS.value
         logger.info(
             "poll_ksef_status: UPO pobrane dla %s (%d bajtow).",
             ksef_reference_number,

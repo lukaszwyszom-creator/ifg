@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, ExternalServiceError, NotFoundError
-from app.domain.enums import InvoiceStatus, InvoiceType, PaymentMethod
+from app.domain.enums import (
+    InvoiceStatus,
+    InvoiceType,
+    KSeFOperationType,
+    KSeFSeverity,
+    PaymentMethod,
+)
 from app.domain.models.invoice import Invoice, InvoiceItem
 from app.integrations.ksef.auth import KSeFAuthError, KSeFAuthProvider
 from app.integrations.ksef.client import (
@@ -112,12 +118,14 @@ class KSeFSessionService:
         ksef_client: KSeFClient,
         audit_service: AuditService,
         invoice_repository: InvoiceRepository | None = None,
+        journal_service=None,
     ) -> None:
         self.session = session
         self.auth_provider = auth_provider
         self.ksef_client = ksef_client
         self.audit_service = audit_service
         self.invoice_repository = invoice_repository
+        self._journal_service = journal_service
         # cache tokenów — klucz: nip (str), wartość: _TokenCacheEntry
         self._token_cache: dict[str, _TokenCacheEntry] = {}
         self._cache_lock = threading.Lock()
@@ -194,6 +202,15 @@ class KSeFSessionService:
             entity_id=str(orm.id),
             after={"status": SESSION_ACTIVE, "nip": nip},
         )
+        if self._journal_service is not None:
+            self._journal_service.log_event(
+                operation_type=KSeFOperationType.SESSION_OPEN,
+                severity=KSeFSeverity.SUCCESS,
+                status="success",
+                short_description=f"Opened KSeF session for NIP {nip}.",
+                correlation_id=orm.id,
+                metadata_json={"source": "session"},
+            )
 
         return orm
 
@@ -209,6 +226,15 @@ class KSeFSessionService:
             orm.status = SESSION_EXPIRED
             self.session.flush()
             self._invalidate_cache(nip)
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.SESSION_EXPIRED,
+                    severity=KSeFSeverity.WARNING,
+                    status="expired",
+                    short_description=f"KSeF session expired for NIP {nip}.",
+                    correlation_id=orm.id,
+                    metadata_json={"source": "session"},
+                )
             raise NotFoundError(f"Sesja KSeF dla NIP {nip} wygasła.")
 
         return orm
@@ -274,6 +300,15 @@ class KSeFSessionService:
             entity_id=str(orm.id),
             after={"status": SESSION_TERMINATED, "nip": nip},
         )
+        if self._journal_service is not None:
+            self._journal_service.log_event(
+                operation_type=KSeFOperationType.SESSION_CLOSE,
+                severity=KSeFSeverity.INFO,
+                status="success",
+                short_description=f"Closed KSeF session for NIP {nip}.",
+                correlation_id=orm.id,
+                metadata_json={"source": "session"},
+            )
 
         return orm
 
@@ -285,6 +320,15 @@ class KSeFSessionService:
             orm.status = SESSION_EXPIRED
             orm.updated_at = datetime.now(UTC)
             self.session.flush()
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.SESSION_EXPIRED,
+                    severity=KSeFSeverity.WARNING,
+                    status="expired",
+                    short_description=f"KSeF session marked expired for NIP {nip}.",
+                    correlation_id=orm.id,
+                    metadata_json={"source": "session"},
+                )
         self._invalidate_cache(nip)
 
     def get_session_by_id(self, session_id: UUID) -> KSeFSessionORM:
@@ -480,6 +524,35 @@ class KSeFSessionService:
             date_to=resolved_to,
         )
         audit.record_window(window)
+        operation_type = (
+            KSeFOperationType.PURCHASE_SYNC_AUTO
+            if incremental and settings.ksef_auto_sync_enabled
+            else KSeFOperationType.PURCHASE_SYNC_MANUAL
+        )
+        corr_id = uuid4()
+        if self._journal_service is not None:
+            self._journal_service.log_event(
+                operation_type=operation_type,
+                severity=KSeFSeverity.RUNNING,
+                status="started",
+                short_description="Purchase sync started.",
+                correlation_id=corr_id,
+                metadata_json={
+                    "source": "auto" if operation_type == KSeFOperationType.PURCHASE_SYNC_AUTO else "manual",
+                },
+            )
+            if resume_state:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.RESUME,
+                    severity=KSeFSeverity.INFO,
+                    status="resumed",
+                    short_description="Purchase sync resumed from checkpoint.",
+                    correlation_id=corr_id,
+                    metadata_json={
+                        "offset": resume_state.get("current_offset"),
+                        "source": "resume_state",
+                    },
+                )
         prev_defer = self.ksef_client.defer_purchase_rate_limit
         self.ksef_client.defer_purchase_rate_limit = True
         try:
@@ -490,11 +563,27 @@ class KSeFSessionService:
                 actor_user_id=actor_user_id,
                 resume_state=resume_state,
                 audit=audit,
+                correlation_id=corr_id,
             )
-            self._finalize_purchase_sync_audit(audit, resolved_from, resolved_to, resolved_nip)
+            self._finalize_purchase_sync_audit(
+                audit, resolved_from, resolved_to, resolved_nip, correlation_id=corr_id
+            )
             if counts.get("rate_limit_deferred"):
                 warning = counts.get("warning") or _RATE_LIMIT_WARNING
                 sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, warning)
+                if self._journal_service is not None:
+                    self._journal_service.log_event(
+                        operation_type=KSeFOperationType.RETRY,
+                        severity=KSeFSeverity.PAUSED,
+                        status="deferred",
+                        short_description="Purchase sync deferred due to KSeF 429.",
+                        correlation_id=corr_id,
+                        metadata_json={
+                            "retry_after": counts["retry_after_seconds"],
+                            "offset": (counts.get("resume_state") or {}).get("current_offset"),
+                            "source": "ksef_429",
+                        },
+                    )
                 return {
                     "status": "deferred",
                     "incomplete": True,
@@ -555,11 +644,36 @@ class KSeFSessionService:
                 report["errors"],
                 report["incomplete"],
             )
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=operation_type,
+                    severity=KSeFSeverity.WARNING if report["incomplete"] else KSeFSeverity.SUCCESS,
+                    status=report["status"],
+                    short_description="Purchase sync finished.",
+                    correlation_id=corr_id,
+                    metadata_json={
+                        "downloaded": report["ksef_returned"],
+                        "saved": report["created"],
+                        "duplicates": report["skipped_existing"],
+                        "skipped": report["errors"],
+                        "source": "auto" if operation_type == KSeFOperationType.PURCHASE_SYNC_AUTO else "manual",
+                    },
+                )
             return report
         except Exception as exc:
             if audit.is_sync_incomplete():
                 audit.emit_full_report()
             sync_repo.mark_error(_SCOPE_PURCHASE_INVOICES, str(exc))
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.ERROR,
+                    severity=KSeFSeverity.ERROR,
+                    status="failed",
+                    short_description="Purchase sync failed.",
+                    correlation_id=corr_id,
+                    error_message=str(exc)[:512],
+                    metadata_json={"error_code": "PURCHASE_SYNC_ERROR", "source": "sync"},
+                )
             raise
         finally:
             self.ksef_client.defer_purchase_rate_limit = prev_defer
@@ -571,6 +685,7 @@ class KSeFSessionService:
         date_from: date,
         date_to: date,
         nip: str,
+        correlation_id: UUID | None = None,
     ) -> None:
         if self.invoice_repository is not None:
             audit.db_refs_in_window = set(
@@ -582,6 +697,21 @@ class KSeFSessionService:
             )
             audit.final_database_count = len(audit.db_refs_in_window)
         audit.emit_full_report()
+        if self._journal_service is not None:
+            self._journal_service.log_event(
+                operation_type=KSeFOperationType.PURCHASE_IMPORT_SUMMARY,
+                severity=KSeFSeverity.INFO,
+                status="summary",
+                short_description="Purchase import summary emitted.",
+                correlation_id=correlation_id or uuid4(),
+                metadata_json={
+                    "downloaded": audit.xml_downloaded,
+                    "saved": audit.saved,
+                    "duplicates": audit.skipped_existing,
+                    "skipped": audit.skipped_invalid + audit.skipped_error,
+                    "source": "audit_summary",
+                },
+            )
 
     def sync_received_invoices(
         self,
@@ -591,6 +721,7 @@ class KSeFSessionService:
         actor_user_id: UUID | None = None,
         resume_state: dict | None = None,
         audit: PurchaseSyncAudit | None = None,
+        correlation_id: UUID | None = None,
     ) -> dict:
         """Pobiera faktury zakupowe z KSeF (incremental + resume przy HTTP 429)."""
         if self.invoice_repository is None:
@@ -607,6 +738,7 @@ class KSeFSessionService:
             actor_user_id=actor_user_id,
             resume_state=resume_state,
             audit=audit,
+            correlation_id=correlation_id,
         )
 
     def _sync_received_invoices_incremental(
@@ -619,6 +751,7 @@ class KSeFSessionService:
         actor_user_id: UUID | None,
         resume_state: dict | None,
         audit: PurchaseSyncAudit | None = None,
+        correlation_id: UUID | None = None,
     ) -> dict:
         """Pobiera metadata raz, następnie GET+save per faktura z resume przy 429."""
         resume = resume_state or {}
@@ -645,6 +778,18 @@ class KSeFSessionService:
             refs = metadata_refs
             subject_type_used = "subject2"
             start_offset = 0
+            if self._journal_service is not None:
+                self._journal_service.log_event(
+                    operation_type=KSeFOperationType.PURCHASE_METADATA_FETCH,
+                    severity=KSeFSeverity.INFO,
+                    status="success",
+                    short_description="Fetched purchase metadata references.",
+                    correlation_id=correlation_id or uuid4(),
+                    metadata_json={
+                        "downloaded": len(refs),
+                        "source": "metadata",
+                    },
+                )
         elif audit is not None and audit.invoice_ids_received == 0:
             audit.invoice_ids_received = len(refs)
             audit.metadata_returned = len(refs)
@@ -673,6 +818,16 @@ class KSeFSessionService:
                 xml_bytes = self.ksef_client.get_purchase_invoice_xml(ctx.access_token, ref)
                 if audit is not None:
                     audit.record_xml_downloaded(ref)
+                if self._journal_service is not None:
+                    self._journal_service.log_event(
+                        operation_type=KSeFOperationType.PURCHASE_INVOICE_FETCH,
+                        severity=KSeFSeverity.INFO,
+                        status="downloaded",
+                        short_description="Fetched purchase invoice XML.",
+                        correlation_id=correlation_id or uuid4(),
+                        ksef_reference_number=ref,
+                        metadata_json={"source": "purchase_fetch"},
+                    )
             except KSeFRateLimitDeferredError as exc:
                 if audit is not None:
                     audit.rate_limited = True

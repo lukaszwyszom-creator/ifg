@@ -30,6 +30,9 @@ _TRANSMISSION_RESPONSE_FIELDS = (
     "invoice_id",
     "channel",
     "operation_type",
+    "severity",
+    "correlation_id",
+    "job_id",
     "status",
     "attempt_no",
     "idempotency_key",
@@ -38,6 +41,7 @@ _TRANSMISSION_RESPONSE_FIELDS = (
     "upo_status",
     "error_code",
     "error_message",
+    "metadata_json",
     "started_at",
     "finished_at",
     "created_at",
@@ -79,10 +83,20 @@ def _extract_invoice_number_from_xml(xml_content: bytes | None) -> str | None:
 def list_transmissions(
     page: int = 1,
     size: int = 20,
+    warnings_or_errors_only: bool = False,
     transmission_service: Annotated[TransmissionService, Depends(get_transmission_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
 ) -> TransmissionPageResponse:
     items, total = transmission_service.list_all(page=page, size=size)
+    if warnings_or_errors_only:
+        filtered = [
+            t
+            for t in items
+            if str(getattr(t, "severity", "")).upper() in {"WARNING", "ERROR"}
+            or str(getattr(t, "status", "")).lower() in {"failed_permanent", "failed_retryable", "failed_temporary"}
+        ]
+        items = filtered
+        total = len(filtered)
     return TransmissionPageResponse(
         items=[_transmission_to_response(t) for t in items],
         total=total,

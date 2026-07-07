@@ -52,8 +52,13 @@ class SyncPurchaseInvoicesJobHandler:
 
         job_id = payload.get("job_id", "?")
         nip: str = payload["nip"]
-        date_from = date.fromisoformat(payload["date_from"])
-        date_to = date.fromisoformat(payload["date_to"])
+        raw_date_from = payload.get("date_from")
+        raw_date_to = payload.get("date_to")
+        date_from = date.fromisoformat(raw_date_from) if raw_date_from else None
+        date_to = date.fromisoformat(raw_date_to) if raw_date_to else None
+        incremental = bool(payload.get("incremental", False))
+        force_full = bool(payload.get("force_full", False))
+        days_back = payload.get("days_back")
         actor_user_id = payload.get("actor_user_id")
 
         actor_id = UUID(actor_user_id) if actor_user_id else None
@@ -72,6 +77,9 @@ class SyncPurchaseInvoicesJobHandler:
                 nip=nip,
                 date_from=date_from,
                 date_to=date_to,
+                incremental=incremental,
+                force_full=force_full,
+                days_back=days_back,
                 actor_user_id=actor_id,
                 resume_state=payload.get("resume"),
                 exclude_job_id=job_uuid,

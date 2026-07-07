@@ -10,27 +10,33 @@ import logging
 import signal
 import time
 from datetime import UTC, datetime, timedelta
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 from sqlalchemy import case, or_, select
 
 from app.core.config import settings
+from app.domain.enums import KSeFOperationType, KSeFSeverity
 from app.integrations.ksef.auth import KSeFAuthProvider
 from app.integrations.ksef.client import KSeFClient, RetryConfig
 from app.persistence.db import SessionLocal
 from app.persistence.models.background_job import BackgroundJob, prepare_job_queue
 from app.persistence.models.background_job import _utcnow
+from app.persistence.models.ksef_sync_state import KSeFSyncStateORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.job_repository import JobRepository
+from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
 from app.persistence.repositories.transmission_repository import TransmissionRepository
 from app.services.audit_service import AuditService
 from app.persistence.repositories.audit_repository import AuditRepository
 from app.services.ksef_session_service import KSeFSessionService
+from app.services.ksef_transmission_journal_service import KSeFTransmissionJournalService
 from app.worker.job_handlers.submit_invoice import SubmitInvoiceJobHandler
 from app.worker.job_handlers.poll_ksef_status import PollKSeFStatusJobHandler
 from app.worker.job_handlers.sync_purchase_invoices import (
     JobRateLimitDeferredError,
     SyncPurchaseInvoicesJobHandler,
 )
+from app.worker.ksef_auto_sync_scheduler import evaluate_tick
 
 logger = logging.getLogger("app.worker")
 
@@ -45,6 +51,189 @@ _JOB_TYPE_PRIORITY = case(
 )
 
 _running = True
+_last_scheduler_tick_key: str | None = None
+_SCHEDULER_SCOPE = "ksef_purchase_auto_scheduler"
+
+
+def _scheduler_corr_id(seed: str):
+    return uuid5(NAMESPACE_DNS, f"ifg-ksef-scheduler:{seed}")
+
+
+def _scheduler_log_event(
+    *,
+    session,
+    operation_type: KSeFOperationType,
+    severity: KSeFSeverity,
+    status: str,
+    short_description: str,
+    correlation_seed: str,
+    metadata_json: dict | None = None,
+) -> None:
+    journal = KSeFTransmissionJournalService(
+        session=session,
+        transmission_repository=TransmissionRepository(session),
+    )
+    journal.log_event(
+        operation_type=operation_type,
+        severity=severity,
+        status=status,
+        short_description=short_description,
+        correlation_id=_scheduler_corr_id(correlation_seed),
+        metadata_json=metadata_json,
+    )
+
+
+def _run_scheduler_tick() -> None:
+    global _last_scheduler_tick_key
+    now_local = datetime.now().astimezone()
+    tick_key = now_local.strftime("%Y-%m-%dT%H:%M")
+    if tick_key == _last_scheduler_tick_key:
+        return
+    _last_scheduler_tick_key = tick_key
+
+    session = SessionLocal()
+    try:
+        state = session.execute(
+            select(KSeFSyncStateORM)
+            .where(KSeFSyncStateORM.scope == _SCHEDULER_SCOPE)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if state is None:
+            state = KSeFSyncStateORM(scope=_SCHEDULER_SCOPE, status="idle", state_json={})
+            session.add(state)
+            session.flush()
+            _scheduler_log_event(
+                session=session,
+                operation_type=KSeFOperationType.SCHEDULER_STARTED,
+                severity=KSeFSeverity.INFO,
+                status="started",
+                short_description="KSeF auto-sync scheduler started.",
+                correlation_seed=tick_key,
+                metadata_json={"scope": _SCHEDULER_SCOPE},
+            )
+
+        state_json = dict(state.state_json or {})
+        logger.debug(
+            "KSeF scheduler tick cron=%s tick_key=%s",
+            settings.ksef_auto_sync_cron,
+            tick_key,
+        )
+
+        decision = evaluate_tick(
+            enabled=settings.ksef_auto_sync_enabled,
+            cron_expr=settings.ksef_auto_sync_cron,
+            now=now_local,
+            last_executed_slot_key=state_json.get("last_executed_slot"),
+        )
+        if not decision.should_enqueue:
+            if decision.reason == "disabled":
+                _scheduler_log_event(
+                    session=session,
+                    operation_type=KSeFOperationType.SCHEDULER_DISABLED,
+                    severity=KSeFSeverity.INFO,
+                    status="disabled",
+                    short_description="Scheduler disabled.",
+                    correlation_seed=tick_key,
+                    metadata_json={"cron": settings.ksef_auto_sync_cron},
+                )
+            elif decision.reason == "already_executed":
+                skip_slot = decision.slot_key
+                if (
+                    skip_slot
+                    and state_json.get("last_skip_logged_slot") != skip_slot
+                ):
+                    _scheduler_log_event(
+                        session=session,
+                        operation_type=KSeFOperationType.SCHEDULER_SKIP_ALREADY_EXECUTED,
+                        severity=KSeFSeverity.INFO,
+                        status="skipped",
+                        short_description="Scheduler slot already executed.",
+                        correlation_seed=skip_slot,
+                        metadata_json={"slot": skip_slot},
+                    )
+                    state_json["last_skip_logged_slot"] = skip_slot
+            elif decision.reason.startswith("invalid_cron:"):
+                cron_expr = settings.ksef_auto_sync_cron
+                if state_json.get("last_invalid_cron_logged") != cron_expr:
+                    cron_error = decision.reason.removeprefix("invalid_cron:")
+                    _scheduler_log_event(
+                        session=session,
+                        operation_type=KSeFOperationType.SCHEDULER_INVALID_CRON,
+                        severity=KSeFSeverity.WARNING,
+                        status="invalid_cron",
+                        short_description=f"Invalid scheduler cron: {cron_error}",
+                        correlation_seed=cron_expr,
+                        metadata_json={"source": "scheduler"},
+                    )
+                    state_json["last_invalid_cron_logged"] = cron_expr
+            state.status = "idle"
+            state.last_attempt_at = datetime.now(UTC)
+            state.state_json = state_json
+            session.commit()
+            return
+
+        slot_key = decision.slot_key or tick_key
+        _scheduler_log_event(
+            session=session,
+            operation_type=KSeFOperationType.SCHEDULER_SLOT,
+            severity=KSeFSeverity.RUNNING,
+            status="slot_due",
+            short_description="Scheduler slot due.",
+            correlation_seed=slot_key,
+            metadata_json={"slot": slot_key},
+        )
+        if decision.is_recovery:
+            _scheduler_log_event(
+                session=session,
+                operation_type=KSeFOperationType.SCHEDULER_RECOVERY,
+                severity=KSeFSeverity.WARNING,
+                status="recovery",
+                short_description="Scheduler recovered missed slot.",
+                correlation_seed=slot_key,
+                metadata_json={"slot": slot_key},
+            )
+
+        job = BackgroundJob(
+            id=uuid4(),
+            job_type="sync_purchase_invoices",
+            payload_json={
+                "job_id": "",
+                "nip": settings.seller_nip,
+                "incremental": True,
+                "force_full": False,
+                "date_from": None,
+                "date_to": None,
+                "scheduler_slot": slot_key,
+                "scheduler_recovery": decision.is_recovery,
+            },
+            status="pending",
+            max_attempts=1,
+        )
+        job.payload_json["job_id"] = str(job.id)
+        session.add(job)
+        session.flush()
+        _scheduler_log_event(
+            session=session,
+            operation_type=KSeFOperationType.SCHEDULER_ENQUEUE,
+            severity=KSeFSeverity.SUCCESS,
+            status="enqueued",
+            short_description="Scheduler enqueued purchase sync job.",
+            correlation_seed=slot_key,
+            metadata_json={"slot": slot_key, "job_id": str(job.id)},
+        )
+
+        state_json["last_executed_slot"] = slot_key
+        state_json["last_enqueued_job_id"] = str(job.id)
+        state_json["last_cron"] = settings.ksef_auto_sync_cron
+        state.state_json = state_json
+        sync_repo = KSeFSyncStateRepository(session)
+        sync_repo.mark_success(_SCHEDULER_SCOPE, state_json=state_json)
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("KSeF scheduler tick failed.")
+    finally:
+        session.close()
 
 
 def claim_priority_jobs(
@@ -123,6 +312,10 @@ def _build_ksef_session_service(session):
         audit_repository=AuditRepository(session),
     )
     return KSeFSessionService(
+        journal_service=KSeFTransmissionJournalService(
+            session=session,
+            transmission_repository=TransmissionRepository(session),
+        ),
         session=session,
         auth_provider=KSeFAuthProvider(
             environment=settings.ksef_environment,
@@ -282,6 +475,7 @@ def main() -> None:
     logger.info("Worker startuje. poll_interval=%ss batch=%s", POLL_INTERVAL_SECONDS, BATCH_SIZE)
     while _running:
         try:
+            _run_scheduler_tick()
             n = _process_batch()
             if n:
                 logger.info("Przetworzone joby: %s", n)

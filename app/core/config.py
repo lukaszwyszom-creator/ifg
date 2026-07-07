@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     ksef_purchase_sync_days_back: int = Field(default=90, alias="KSEF_PURCHASE_SYNC_DAYS_BACK")
     ksef_purchase_sync_full_days: int = Field(default=365, alias="KSEF_PURCHASE_SYNC_FULL_DAYS")
     ksef_purchase_sync_overlap_days: int = Field(default=2, alias="KSEF_PURCHASE_SYNC_OVERLAP_DAYS")
+    ksef_auto_sync_enabled: bool = Field(default=False, alias="KSEF_AUTO_SYNC_ENABLED")
+    ksef_auto_sync_cron: str = Field(default="0 8,14 * * *", alias="KSEF_AUTO_SYNC_CRON")
 
     @field_validator(
         "seller_nip",
