@@ -30,5 +30,109 @@
     "override_flag": "--allow-dirty-build",
     "override_status": "READY_WITH_OVERRIDE",
     "score_penalty": 25
+  },
+  "score_config": {
+    "weights": {
+      "repo": 15,
+      "tests": 15,
+      "build": 15,
+      "migrations": 12,
+      "docker": 10,
+      "configuration": 10,
+      "rollback_readiness": 13,
+      "documentation": 10
+    },
+    "status_penalties": {
+      "WARN": 20,
+      "FAIL": 45,
+      "CRITICAL": 70
+    },
+    "component_scores": {
+      "tests_failed": 35,
+      "rollback_missing": 55,
+      "docs_heuristic": 70,
+      "empty_group": 50
+    },
+    "rule_penalties": {
+      "dirty_tree_build_with_override": 25,
+      "tests_must_pass": 40
+    }
+  },
+  "policy_rules": {
+    "dirty_working_tree_blocks_production": {
+      "scope": "POLICY",
+      "category": "BLOCKER",
+      "penalty": 0
+    },
+    "dirty_tree_build_with_override": {
+      "scope": "POLICY",
+      "category": "WARNING",
+      "penalty": 25
+    },
+    "tests_must_pass": {
+      "scope": "PROJECT",
+      "category": "BLOCKER",
+      "penalty": 40
+    },
+    "frontend_change_requires_passing_build": {
+      "scope": "PROJECT",
+      "category": "BLOCKER",
+      "penalty": 0
+    },
+    "suspicious_untracked_files_block": {
+      "scope": "POLICY",
+      "category": "BLOCKER",
+      "penalty": 0
+    },
+    "untracked_files_warn": {
+      "scope": "POLICY",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "alembic_changes_require_staging": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "migration_change_requires_controlled_deploy": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "critical_table_migration_requires_backup": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "critical_db_change_requires_verified_backup": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "backend_change_requires_api_worker_rebuild": {
+      "scope": "PROJECT",
+      "category": "INFORMATION",
+      "penalty": 0
+    },
+    "doctor_critical_fail_blocks_production": {
+      "scope": "PROJECT",
+      "category": "BLOCKER",
+      "penalty": 0
+    },
+    "doctor_fail_requires_staging": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "doctor_fail_warn_single_production": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
+    "doctor_hard_block_check": {
+      "scope": "CONFIGURATION",
+      "category": "BLOCKER",
+      "penalty": 0
+    }
   }
 }

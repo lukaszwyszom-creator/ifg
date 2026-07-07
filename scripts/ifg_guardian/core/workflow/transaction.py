@@ -76,18 +76,25 @@ class WorkflowTransaction:
     doctor: dict[str, Any] = field(default_factory=dict)
     dependencies: dict[str, Any] = field(default_factory=dict)
     release_plan: dict[str, Any] = field(default_factory=dict)
+    release_evaluate: dict[str, Any] = field(default_factory=dict)
     deploy_run: dict[str, Any] = field(default_factory=dict)
     cutover_run: dict[str, Any] = field(default_factory=dict)
 
     def mark_started(self) -> None:
         self.started_at = datetime.now(UTC)
 
+    def elapsed_ms(self, *, now: datetime | None = None) -> int:
+        if self.duration_ms > 0 and self.ended_at is not None:
+            return self.duration_ms
+        if self.started_at is None:
+            return 0
+        end = self.ended_at or now or datetime.now(UTC)
+        return max(0, int((end - self.started_at).total_seconds() * 1000))
+
     def mark_ended(self, *, state: WorkflowState) -> None:
         self.ended_at = datetime.now(UTC)
         self.state = state
-        if self.started_at is not None:
-            delta = self.ended_at - self.started_at
-            self.duration_ms = int(delta.total_seconds() * 1000)
+        self.duration_ms = self.elapsed_ms()
         if state == WorkflowState.SUCCESS:
             self.outcome = "SUCCESS"
         elif state == WorkflowState.FAILED:
@@ -147,6 +154,7 @@ class WorkflowTransaction:
             "doctor": dict(self.doctor),
             "dependencies": dict(self.dependencies),
             "release_plan": dict(self.release_plan),
+            "release_evaluate": dict(self.release_evaluate),
             "deploy_run": dict(self.deploy_run),
             "cutover_run": dict(self.cutover_run),
         }
@@ -215,6 +223,7 @@ class WorkflowTransaction:
             doctor=dict(data.get("doctor", {})),
             dependencies=dict(data.get("dependencies", {})),
             release_plan=dict(data.get("release_plan", {})),
+            release_evaluate=dict(data.get("release_evaluate", {})),
             deploy_run=dict(data.get("deploy_run", {})),
             cutover_run=dict(data.get("cutover_run", {})),
         )

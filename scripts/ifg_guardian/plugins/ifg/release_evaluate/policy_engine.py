@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ifg_guardian.config import DEPLOYMENT_PROFILE, ROOT
 from ifg_guardian.plugins.ifg.doctor.models import DoctorState
+from ifg_guardian.plugins.ifg.release_evaluate.classification import get_rule_penalty
 from ifg_guardian.plugins.ifg.release_evaluate.models import ReleaseDecisionStatus, ReleaseEvaluateState
 
 POLICY_PATH = ROOT / "scripts" / "ifg_guardian" / "policies" / "ifg_production.yaml"
@@ -82,7 +83,10 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
             required_actions.append(
                 "Potwierdź świadomy deploy z flagą --allow-dirty-build (build z lokalnego dirty tree)."
             )
-            state.release_score = max(0, state.release_score - 25)
+            state.release_score = max(
+                0,
+                state.release_score - get_rule_penalty(policy, "dirty_tree_build_with_override"),
+            )
         else:
             decision = ReleaseDecisionStatus.PRODUCTION_BLOCKED
             state.production_blocked = True
@@ -117,11 +121,14 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
             + ")."
         )
 
-    if not state.test_discovery_ok:
+    if not state.test_discovery_ok and not state.test_discovery_local_env:
         decision = ReleaseDecisionStatus.PRODUCTION_BLOCKED
         state.production_blocked = True
         rules.append("tests_must_pass")
         blockers.append("Test discovery failed.")
+        penalty = get_rule_penalty(policy, "tests_must_pass")
+        if penalty:
+            state.release_score = max(0, state.release_score - penalty)
         required_actions.append("Napraw test discovery i uruchom ponownie evaluate.")
 
     frontend_build = check_by_id.get("frontend.build_required")

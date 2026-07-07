@@ -31,7 +31,12 @@ from ifg_guardian.plugins.ifg.release_evaluate.models import (  # noqa: E402
     ReleaseDecisionStatus,
     ReleaseEvaluateState,
 )
-from ifg_guardian.plugins.ifg.release_evaluate.policy_engine import apply_policy_engine  # noqa: E402
+from ifg_guardian.plugins.ifg.release_evaluate.classification import (  # noqa: E402
+    classify_doctor_check,
+    finalize_classification,
+    is_local_environment_error,
+)
+from ifg_guardian.plugins.ifg.release_evaluate.policy_engine import apply_policy_engine, load_policy_config  # noqa: E402
 from ifg_guardian.plugins.ifg.release_evaluate.report import render_json, render_markdown, render_terminal  # noqa: E402
 
 
@@ -169,6 +174,14 @@ class TestReleaseEvaluateReport:
                 "staging_required": True,
                 "production_blocked": False,
                 "git_status_entries": [],
+                "local_environment": [],
+                "information": ["repo clean"],
+                "summary": {
+                    "project_status": "WARNING",
+                    "environment_status": "READY",
+                    "policy_status": "WARN",
+                    "deployment_recommendation": "Wymagany staging",
+                },
             }})()})
         )
         md = render_markdown(state, transaction=tx)
@@ -177,6 +190,75 @@ class TestReleaseEvaluateReport:
         assert "Release Engine Evaluation" in md
         assert js["schema"] == "ifg_release_evaluate_report_v1"
         assert "Decision" in term
+        assert "## BLOCKERS" in md
+        assert "## LOCAL ENVIRONMENT" in md
+        assert "## Executive Summary" in md
+
+
+class TestClassificationEngine:
+    def test_is_local_environment_error_detects_pytest_psycopg_alembic(self):
+        assert is_local_environment_error("No module named 'pytest'")
+        assert is_local_environment_error("No module named 'psycopg'")
+        assert is_local_environment_error("[Errno 2] No such file or directory: 'alembic'")
+
+    def test_classify_doctor_alembic_missing_as_local_environment(self):
+        check = CheckResult(
+            "alembic.current",
+            "alembic",
+            "current",
+            CheckStatus.WARN,
+            "[Errno 2] No such file or directory: 'alembic'",
+        )
+        finding = classify_doctor_check(check)
+        assert finding.category.value == "LOCAL_ENVIRONMENT"
+        assert finding.scope.value == "ENVIRONMENT"
+
+    def test_local_env_pytest_missing_does_not_block_release(self):
+        doctor = _sample_doctor_state()
+        state = ReleaseEvaluateState(
+            status=ReleaseDecisionStatus.READY_FOR_DEPLOY,
+            test_discovery_ok=False,
+            test_discovery_local_env=True,
+            test_discovery_error="No module named 'pytest'",
+            release_score=80,
+        )
+        policy = load_policy_config()
+        apply_policy_engine(state, doctor=doctor, policy=policy)
+        finalize_classification(state, doctor=doctor, policy=policy)
+        assert state.status != ReleaseDecisionStatus.PRODUCTION_BLOCKED
+        assert "tests_must_pass" not in state.policy_rules_triggered
+        assert any("pytest" in item for item in state.local_environment)
+
+    def test_failed_project_tests_still_block(self):
+        doctor = _sample_doctor_state()
+        state = ReleaseEvaluateState(
+            status=ReleaseDecisionStatus.READY_FOR_DEPLOY,
+            test_discovery_ok=False,
+            test_discovery_local_env=False,
+            test_discovery_error="collected 0 items / 3 errors",
+            release_score=80,
+        )
+        policy = load_policy_config()
+        apply_policy_engine(state, doctor=doctor, policy=policy)
+        assert state.status == ReleaseDecisionStatus.PRODUCTION_BLOCKED
+        assert state.release_score == 40
+
+
+class TestWorkflowDuration:
+    def test_elapsed_ms_before_mark_ended(self):
+        import time
+
+        tx = WorkflowTransaction(
+            workflow_id="dur-test",
+            workflow_type="ifg.release.evaluate",
+            plugin="ifg",
+            execution_mode=ExecutionMode.LIVE,
+        )
+        tx.mark_started()
+        time.sleep(0.01)
+        assert tx.elapsed_ms() >= 10
+        tx.mark_ended(state=WorkflowState.SUCCESS)
+        assert tx.duration_ms >= 10
 
 
 class TestPolicyEngine:
@@ -216,11 +298,7 @@ class TestPolicyEngine:
         apply_policy_engine(
             state,
             doctor=doctor,
-            policy={
-                "critical_migration_tables": [],
-                "non_report_untracked_block_patterns": [],
-                "report_paths": ["docs/reports/"],
-            },
+            policy=load_policy_config(),
         )
         assert state.status == ReleaseDecisionStatus.PRODUCTION_BLOCKED
         assert state.production_blocked is True
@@ -238,11 +316,7 @@ class TestPolicyEngine:
         apply_policy_engine(
             state,
             doctor=doctor,
-            policy={
-                "critical_migration_tables": [],
-                "non_report_untracked_block_patterns": [],
-                "report_paths": ["docs/reports/"],
-            },
+            policy=load_policy_config(),
         )
         assert state.status == ReleaseDecisionStatus.PRODUCTION_BLOCKED
         assert "dirty_working_tree_blocks_production" in state.policy_rules_triggered
@@ -260,11 +334,7 @@ class TestPolicyEngine:
         apply_policy_engine(
             state,
             doctor=doctor,
-            policy={
-                "critical_migration_tables": [],
-                "non_report_untracked_block_patterns": [],
-                "report_paths": ["docs/reports/"],
-            },
+            policy=load_policy_config(),
         )
         assert state.status == ReleaseDecisionStatus.READY_WITH_OVERRIDE
         assert "dirty_tree_build_with_override" in state.policy_rules_triggered

@@ -19,6 +19,73 @@ class ImpactLevel(str, Enum):
     HIGH = "HIGH"
 
 
+class FindingCategory(str, Enum):
+    BLOCKER = "BLOCKER"
+    WARNING = "WARNING"
+    LOCAL_ENVIRONMENT = "LOCAL_ENVIRONMENT"
+    INFORMATION = "INFORMATION"
+
+
+class FindingScope(str, Enum):
+    PROJECT = "PROJECT"
+    ENVIRONMENT = "ENVIRONMENT"
+    CONFIGURATION = "CONFIGURATION"
+    POLICY = "POLICY"
+
+
+@dataclass
+class ClassifiedFinding:
+    message: str
+    category: FindingCategory
+    scope: FindingScope
+    source: str = ""
+    rule_id: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "message": self.message,
+            "category": self.category.value,
+            "scope": self.scope.value,
+            "source": self.source,
+            "rule_id": self.rule_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ClassifiedFinding:
+        return cls(
+            message=data.get("message", ""),
+            category=FindingCategory(data.get("category", FindingCategory.INFORMATION.value)),
+            scope=FindingScope(data.get("scope", FindingScope.PROJECT.value)),
+            source=data.get("source", ""),
+            rule_id=data.get("rule_id", ""),
+        )
+
+
+@dataclass
+class StatusSummary:
+    project_status: str = "READY"
+    environment_status: str = "READY"
+    policy_status: str = "PASS"
+    deployment_recommendation: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "project_status": self.project_status,
+            "environment_status": self.environment_status,
+            "policy_status": self.policy_status,
+            "deployment_recommendation": self.deployment_recommendation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> StatusSummary:
+        return cls(
+            project_status=data.get("project_status", "READY"),
+            environment_status=data.get("environment_status", "READY"),
+            policy_status=data.get("policy_status", "PASS"),
+            deployment_recommendation=data.get("deployment_recommendation", ""),
+        )
+
+
 @dataclass
 class ReleaseScorePart:
     name: str
@@ -68,6 +135,12 @@ class ReleaseEvaluateState:
     git_status_entries: list[dict[str, str]] = field(default_factory=list)
     deployment_profile: str = "single_production"
     allow_dirty_build: bool = False
+    test_discovery_local_env: bool = False
+    test_discovery_error: str = ""
+    local_environment: list[str] = field(default_factory=list)
+    information: list[str] = field(default_factory=list)
+    findings: list[ClassifiedFinding] = field(default_factory=list)
+    summary: StatusSummary | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -93,6 +166,16 @@ class ReleaseEvaluateState:
             "git_status_entries": list(self.git_status_entries),
             "deployment_profile": self.deployment_profile,
             "allow_dirty_build": self.allow_dirty_build,
+            "test_discovery_local_env": self.test_discovery_local_env,
+            "test_discovery_error": self.test_discovery_error,
+            "local_environment": list(self.local_environment),
+            "information": list(self.information),
+            "findings": [
+                f.to_dict() if hasattr(f, "to_dict") else f for f in self.findings
+            ],
+            "summary": self.summary.to_dict() if isinstance(self.summary, StatusSummary) else (
+                self.summary if isinstance(self.summary, dict) else {}
+            ),
         }
 
     @classmethod
@@ -125,4 +208,15 @@ class ReleaseEvaluateState:
             git_status_entries=list(data.get("git_status_entries", [])),
             deployment_profile=data.get("deployment_profile", "single_production"),
             allow_dirty_build=bool(data.get("allow_dirty_build", False)),
+            test_discovery_local_env=bool(data.get("test_discovery_local_env", False)),
+            test_discovery_error=data.get("test_discovery_error", ""),
+            local_environment=list(data.get("local_environment", [])),
+            information=list(data.get("information", [])),
+            findings=[
+                ClassifiedFinding.from_dict(f) if isinstance(f, dict) else f
+                for f in data.get("findings", [])
+            ],
+            summary=StatusSummary.from_dict(data["summary"])
+            if isinstance(data.get("summary"), dict)
+            else data.get("summary"),
         )
