@@ -45,7 +45,12 @@ class AuthService:
         except Exception as exc:
             raise UnauthorizedError("Nieprawidlowy token dostepu.") from exc
 
-        user = self.user_repository.get_by_id(UUID(user_id))
+        try:
+            user_uuid = UUID(str(user_id))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise UnauthorizedError("Nieprawidlowy token dostepu.") from exc
+
+        user = self.user_repository.get_by_id(user_uuid)
         if user is None or not user.is_active:
             raise UnauthorizedError("Uzytkownik nie istnieje lub jest nieaktywny.")
 

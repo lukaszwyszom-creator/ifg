@@ -68,6 +68,11 @@ class TestGetAuthenticatedUser:
         with pytest.raises(UnauthorizedError, match="token"):
             service.get_authenticated_user("invalid-token")
 
+    @patch("app.services.auth_service.decode_access_token", return_value={"sub": "admin"})
+    def test_invalid_subject_uuid_raises(self, _mock, service: AuthService):
+        with pytest.raises(UnauthorizedError, match="token"):
+            service.get_authenticated_user("legacy-token")
+
     @patch("app.services.auth_service.decode_access_token", return_value={"sub": str(uuid4())})
     def test_user_not_found_raises(self, _mock, service: AuthService):
         service.user_repository.get_by_id.return_value = None
