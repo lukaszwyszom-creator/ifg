@@ -1,9 +1,9 @@
 # IFG Guardian — IFG Doctor
 
-**Generated:** 2026-07-10 22:05:20 UTC  
-**Overall status:** `BLOCKED`  
+**Generated:** 2026-07-10 22:23:58 UTC  
+**Overall status:** `READY_WITH_WARNINGS`  
 **Question:** Czy środowisko IFG jest gotowe do bezpiecznej pracy i deployu?  
-**Workflow ID:** `2026-07-10T220516Z_ifg_doctor`  
+**Workflow ID:** `2026-07-10T222355Z_ifg_doctor`  
 **Duration:** 0 ms  
 
 ## Checks
@@ -12,9 +12,9 @@
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `PASS` | branch | on production (f5215b0) |
+| `PASS` | branch | on production (6efafc1) |
 | `WARN` | git status | working tree dirty |
-| `PASS` | ahead/behind | synced with origin/production |
+| `WARN` | ahead/behind | ahead=2, behind=0 vs origin/production |
 | `PASS` | python | Python 3.14.5 |
 | `PASS` | node | v25.9.0 |
 | `PASS` | npm | 11.12.1 |
@@ -23,25 +23,24 @@
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `PASS` | repo audit | overall risk HIGH, 217 classified file(s) |
+| `PASS` | repo audit | overall risk MEDIUM, 16 classified file(s) |
 | `WARN` | dirty repo | working tree has tracked/untracked changes |
-| `WARN` | line endings | 8 file(s) with unknown line endings |
+| `PASS` | line endings | no line-ending issues detected |
 | `PASS` | ignored files | no tracked ignore conflicts |
 
 ### Frontend
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `WARN` | frontend-react/src | uncommitted changes in frontend-react/src |
-| `PASS` | npm run build | ✅ [lokalnie] dist nowszy niż niezcommitowane zmiany src |
+| `PASS` | frontend-react/src | no uncommitted src changes |
+| `PASS` | npm run build | ✅ [lokalnie] brak niezcommitowanych zmian frontend-react/src |
 | `PASS` | dist freshness | ✅ [lokalnie] frontend-react/dist aktualny względem ostatniego commita src |
 
 ### Backend
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `FAIL` | backend changes | 7 backend/alembic change(s) |
-| `FAIL` | build required | rebuild api/worker required before deploy |
+| `PASS` | backend changes | no pending backend/alembic changes |
 
 ### Docker
 
@@ -124,11 +123,11 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic. |
 
 ## Summary
 
-- **overall_status:** BLOCKED
-- **checks_total:** 27
-- **pass:** 20
-- **warn:** 5
-- **fail:** 2
+- **overall_status:** READY_WITH_WARNINGS
+- **checks_total:** 26
+- **pass:** 22
+- **warn:** 4
+- **fail:** 0
 - **critical:** 0
 
 ## Decyzje dla ChatGPT

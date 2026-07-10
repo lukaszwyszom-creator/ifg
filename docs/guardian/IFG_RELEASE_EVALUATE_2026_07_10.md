@@ -1,21 +1,21 @@
 # IFG Guardian — Release Engine Evaluation
 
-**Generated:** 2026-07-10 22:05:24 UTC  
+**Generated:** 2026-07-10 22:24:03 UTC  
 **Decision:** `PRODUCTION_BLOCKED`  
 **Deployment Profile:** `single_production`  
 **Policy Engine:** final decision authority  
-**Release Score:** `88/100`  
+**Release Score:** `94/100`  
 **Deployment Recommendation:** **Deploy zablokowany**  
-**Backup Required:** `True`  
+**Backup Required:** `False`  
 **Staging Required:** `False`  
 **Production Blocked:** `True`  
-**Workflow ID:** `2026-07-10T220516Z_ifg_release_evaluate`  
-**Duration:** 8244 ms  
+**Workflow ID:** `2026-07-10T222355Z_ifg_release_evaluate`  
+**Duration:** 7594 ms  
 ## Executive Summary
 
 | Dimension | Status |
 |---|---|
-| **Project status** | `BLOCKED` |
+| **Project status** | `WARNING` |
 | **Environment status** | `WARNING` |
 | **Policy status** | `BLOCK` |
 | **Deployment recommendation** | `Deploy zablokowany` |
@@ -24,21 +24,18 @@ Operator note: blockers in **BLOCKERS** concern the project or policy. Items in 
 
 ## Decision Rationale
 
-Policy decision based on doctor status `BLOCKED`, facts from checks and advisory release score `88`.
+Policy decision based on doctor status `READY_WITH_WARNINGS`, facts from checks and advisory release score `94`.
 
 ## BLOCKERS
 
-- [backend] backend changes: 7 backend/alembic change(s)
-- [backend] build required: rebuild api/worker required before deploy
 - Policy rule triggered: dirty_working_tree_blocks_production
 - Production deployment blocked. Working tree contains uncommitted changes.
 
 ## WARNINGS
 
 - [environment] git status: working tree dirty
+- [environment] ahead/behind: ahead=2, behind=0 vs origin/production
 - [repository] dirty repo: working tree has tracked/untracked changes
-- [repository] line endings: 8 file(s) with unknown line endings
-- [frontend] frontend-react/src: uncommitted changes in frontend-react/src
 - [alembic] current: Traceback (most recent call last):
   File "/opt/homebrew/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -82,9 +79,8 @@ Policy decision based on doctor status `BLOCKED`, facts from checks and advisory
   File "/Users/lukasz/projekty/ifg_standalone/alembic/env.py", line 25, in get_database_url
     raise RuntimeError("Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.")
 RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
-- Policy rule triggered: critical_db_change_requires_verified_backup
 - Policy rule triggered: untracked_files_warn
-- Policy rule triggered: doctor_fail_warn_single_production
+- Deploy check returned exit code 1
 
 ## LOCAL ENVIRONMENT
 
@@ -92,15 +88,17 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 
 ## INFORMATION
 
-- [environment] branch: on production (f5215b0)
-- [environment] ahead/behind: synced with origin/production
+- [environment] branch: on production (6efafc1)
 - [environment] python: Python 3.14.5
 - [environment] node: v25.9.0
 - [environment] npm: 11.12.1
-- [repository] repo audit: overall risk HIGH, 217 classified file(s)
+- [repository] repo audit: overall risk MEDIUM, 16 classified file(s)
+- [repository] line endings: no line-ending issues detected
 - [repository] ignored files: no tracked ignore conflicts
-- [frontend] npm run build: ✅ [lokalnie] dist nowszy niż niezcommitowane zmiany src
+- [frontend] frontend-react/src: no uncommitted src changes
+- [frontend] npm run build: ✅ [lokalnie] brak niezcommitowanych zmian frontend-react/src
 - [frontend] dist freshness: ✅ [lokalnie] frontend-react/dist aktualny względem ostatniego commita src
+- [backend] backend changes: no pending backend/alembic changes
 - [docker] compose config: compose file valid
 - [docker] containers: api/worker/db running
 - [docker] images: compose ps returned 3 service(s)
@@ -112,20 +110,17 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 - [configuration] .env.production: .env.production present locally
 - [configuration] required variables: required keys documented in .env.example
 - [health] /health: {"status":"ok","app_name":"IFG Faktury","version":"1.0.0","environment":"production","db_timezone":"Europe/Warsaw","db_timezone_utc":false,"regon":{"environment":"production","configured":true}}
-- Policy rule triggered: backend_change_requires_api_worker_rebuild
 - Zacommituj zmiany lub użyj jawnego override: guardian ifg deploy run --allow-dirty-build --yes
-- Wykonaj backup DB przed produkcją (krytyczne tabele migracji: invoices, transmissions).
-- Wymagany rebuild obrazów api/worker przed produkcją.
-- Zweryfikuj untracked pliki przed produkcją: .state/, Architecture/, docs/FV_AUTO_WZ_IMPLEMENTATION_PLAN.md, docs/FV_DRAFT_LOCKED_NUMBERING_MODEL.md, docs/FV_NUMBERING_RENUMBERING_BUG.md, docs/FV_STATUS_NUMBERING_POLICY_REVIEW.md, docs/FV_WZ_AUTO_SYNC_ANALYSIS.md, docs/IFG_LONG_RUNNING_OPERATIONS_STANDARD.md
+- Zweryfikuj untracked pliki przed produkcją: reports/CHATGPT_HANDOFF_2026-07-11.md, scripts/ifg_guardian/core/clipboard.py, scripts/ifg_guardian/core/report_metadata.py, tests/unit/test_guardian_handoff_clipboard.py, tests/unit/test_guardian_report_metadata.py
 
 
 ## Release Score Breakdown
 
 | Component | Weight | Score | Rationale |
 |---|---:|---:|---|
-| repo | 15 | 60 | repo+audit |
+| repo | 15 | 80 | repo+audit |
 | tests | 15 | 100 | pytest collect |
-| build | 15 | 80 | frontend build checks |
+| build | 15 | 100 | frontend build checks |
 | migrations | 12 | 80 | alembic checks |
 | docker | 10 | 100 | docker checks |
 | configuration | 10 | 100 | env/config checks |
@@ -136,31 +131,26 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 
 | Area | Impact |
 |---|---|
-| Backend | MEDIUM |
-| Frontend | MEDIUM |
+| Backend | LOW |
+| Frontend | LOW |
 | Mobile | LOW |
 | Docker | LOW |
 | DB | LOW |
 | Alembic | LOW |
 | Worker | LOW |
-| KSeF | HIGH |
-| Warehouse | HIGH |
-| Payments | HIGH |
+| KSeF | LOW |
+| Warehouse | LOW |
+| Payments | LOW |
 
 ## Policy Rules Triggered
 
 - `dirty_working_tree_blocks_production`
-- `critical_db_change_requires_verified_backup`
-- `backend_change_requires_api_worker_rebuild`
 - `untracked_files_warn`
-- `doctor_fail_warn_single_production`
 
 ## Required Actions Before Production
 
 - Zacommituj zmiany lub użyj jawnego override: guardian ifg deploy run --allow-dirty-build --yes
-- Wykonaj backup DB przed produkcją (krytyczne tabele migracji: invoices, transmissions).
-- Wymagany rebuild obrazów api/worker przed produkcją.
-- Zweryfikuj untracked pliki przed produkcją: .state/, Architecture/, docs/FV_AUTO_WZ_IMPLEMENTATION_PLAN.md, docs/FV_DRAFT_LOCKED_NUMBERING_MODEL.md, docs/FV_NUMBERING_RENUMBERING_BUG.md, docs/FV_STATUS_NUMBERING_POLICY_REVIEW.md, docs/FV_WZ_AUTO_SYNC_ANALYSIS.md, docs/IFG_LONG_RUNNING_OPERATIONS_STANDARD.md
+- Zweryfikuj untracked pliki przed produkcją: reports/CHATGPT_HANDOFF_2026-07-11.md, scripts/ifg_guardian/core/clipboard.py, scripts/ifg_guardian/core/report_metadata.py, tests/unit/test_guardian_handoff_clipboard.py, tests/unit/test_guardian_report_metadata.py
 
 ## Next Step
 
