@@ -39,13 +39,19 @@ def _max_status(a: ReleaseDecisionStatus, b: ReleaseDecisionStatus) -> ReleaseDe
     return a if rank[a] >= rank[b] else b
 
 
-def _working_tree_dirty(state: ReleaseEvaluateState) -> bool:
+def _working_tree_dirty(
+    state: ReleaseEvaluateState,
+    *,
+    report_prefixes: tuple[str, ...] = (),
+) -> bool:
     for entry in state.git_status_entries:
         path = (entry.get("path") or "").strip()
         code = (entry.get("code") or "").strip()
         if not path:
             continue
         if code == "??" and (path == "backups" or path.startswith("backups/")):
+            continue
+        if report_prefixes and any(path.startswith(prefix) for prefix in report_prefixes):
             continue
         return True
     return False
@@ -75,7 +81,8 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
     staging_available = bool(profile_cfg.get("staging_available", deployment_profile == "enterprise"))
     state.deployment_profile = deployment_profile
 
-    if _working_tree_dirty(state):
+    report_prefixes = tuple(policy.get("report_paths", []))
+    if _working_tree_dirty(state, report_prefixes=report_prefixes):
         if state.allow_dirty_build:
             decision = _max_status(decision, ReleaseDecisionStatus.READY_WITH_OVERRIDE)
             rules.append("dirty_tree_build_with_override")
@@ -143,7 +150,6 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
         rules.append("backend_change_requires_api_worker_rebuild")
         required_actions.append("Wymagany rebuild obrazów api/worker przed produkcją.")
 
-    report_prefixes = tuple(policy.get("report_paths", []))
     block_patterns = [s.lower() for s in policy.get("non_report_untracked_block_patterns", [])]
     suspicious_untracked: list[str] = []
     normal_untracked: list[str] = []
