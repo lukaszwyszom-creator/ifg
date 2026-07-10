@@ -1,19 +1,3 @@
-# CHATGPT HANDOFF 2026-07-11
-
-## Streszczenie
-
-- Liczba znalezionych raportów: 1
-- Zakres GWO: GWO-GUARDIAN-0065, GWO-GUARDIAN-0066, GWO-IFG-0064, GWO-IFG-0067, GWO-IFG-0068
-- Preferencja raportów z dzisiaj: TAK
-- Scalono pliki:
-  - `docs/reports/2026-07-11_GWO-IFG-0068_RELEASE_FINALIZATION.md`
-
-## Co wymaga decyzji ChatGPT
-
-Brak decyzji wymagających oceny ChatGPT.
-
-## Raport 1: `docs/reports/2026-07-11_GWO-IFG-0068_RELEASE_FINALIZATION.md`
-
 ---
 kind: gwo
 project: IFG
@@ -179,8 +163,3 @@ Brak.
 - `docs/reports/2026-07-11_GWO-IFG-0068_RELEASE_FINALIZATION.md`
 - `docs/guardian/IFG_RELEASE_EVALUATE_2026_07_10.md` (auto, po evaluate)
 - `docs/guardian/IFG_DOCTOR_2026_07_10.md` (auto, po evaluate)
-
-## Wygenerowane raporty
-
-- `/Users/lukasz/projekty/ifg_standalone/reports/CHATGPT_HANDOFF_2026-07-11.md`
-- `docs/reports/2026-07-11_GWO-IFG-0068_RELEASE_FINALIZATION.md`

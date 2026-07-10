@@ -1,41 +1,38 @@
 # IFG Guardian — Release Engine Evaluation
 
-**Generated:** 2026-07-10 22:24:03 UTC  
-**Decision:** `PRODUCTION_BLOCKED`  
+**Generated:** 2026-07-10 22:36:18 UTC  
+**Decision:** `READY_FOR_DEPLOY`  
 **Deployment Profile:** `single_production`  
 **Policy Engine:** final decision authority  
-**Release Score:** `94/100`  
-**Deployment Recommendation:** **Deploy zablokowany**  
+**Release Score:** `97/100`  
+**Deployment Recommendation:** **Deploy możliwy**  
 **Backup Required:** `False`  
 **Staging Required:** `False`  
-**Production Blocked:** `True`  
-**Workflow ID:** `2026-07-10T222355Z_ifg_release_evaluate`  
-**Duration:** 7594 ms  
+**Production Blocked:** `False`  
+**Workflow ID:** `2026-07-10T223612Z_ifg_release_evaluate`  
+**Duration:** 6714 ms  
 ## Executive Summary
 
 | Dimension | Status |
 |---|---|
 | **Project status** | `WARNING` |
 | **Environment status** | `WARNING` |
-| **Policy status** | `BLOCK` |
-| **Deployment recommendation** | `Deploy zablokowany` |
+| **Policy status** | `PASS` |
+| **Deployment recommendation** | `Deploy możliwy` |
 
 Operator note: blockers in **BLOCKERS** concern the project or policy. Items in **LOCAL ENVIRONMENT** reflect this machine's interpreter/tools — they do not block release by themselves.
 
 ## Decision Rationale
 
-Policy decision based on doctor status `READY_WITH_WARNINGS`, facts from checks and advisory release score `94`.
+Policy decision based on doctor status `READY_WITH_WARNINGS`, facts from checks and advisory release score `97`.
 
 ## BLOCKERS
 
-- Policy rule triggered: dirty_working_tree_blocks_production
-- Production deployment blocked. Working tree contains uncommitted changes.
+- None
 
 ## WARNINGS
 
-- [environment] git status: working tree dirty
-- [environment] ahead/behind: ahead=2, behind=0 vs origin/production
-- [repository] dirty repo: working tree has tracked/untracked changes
+- [environment] ahead/behind: ahead=6, behind=0 vs origin/production
 - [alembic] current: Traceback (most recent call last):
   File "/opt/homebrew/bin/alembic", line 6, in <module>
     sys.exit(main())
@@ -79,7 +76,6 @@ Policy decision based on doctor status `READY_WITH_WARNINGS`, facts from checks 
   File "/Users/lukasz/projekty/ifg_standalone/alembic/env.py", line 25, in get_database_url
     raise RuntimeError("Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.")
 RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
-- Policy rule triggered: untracked_files_warn
 - Deploy check returned exit code 1
 
 ## LOCAL ENVIRONMENT
@@ -88,11 +84,13 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 
 ## INFORMATION
 
-- [environment] branch: on production (6efafc1)
+- [environment] branch: on production (42e76dc)
+- [environment] git status: working tree clean
 - [environment] python: Python 3.14.5
 - [environment] node: v25.9.0
 - [environment] npm: 11.12.1
-- [repository] repo audit: overall risk MEDIUM, 16 classified file(s)
+- [repository] repo audit: overall risk MEDIUM, 0 classified file(s)
+- [repository] dirty repo: working tree clean (audit)
 - [repository] line endings: no line-ending issues detected
 - [repository] ignored files: no tracked ignore conflicts
 - [frontend] frontend-react/src: no uncommitted src changes
@@ -110,15 +108,13 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 - [configuration] .env.production: .env.production present locally
 - [configuration] required variables: required keys documented in .env.example
 - [health] /health: {"status":"ok","app_name":"IFG Faktury","version":"1.0.0","environment":"production","db_timezone":"Europe/Warsaw","db_timezone_utc":false,"regon":{"environment":"production","configured":true}}
-- Zacommituj zmiany lub użyj jawnego override: guardian ifg deploy run --allow-dirty-build --yes
-- Zweryfikuj untracked pliki przed produkcją: reports/CHATGPT_HANDOFF_2026-07-11.md, scripts/ifg_guardian/core/clipboard.py, scripts/ifg_guardian/core/report_metadata.py, tests/unit/test_guardian_handoff_clipboard.py, tests/unit/test_guardian_report_metadata.py
 
 
 ## Release Score Breakdown
 
 | Component | Weight | Score | Rationale |
 |---|---:|---:|---|
-| repo | 15 | 80 | repo+audit |
+| repo | 15 | 100 | repo+audit |
 | tests | 15 | 100 | pytest collect |
 | build | 15 | 100 | frontend build checks |
 | migrations | 12 | 80 | alembic checks |
@@ -144,17 +140,15 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic.
 
 ## Policy Rules Triggered
 
-- `dirty_working_tree_blocks_production`
-- `untracked_files_warn`
+- None
 
 ## Required Actions Before Production
 
-- Zacommituj zmiany lub użyj jawnego override: guardian ifg deploy run --allow-dirty-build --yes
-- Zweryfikuj untracked pliki przed produkcją: reports/CHATGPT_HANDOFF_2026-07-11.md, scripts/ifg_guardian/core/clipboard.py, scripts/ifg_guardian/core/report_metadata.py, tests/unit/test_guardian_handoff_clipboard.py, tests/unit/test_guardian_report_metadata.py
+- None
 
 ## Next Step
 
-Usuń blockery polityk i uruchom ponownie guardian release evaluate.
+N/A
 
 
 ## Decyzje dla ChatGPT

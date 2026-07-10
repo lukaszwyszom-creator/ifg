@@ -1,9 +1,9 @@
 # IFG Guardian — IFG Doctor
 
-**Generated:** 2026-07-10 22:23:58 UTC  
+**Generated:** 2026-07-10 22:36:14 UTC  
 **Overall status:** `READY_WITH_WARNINGS`  
 **Question:** Czy środowisko IFG jest gotowe do bezpiecznej pracy i deployu?  
-**Workflow ID:** `2026-07-10T222355Z_ifg_doctor`  
+**Workflow ID:** `2026-07-10T223612Z_ifg_doctor`  
 **Duration:** 0 ms  
 
 ## Checks
@@ -12,9 +12,9 @@
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `PASS` | branch | on production (6efafc1) |
-| `WARN` | git status | working tree dirty |
-| `WARN` | ahead/behind | ahead=2, behind=0 vs origin/production |
+| `PASS` | branch | on production (42e76dc) |
+| `PASS` | git status | working tree clean |
+| `WARN` | ahead/behind | ahead=6, behind=0 vs origin/production |
 | `PASS` | python | Python 3.14.5 |
 | `PASS` | node | v25.9.0 |
 | `PASS` | npm | 11.12.1 |
@@ -23,8 +23,8 @@
 
 | Status | Check | Message |
 |--------|-------|---------|
-| `PASS` | repo audit | overall risk MEDIUM, 16 classified file(s) |
-| `WARN` | dirty repo | working tree has tracked/untracked changes |
+| `PASS` | repo audit | overall risk MEDIUM, 0 classified file(s) |
+| `PASS` | dirty repo | working tree clean (audit) |
 | `PASS` | line endings | no line-ending issues detected |
 | `PASS` | ignored files | no tracked ignore conflicts |
 
@@ -125,8 +125,8 @@ RuntimeError: Brak DATABASE_URL w zmiennych srodowiskowych dla Alembic. |
 
 - **overall_status:** READY_WITH_WARNINGS
 - **checks_total:** 26
-- **pass:** 22
-- **warn:** 4
+- **pass:** 24
+- **warn:** 2
 - **fail:** 0
 - **critical:** 0
 
