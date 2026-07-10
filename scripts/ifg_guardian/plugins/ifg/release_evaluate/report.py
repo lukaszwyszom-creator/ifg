@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.time_compat import UTC
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction
@@ -50,7 +51,12 @@ def _section(title: str, items: list[str]) -> list[str]:
     return lines
 
 
-def render_markdown(state: ReleaseEvaluateState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    state: ReleaseEvaluateState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     duration = _workflow_duration_ms(transaction)
     lines = [
@@ -101,7 +107,7 @@ def render_markdown(state: ReleaseEvaluateState, *, transaction: WorkflowTransac
     if transaction is not None:
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: ReleaseEvaluateState, *, transaction: WorkflowTransaction) -> str:

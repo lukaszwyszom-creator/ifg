@@ -1,0 +1,130 @@
+# IFG Repository Cleanup Execution
+
+**Executed:** 2026-06-26 21:46 UTC  
+**Phase:** 0  
+**Operations run:** 69  
+
+## Executed
+
+- removed .logs
+- removed .pytest_cache
+- removed agent/__pycache__
+- removed app/__pycache__
+- removed app/api/__pycache__
+- removed app/api/routers/__pycache__
+- removed app/core/__pycache__
+- removed app/domain/__pycache__
+- removed app/domain/models/__pycache__
+- removed app/integrations/__pycache__
+- removed app/integrations/ksef/__pycache__
+- removed app/integrations/nbp/__pycache__
+- removed app/integrations/regon/__pycache__
+- removed app/persistence/__pycache__
+- removed app/persistence/mappers/__pycache__
+- removed app/persistence/models/__pycache__
+- removed app/persistence/repositories/__pycache__
+- removed app/schemas/__pycache__
+- removed app/services/__pycache__
+- removed app/worker/__pycache__
+- removed app/worker/job_handlers/__pycache__
+- removed scripts/__pycache__
+- removed scripts/guardian_platform/__pycache__
+- removed scripts/guardian_platform/core/__pycache__
+- removed scripts/guardian_platform/core/cli/__pycache__
+- removed scripts/guardian_platform/core/config/__pycache__
+- removed scripts/guardian_platform/core/environment/__pycache__
+- removed scripts/guardian_platform/core/git/__pycache__
+- removed scripts/guardian_platform/core/profiles/__pycache__
+- removed scripts/guardian_platform/core/registry/__pycache__
+- removed scripts/guardian_platform/core/reporting/__pycache__
+- removed scripts/guardian_platform/core/repository/__pycache__
+- removed scripts/guardian_platform/core/runtime/__pycache__
+- removed scripts/guardian_platform/core/shell/__pycache__
+- removed scripts/guardian_platform/core/workflow/__pycache__
+- removed scripts/guardian_platform/core/workflow/workflows/__pycache__
+- removed scripts/guardian_platform/profiles/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/checks/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/commands/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/config/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/deploy/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/doctor/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/infra/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/lib/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/recover/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/repo_audit/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/repo_cleanup/__pycache__
+- removed scripts/guardian_platform/profiles/ifg/workflows/__pycache__
+- removed scripts/guardian_platform/profiles/ifg_scaffold/__pycache__
+- removed scripts/guardian_platform/profiles/psag_scaffold/__pycache__
+- removed scripts/ifg_guardian/__pycache__
+- removed scripts/ifg_guardian/core/__pycache__
+- removed scripts/ifg_guardian/core/plugins/__pycache__
+- removed scripts/ifg_guardian/core/repo_audit/__pycache__
+- removed scripts/ifg_guardian/core/workflow/__pycache__
+- removed scripts/ifg_guardian/core/workflow/executors/__pycache__
+- removed scripts/ifg_guardian/modules/__pycache__
+- removed scripts/ifg_guardian/plugins/__pycache__
+- removed scripts/ifg_guardian/plugins/core/__pycache__
+- removed scripts/ifg_guardian/plugins/core/workflows/__pycache__
+- removed scripts/ifg_guardian/plugins/core/workflows/repo_audit/__pycache__
+- removed scripts/ifg_guardian/plugins/ifg/__pycache__
+- removed scripts/ifg_guardian/plugins/ifg/deploy_run/__pycache__
+- removed scripts/ifg_guardian/plugins/ifg/doctor/__pycache__
+- removed scripts/ifg_guardian/plugins/ifg/release_plan/__pycache__
+- removed tests/__pycache__
+- removed tests/guardian_platform/__pycache__
+- removed tests/unit/__pycache__
+
+## Rollback plan
+
+- Restore from VCS or rebuild if needed (.logs)
+- Restore from VCS or rebuild if needed (.pytest_cache)
+- Regenerate: run Python/tests (recreates agent/__pycache__)
+- Regenerate: run Python/tests (recreates app/__pycache__)
+- Regenerate: run Python/tests (recreates app/api/__pycache__)
+- Regenerate: run Python/tests (recreates app/api/routers/__pycache__)
+- Regenerate: run Python/tests (recreates app/core/__pycache__)
+- Regenerate: run Python/tests (recreates app/domain/__pycache__)
+- Regenerate: run Python/tests (recreates app/domain/models/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/ksef/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/nbp/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/regon/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/mappers/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/models/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/repositories/__pycache__)
+- Regenerate: run Python/tests (recreates app/schemas/__pycache__)
+- Regenerate: run Python/tests (recreates app/services/__pycache__)
+- Regenerate: run Python/tests (recreates app/worker/__pycache__)
+- Regenerate: run Python/tests (recreates app/worker/job_handlers/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/cli/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/config/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/environment/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/git/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/profiles/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/registry/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/reporting/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/repository/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/runtime/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/shell/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/workflows/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/checks/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/commands/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/config/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/deploy/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/doctor/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/infra/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/lib/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/recover/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_audit/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_cleanup/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/workflows/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg_scaffold/__pycache__)

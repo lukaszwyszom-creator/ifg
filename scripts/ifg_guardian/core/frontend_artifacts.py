@@ -9,8 +9,8 @@ DIST_REL = "frontend-react/dist"
 INDEX_REL = f"{DIST_REL}/index.html"
 ASSETS_REL = f"{DIST_REL}/assets"
 
-ARTIFACT_GATE_LOCAL_CMD = "ifg_guardian_frontend_artifact_gate local"
-ARTIFACT_GATE_REMOTE_CMD = "ifg_guardian_frontend_artifact_gate remote"
+ARTIFACT_GATE_LOCAL_CMD = "python3 scripts/ifg_guardian_frontend_artifact_gate.py local"
+ARTIFACT_GATE_REMOTE_CMD = "python3 scripts/ifg_guardian_frontend_artifact_gate.py remote"
 
 GO_MARKER = "ARTIFACT_GATE_STATUS=GO"
 NO_GO_MARKER = "ARTIFACT_GATE_STATUS=NO_GO"
@@ -159,4 +159,5 @@ def build_rsync_dist_command(*, remote_path: str | None = None) -> str:
     ssh_target = cfg.ssh_target
     port = cfg.port
     dest = f"{ssh_target}:{cfg.repo}/frontend-react/dist/"
-    return f'rsync -av -e "ssh -p {port}" frontend-react/dist/ {dest}'
+    rsync_path = f" --rsync-path={cfg.remote_rsync_path}" if cfg.remote_rsync_path else ""
+    return f'rsync -av{rsync_path} -e "ssh -p {port}" frontend-react/dist/ {dest}'

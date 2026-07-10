@@ -28,6 +28,7 @@ def execute_ifg_doctor(
     report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
     root: Path | None = None,
 ):
     runtime = create_runtime(root=root)
@@ -47,6 +48,7 @@ def execute_ifg_doctor(
                 "report_path": str(report_path) if report_path else None,
                 "remote_host": remote_host,
                 "remote_path": remote_path,
+                "progress_enabled": progress_enabled,
             },
             plugin_registry=runtime.plugin_registry,
         )
@@ -68,6 +70,7 @@ def run_ifg_doctor(
     report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
 ) -> int:
     try:
         ctx = execute_ifg_doctor(
@@ -77,6 +80,7 @@ def run_ifg_doctor(
             report_path=report_path,
             remote_host=remote_host,
             remote_path=remote_path,
+            progress_enabled=progress_enabled,
         )
     except RuntimeError as exc:
         print(f"\n❌ Doctor failed: {exc}")

@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from guardian_platform.core.reporting.debt import finish_markdown
 from guardian_platform.core.workflow.context import WorkflowTransaction
 from guardian_platform.profiles.ifg.recover.models import RecoverState
 
 
-def render_markdown(state: RecoverState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    state: RecoverState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     mode = "DRY-RUN" if state.dry_run else "LIVE"
     lines = [
@@ -41,7 +47,7 @@ def render_markdown(state: RecoverState, *, transaction: WorkflowTransaction | N
         for note in state.notes:
             lines.append(f"- {note}")
 
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: RecoverState, *, transaction: WorkflowTransaction) -> str:

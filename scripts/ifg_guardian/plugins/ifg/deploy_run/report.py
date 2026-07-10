@@ -8,6 +8,7 @@ from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployRunState, DeployStepStatus
 
 
@@ -16,7 +17,12 @@ def deploy_from_transaction(transaction: WorkflowTransaction) -> DeployRunState:
     return DeployRunState.from_dict(payload)
 
 
-def render_markdown(state: DeployRunState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    state: DeployRunState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     mode = "DRY-RUN" if state.dry_run else "LIVE"
     lines = [
@@ -115,8 +121,7 @@ def render_markdown(state: DeployRunState, *, transaction: WorkflowTransaction |
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
 
-    lines.append("")
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: DeployRunState, *, transaction: WorkflowTransaction) -> str:

@@ -6,7 +6,13 @@ from ifg_guardian.core.workflow.mode import ExecutionMode
 from ifg_guardian.core.workflow.state import WorkflowState
 
 
-def run_workflow(workflow_id: str, *, dry_run: bool = False, plan: bool = False) -> int:
+def run_workflow(
+    workflow_id: str,
+    *,
+    dry_run: bool = False,
+    plan: bool = False,
+    progress_enabled: bool | None = None,
+) -> int:
     runtime = create_runtime()
     try:
         workflow = runtime.resolve_workflow(workflow_id)
@@ -26,7 +32,11 @@ def run_workflow(workflow_id: str, *, dry_run: bool = False, plan: bool = False)
         print(f"Mode: {mode.value}")
 
         engine = ExecutionEngine(root=runtime.config.root)
-        ctx = engine.run(workflow, mode=mode)
+        ctx = engine.run(
+            workflow,
+            mode=mode,
+            initial_data={"progress_enabled": progress_enabled},
+        )
 
         print(f"\nWorkflow ID: {ctx.workflow_id}")
         print(f"Outcome: {ctx.transaction.outcome}")

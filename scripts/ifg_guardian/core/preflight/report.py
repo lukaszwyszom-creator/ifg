@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.core.time_compat import UTC
 
 from ifg_guardian.core.preflight.models import DeploymentDecision, PreflightReport, PreflightStatus
@@ -12,6 +13,7 @@ def render_precheck_markdown(
     *,
     decision: DeploymentDecision,
     workflow_id: str = "",
+    debt=None,
 ) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [
@@ -80,4 +82,4 @@ def render_precheck_markdown(
     lines.append("---")
     lines.append("")
     lines.append("*Read-only preflight — no environment mutations.*")
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=report, transaction=None)

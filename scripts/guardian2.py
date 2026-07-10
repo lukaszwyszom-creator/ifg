@@ -79,6 +79,15 @@ class RecoveryReport:
     cloudflared_ps: str = ""
     cloudflared_logs: str = ""
     ksef_connect_blocker: str = ""
+    precheck_ok: bool = False
+    precheck_details: list[str] = field(default_factory=list)
+    backup_path: str = ""
+    backup_size_bytes: int = 0
+    backup_ok: bool = False
+    smoke_ok: bool = False
+    smoke_details: list[str] = field(default_factory=list)
+    worker_logs: str = ""
+    db_logs: str = ""
     notes: list[str] = field(default_factory=list)
     aborted: bool = False
     abort_reason: str = ""
@@ -213,6 +222,119 @@ def _wait_for_service(
     return False, last_line or f"brak wpisu {service} w compose ps"
 
 
+def _recovery_precheck(host: str, report: RecoveryReport) -> bool:
+    """Read-only precheck before mutating recovery steps."""
+    compose = _compose_cmd()
+    checks: list[tuple[str, str, bool]] = []
+
+    code, out, err = _ssh_capture(host, f"{compose} config --quiet")
+    checks.append(("compose config", err or out or "OK", code == 0))
+
+    code, out, _ = _ssh_capture(host, f"{compose} ps -a")
+    ps_text = out or ""
+    states = parse_compose_service_states(ps_text)
+    stack_stopped = bool(states) and all(
+        not service_state_is_running(state) for state in states.values()
+    )
+    checks.append(("stack IFG zatrzymany", ps_text or "(brak ps)", stack_stopped))
+
+    for image in ("ifg-api:latest", "postgres:17"):
+        code, out, err = _ssh_capture(
+            host,
+            f"sudo docker images --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep -Fx '{image}'",
+            cwd=None,
+        )
+        checks.append((f"obraz {image}", out or err or "brak", code == 0 and bool(out)))
+
+    code, out, err = _ssh_capture(
+        host,
+        "sudo docker volume inspect docker_postgres_data --format '{{.Name}}'",
+        cwd=None,
+    )
+    checks.append(("wolumen docker_postgres_data", out or err, code == 0))
+
+    for rel_path in (".env.production", "frontend-react/dist/index.html"):
+        code, out, err = _ssh_capture(host, f"test -f {rel_path} && wc -c < {rel_path}")
+        checks.append((rel_path, out or err or "brak", code == 0 and bool(out)))
+
+    code, out, err = _ssh_capture(host, "df -h /volume1 | tail -1", cwd=None)
+    disk_ok = code == 0 and bool(out)
+    if disk_ok:
+        parts = out.split()
+        avail = parts[3] if len(parts) >= 4 else out
+        disk_ok = not avail.startswith("0")
+    checks.append(("wolne miejsce /volume1", out or err, disk_ok))
+
+    code, out, _ = _ssh_capture(host, "pgrep -af 'docker compose.*build' || true", cwd=None)
+    parallel_build = bool(out.strip())
+    checks.append(("brak równoległego compose build", out or "(brak)", not parallel_build))
+
+    report.precheck_details = [
+        f"{'✅' if ok else '❌'} {label}: {detail[:300]}"
+        for label, detail, ok in checks
+    ]
+    report.precheck_ok = all(ok for _, _, ok in checks)
+    return report.precheck_ok
+
+
+def _recovery_backup(host: str, report: RecoveryReport) -> bool:
+    """Backup DB after temporary db start; abort recovery if dump invalid."""
+    compose = _compose_cmd()
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    backup_name = f"pre_recovery_{stamp}.dump"
+    backup_rel = f"backups/{backup_name}"
+    report.backup_path = f"{DEFAULT_REMOTE_PATH}/{backup_rel}"
+
+    dump_cmd = (
+        f"mkdir -p backups && "
+        f"{compose} exec -T db sh -c "
+        f"'pg_dump -U \"${{POSTGRES_USER:-postgres}}\" \"${{POSTGRES_DB:-ksef_backend}}\"' "
+        f"> {backup_rel} && wc -c < {backup_rel}"
+    )
+    code, out, err = _ssh_capture(host, dump_cmd)
+    if code != 0:
+        report.backup_ok = False
+        report.notes.append(f"backup FAIL exit {code}: {err or out}")
+        return False
+
+    try:
+        size = int((out or "0").strip().split()[-1])
+    except ValueError:
+        size = 0
+    report.backup_size_bytes = size
+    report.backup_ok = size > 0
+    if not report.backup_ok:
+        report.notes.append(f"backup FAIL: rozmiar {size} B dla {backup_rel}")
+    else:
+        report.notes.append(f"backup OK: {backup_rel} ({size} B)")
+    return report.backup_ok
+
+
+def _recovery_smoke(host: str, report: RecoveryReport) -> bool:
+    """Read-only smoke after stack is up."""
+    compose = _compose_cmd()
+    smoke: list[tuple[str, bool]] = []
+
+    code, body, err = _ssh_capture(host, "curl -sS -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:8000/health")
+    smoke.append((f"GET /health → HTTP {body or err}", code == 0 and body == "200"))
+
+    code, body, err = _ssh_capture(host, "curl -sS -m 10 http://127.0.0.1:8000/openapi.json | head -c 120")
+    smoke.append(("GET /openapi.json (fragment)", code == 0 and bool(body) and '"openapi"' in body))
+
+    code, body, err = _ssh_capture(host, "test -f frontend-react/dist/index.html && head -c 80 frontend-react/dist/index.html")
+    smoke.append(("frontend dist/index.html (host)", code == 0 and "<" in (body or "")))
+
+    code, body, err = _ssh_capture(
+        host,
+        f"{compose} exec -T api curl -sS -o /dev/null -w '%{{http_code}}' -m 10 http://localhost:8000/health",
+    )
+    smoke.append((f"API container /health → HTTP {body or err}", code == 0 and body == "200"))
+
+    report.smoke_details = [f"{'✅' if ok else '❌'} {label}" for label, ok in smoke]
+    report.smoke_ok = all(ok for _, ok in smoke)
+    return report.smoke_ok
+
+
 def _infer_ksef_blocker(report: RecoveryReport) -> str:
     if not report.db_ok:
         return "PostgreSQL (db) niedostępna — API nie może startować (depends_on db healthy)."
@@ -258,6 +380,23 @@ def _write_recovery_report(report: RecoveryReport) -> None:
         lines.extend(["## Notatki", ""])
         lines.extend(f"- {note}" for note in report.notes)
         lines.append("")
+    if report.precheck_details:
+        lines.extend(["## Precheck recovery", ""])
+        lines.extend(report.precheck_details)
+        lines.append("")
+    if report.backup_path:
+        lines.extend([
+            "## Backup przed recovery",
+            "",
+            f"- ścieżka: `{report.backup_path}`",
+            f"- rozmiar: {report.backup_size_bytes} B",
+            f"- OK: {report.backup_ok}",
+            "",
+        ])
+    if report.smoke_details:
+        lines.extend(["## Smoke test (read-only)", ""])
+        lines.extend(report.smoke_details)
+        lines.append("")
     lines.extend([
         "## Git",
         "",
@@ -299,6 +438,18 @@ def _write_recovery_report(report: RecoveryReport) -> None:
         "",
         "```",
         report.api_logs,
+        "```",
+        "",
+        "## Worker logs (tail 80)",
+        "",
+        "```",
+        report.worker_logs,
+        "```",
+        "",
+        "## DB logs (tail 80)",
+        "",
+        "```",
+        report.db_logs,
         "```",
         "",
         "## cloudflared-ifg",
@@ -352,12 +503,29 @@ def recover_prod(
             "git branch --show-current",
             "git rev-parse --short HEAD",
             "git status --short",
-            f"{compose} config --services",
+            f"{compose} config --quiet",
             f"{compose} ps -a",
+            "sudo docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(ifg-api:latest|postgres:17)$'",
+            "sudo docker volume inspect docker_postgres_data --format '{{.Name}}'",
+            "test -f .env.production && test -f frontend-react/dist/index.html",
+            "df -h /volume1 | tail -1",
         ):
             print(f"  > {cmd}")
-        print("[dry-run] recovery steps: up -d db → wait → up -d api worker → health → cloudflared")
+        print("[dry-run] recovery steps: precheck → up -d db → backup → up -d api worker → health → smoke")
         return 0
+
+    if not _recovery_precheck(host, report):
+        report.aborted = True
+        report.abort_reason = "Precheck recovery nie powiódł się — patrz precheck_details"
+        _write_recovery_report(report)
+        print("\nABORT: precheck recovery FAIL")
+        for line in report.precheck_details:
+            print(f"  {line}")
+        return 1
+
+    _section("PRECHECK RECOVERY — OK")
+    for line in report.precheck_details:
+        print(f"  {line}")
 
     _, report.git_branch, _ = _ssh_capture(host, "git branch --show-current")
     _, report.git_head, _ = _ssh_capture(host, "git rev-parse --short HEAD")
@@ -401,6 +569,16 @@ def recover_prod(
             print(f"\nABORT: {report.abort_reason}")
             return 1
         report.notes.append(f"db ready: {db_state}")
+
+        _section("BACKUP — przed pełnym startem stacku")
+        if not _recovery_backup(host, report):
+            report.aborted = True
+            report.abort_reason = "Backup przed recovery nie powiódł się — API/worker nie uruchomiono"
+            report.ps_after = _remote_compose_ps(host, all_containers=True)
+            _write_recovery_report(report)
+            print(f"\nABORT: {report.abort_reason}")
+            return 1
+        print(f"  backup OK: {report.backup_path} ({report.backup_size_bytes} B)")
     else:
         report.notes.append("Brak usługi db w compose — pominięto up -d db")
         report.db_ok = False
@@ -469,6 +647,13 @@ def recover_prod(
     report.worker_ok = service_state_is_running(worker_state)
 
     _, report.api_logs, _ = _ssh_capture(host, f"{compose} logs --tail=120 api")
+    _, report.worker_logs, _ = _ssh_capture(host, f"{compose} logs --tail=80 worker")
+    _, report.db_logs, _ = _ssh_capture(host, f"{compose} logs --tail=80 db")
+
+    _section("SMOKE TEST (read-only)")
+    report.smoke_ok = _recovery_smoke(host, report)
+    for line in report.smoke_details:
+        print(f"  {line}")
 
     _section("CLOUDFLARED — diagnostyka (bez zmian config)")
     _, report.cloudflared_ps, _ = _ssh_capture(
@@ -498,7 +683,7 @@ def recover_prod(
     for line in report.summary_lines():
         print(line.replace("**", ""))
 
-    if report.aborted or not report.health_ok:
+    if report.aborted or not report.health_ok or not report.smoke_ok:
         return 1
     return 0
 

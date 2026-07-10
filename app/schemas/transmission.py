@@ -1,7 +1,21 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
+
+
+class TransmissionInvoiceSnapshot(BaseModel):
+    """Zwięzły snapshot faktury do tooltipu Monitora KSeF (bez dodatkowych zapytań)."""
+
+    number: str | None = None
+    counterparty_name: str | None = None
+    counterparty_nip: str | None = None
+    gross_total: str | None = None
+    currency: str | None = None
+    issue_date: date | None = None
+    ksef_reference_number: str | None = None
+    status: str | None = None
+    direction: str | None = None
 
 
 class TransmissionResponse(BaseModel):
@@ -27,6 +41,7 @@ class TransmissionResponse(BaseModel):
     finished_at: datetime | None = None
     created_at: datetime
     invoice_number_local: str | None = None
+    invoice_snapshot: TransmissionInvoiceSnapshot | None = None
 
 
 class KSeFStatusResponse(BaseModel):

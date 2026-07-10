@@ -36,6 +36,8 @@ class TestDeployCommandRouter:
             ("cd frontend-react && npm run build", DeployCommandKind.LOCAL_NPM),
             ("ifg_guardian_frontend_artifact_gate local", DeployCommandKind.ARTIFACT_GATE_LOCAL),
             ("ifg_guardian_frontend_artifact_gate remote", DeployCommandKind.ARTIFACT_GATE_REMOTE),
+            ("python3 scripts/ifg_guardian_frontend_artifact_gate.py local", DeployCommandKind.ARTIFACT_GATE_LOCAL),
+            ("python3 scripts/ifg_guardian_frontend_artifact_gate.py remote", DeployCommandKind.ARTIFACT_GATE_REMOTE),
             ("rsync -av dist/ host:/path/", DeployCommandKind.RSYNC),
             ("docker compose -f docker/docker-compose.prod.yml build api worker", DeployCommandKind.DOCKER_BUILD),
             ("docker compose -f docker/docker-compose.prod.yml up -d", DeployCommandKind.COMPOSE_UP),

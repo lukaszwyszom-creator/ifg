@@ -1,0 +1,413 @@
+# IFG Repository Cleanup Plan
+
+**Generated:** 2026-06-26 21:46 UTC  
+**Mode:** LIVE  
+**Phase filter:** 0  
+**Operations:** 69  
+
+## Summary
+
+- Candidates evaluated: 69
+- Operations planned: 69
+
+## Phase 0
+
+- **local_remove** `.logs`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Restore from VCS or rebuild if needed (.logs)
+- **local_remove** `.pytest_cache`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Restore from VCS or rebuild if needed (.pytest_cache)
+- **local_remove** `agent/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates agent/__pycache__)
+- **local_remove** `app/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/__pycache__)
+- **local_remove** `app/api/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/api/__pycache__)
+- **local_remove** `app/api/routers/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/api/routers/__pycache__)
+- **local_remove** `app/core/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/core/__pycache__)
+- **local_remove** `app/domain/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/domain/__pycache__)
+- **local_remove** `app/domain/models/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/domain/models/__pycache__)
+- **local_remove** `app/integrations/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/integrations/__pycache__)
+- **local_remove** `app/integrations/ksef/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/integrations/ksef/__pycache__)
+- **local_remove** `app/integrations/nbp/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/integrations/nbp/__pycache__)
+- **local_remove** `app/integrations/regon/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/integrations/regon/__pycache__)
+- **local_remove** `app/persistence/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/persistence/__pycache__)
+- **local_remove** `app/persistence/mappers/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/persistence/mappers/__pycache__)
+- **local_remove** `app/persistence/models/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/persistence/models/__pycache__)
+- **local_remove** `app/persistence/repositories/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/persistence/repositories/__pycache__)
+- **local_remove** `app/schemas/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/schemas/__pycache__)
+- **local_remove** `app/services/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/services/__pycache__)
+- **local_remove** `app/worker/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/worker/__pycache__)
+- **local_remove** `app/worker/job_handlers/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates app/worker/job_handlers/__pycache__)
+- **local_remove** `scripts/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/__pycache__)
+- **local_remove** `scripts/guardian_platform/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/cli/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/cli/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/config/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/config/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/environment/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/environment/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/git/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/git/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/profiles/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/profiles/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/registry/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/registry/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/reporting/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/reporting/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/repository/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/repository/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/runtime/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/runtime/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/shell/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/shell/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/workflow/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/__pycache__)
+- **local_remove** `scripts/guardian_platform/core/workflow/workflows/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/workflows/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/checks/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/checks/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/commands/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/commands/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/config/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/config/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/deploy/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/deploy/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/doctor/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/doctor/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/infra/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/infra/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/lib/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/lib/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/recover/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/recover/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/repo_audit/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_audit/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/repo_cleanup/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_cleanup/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg/workflows/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/workflows/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/ifg_scaffold/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg_scaffold/__pycache__)
+- **local_remove** `scripts/guardian_platform/profiles/psag_scaffold/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/psag_scaffold/__pycache__)
+- **local_remove** `scripts/ifg_guardian/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/__pycache__)
+- **local_remove** `scripts/ifg_guardian/core/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/core/__pycache__)
+- **local_remove** `scripts/ifg_guardian/core/plugins/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/core/plugins/__pycache__)
+- **local_remove** `scripts/ifg_guardian/core/repo_audit/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/core/repo_audit/__pycache__)
+- **local_remove** `scripts/ifg_guardian/core/workflow/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/core/workflow/__pycache__)
+- **local_remove** `scripts/ifg_guardian/core/workflow/executors/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/core/workflow/executors/__pycache__)
+- **local_remove** `scripts/ifg_guardian/modules/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/modules/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/core/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/core/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/core/workflows/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/core/workflows/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/core/workflows/repo_audit/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/core/workflows/repo_audit/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/ifg/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/ifg/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/ifg/deploy_run/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/ifg/deploy_run/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/ifg/doctor/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/ifg/doctor/__pycache__)
+- **local_remove** `scripts/ifg_guardian/plugins/ifg/release_plan/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates scripts/ifg_guardian/plugins/ifg/release_plan/__pycache__)
+- **local_remove** `tests/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates tests/__pycache__)
+- **local_remove** `tests/guardian_platform/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates tests/guardian_platform/__pycache__)
+- **local_remove** `tests/unit/__pycache__`
+  - Confidence: 99%
+  - Rationale: Local cache/build artifact — safe local removal
+  - Impact: Regenerated on next build/run
+  - Rollback: Regenerate: run Python/tests (recreates tests/unit/__pycache__)
+
+## Rollback plan
+
+- Restore from VCS or rebuild if needed (.logs)
+- Restore from VCS or rebuild if needed (.pytest_cache)
+- Regenerate: run Python/tests (recreates agent/__pycache__)
+- Regenerate: run Python/tests (recreates app/__pycache__)
+- Regenerate: run Python/tests (recreates app/api/__pycache__)
+- Regenerate: run Python/tests (recreates app/api/routers/__pycache__)
+- Regenerate: run Python/tests (recreates app/core/__pycache__)
+- Regenerate: run Python/tests (recreates app/domain/__pycache__)
+- Regenerate: run Python/tests (recreates app/domain/models/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/ksef/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/nbp/__pycache__)
+- Regenerate: run Python/tests (recreates app/integrations/regon/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/mappers/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/models/__pycache__)
+- Regenerate: run Python/tests (recreates app/persistence/repositories/__pycache__)
+- Regenerate: run Python/tests (recreates app/schemas/__pycache__)
+- Regenerate: run Python/tests (recreates app/services/__pycache__)
+- Regenerate: run Python/tests (recreates app/worker/__pycache__)
+- Regenerate: run Python/tests (recreates app/worker/job_handlers/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/cli/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/config/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/environment/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/git/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/profiles/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/registry/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/reporting/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/repository/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/runtime/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/shell/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/core/workflow/workflows/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/checks/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/commands/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/config/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/deploy/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/doctor/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/infra/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/lib/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/recover/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_audit/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/repo_cleanup/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg/workflows/__pycache__)
+- Regenerate: run Python/tests (recreates scripts/guardian_platform/profiles/ifg_scaffold/__pycache__)
+- … and 19 more

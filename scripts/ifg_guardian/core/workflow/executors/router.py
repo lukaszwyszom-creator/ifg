@@ -32,9 +32,15 @@ def classify_deploy_command(shell_cmd: str) -> DeployCommandKind:
         return DeployCommandKind.LOCAL_NPM
     if normalized.startswith("rsync"):
         return DeployCommandKind.RSYNC
-    if "ifg_guardian_frontend_artifact_gate local" in normalized:
+    if (
+        "ifg_guardian_frontend_artifact_gate local" in normalized
+        or "ifg_guardian_frontend_artifact_gate.py local" in normalized
+    ):
         return DeployCommandKind.ARTIFACT_GATE_LOCAL
-    if "ifg_guardian_frontend_artifact_gate remote" in normalized:
+    if (
+        "ifg_guardian_frontend_artifact_gate remote" in normalized
+        or "ifg_guardian_frontend_artifact_gate.py remote" in normalized
+    ):
         return DeployCommandKind.ARTIFACT_GATE_REMOTE
     if re.search(r"docker compose .* build", normalized):
         return DeployCommandKind.DOCKER_BUILD

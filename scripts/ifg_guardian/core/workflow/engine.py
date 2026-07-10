@@ -10,6 +10,13 @@ from time import perf_counter
 
 from ifg_guardian.config import ROOT
 from ifg_guardian.core.execution_guard import enforce_execution_guard
+from ifg_guardian.core.progress import (
+    DEPLOY_PHASES,
+    create_progress_tracker,
+    default_progress_enabled,
+    deploy_phase_index,
+    phase_for_workflow_stage,
+)
 from ifg_guardian.core.workflow.context import WorkflowContext
 from ifg_guardian.core.workflow.definition import WorkflowDefinition
 from ifg_guardian.core.workflow.executors import DeployExecutorContext, IntentExecutor
@@ -68,11 +75,29 @@ class ExecutionEngine:
         transaction.mark_started()
         state_machine.transition(WorkflowState.RUNNING)
 
+        progress_enabled = default_progress_enabled(
+            workflow.id,
+            explicit=ctx.data.get("progress_enabled"),
+        )
+        progress = create_progress_tracker(
+            workflow_id=workflow_id,
+            workflow_type=workflow.id,
+            enabled=progress_enabled,
+            total_steps=len(DEPLOY_PHASES),
+        )
+        ctx.data["progress_tracker"] = progress
+        progress.workflow_started(f"Workflow {workflow.id} ({mode.value})")
+
         if workflow.depends_on:
             self._run_dependencies(ctx, workflow, mode=mode, initial_data=initial_data or {})
 
         failed = self._run_stages(ctx, workflow, mode=mode)
 
+        progress.workflow_finished(
+            success=not failed,
+            message=f"Workflow {workflow.id} finished ({'FAILED' if failed else 'SUCCESS'})",
+        )
+        ctx.transaction.audit["progress_timeline"] = progress.timeline.to_dict()
         state_machine.transition(WorkflowState.VERIFYING)
         final_state = WorkflowState.FAILED if failed else WorkflowState.SUCCESS
         state_machine.transition(final_state)
@@ -174,7 +199,28 @@ class ExecutionEngine:
         state_machine.transition(WorkflowState.READY)
         transaction.mark_started()
         state_machine.transition(WorkflowState.RUNNING)
+
+        progress_enabled = default_progress_enabled(
+            workflow.id,
+            explicit=ctx.data.get("progress_enabled"),
+        )
+        progress = create_progress_tracker(
+            workflow_id=workflow_id,
+            workflow_type=workflow.id,
+            enabled=progress_enabled,
+            total_steps=len(DEPLOY_PHASES),
+        )
+        ctx.data["progress_tracker"] = progress
+        progress.workflow_started(f"Workflow {workflow.id} ({mode.value})")
+
         failed = self._run_stages(ctx, workflow, mode=mode)
+
+        progress.workflow_finished(
+            success=not failed,
+            message=f"Workflow {workflow.id} finished ({'FAILED' if failed else 'SUCCESS'})",
+        )
+        ctx.transaction.audit["progress_timeline"] = progress.timeline.to_dict()
+
         state_machine.transition(WorkflowState.VERIFYING)
         final_state = WorkflowState.FAILED if failed else WorkflowState.SUCCESS
         state_machine.transition(final_state)
@@ -187,18 +233,38 @@ class ExecutionEngine:
             remote_host=ctx.data.get("remote_host"),
             remote_path=ctx.data.get("remote_path"),
         )
-        executor = IntentExecutor(root=self.root, deploy_context=deploy_context)
+        progress = ctx.data.get("progress_tracker")
+        executor = IntentExecutor(
+            root=self.root,
+            deploy_context=deploy_context,
+            progress_tracker=progress,
+        )
         ctx.data["deploy_executor_context"] = deploy_context
         failed = False
 
-        for stage in workflow.stages:
+        for stage_index, stage in enumerate(workflow.stages, start=1):
             started = perf_counter()
+            phase = phase_for_workflow_stage(workflow.id, stage.id)
+            step = deploy_phase_index(phase) or stage_index
+            emit_stage_progress = progress is not None and stage.id != "simulate_execution"
+
             skip = stage.should_skip(ctx)
             if skip is not None:
                 result = StageResult(status=StageStatus.SKIP, message=skip.message)
+                if emit_stage_progress:
+                    progress.stage_started(phase=phase, step=step, message=f"Stage {stage.id} skipped")
+                    progress.stage_from_result(
+                        phase=phase,
+                        step=step,
+                        stage_status=StageStatus.SKIP,
+                        message=skip.message,
+                    )
                 _record_stage(ctx, stage.id, result, duration_ms=0)
                 ctx.stage_results.append(result)
                 continue
+
+            if emit_stage_progress:
+                progress.stage_started(phase=phase, step=step, message=f"Stage {stage.id} started")
 
             plan = stage.build_plan(ctx)
             intent_results = [
@@ -209,6 +275,16 @@ class ExecutionEngine:
             duration_ms = int((perf_counter() - started) * 1000)
             _record_stage(ctx, stage.id, result, duration_ms=duration_ms, plan_reasons=plan.reasons)
             ctx.stage_results.append(result)
+
+            if emit_stage_progress:
+                progress.stage_from_result(
+                    phase=phase,
+                    step=step,
+                    stage_status=result.status,
+                    message=result.message or stage.id,
+                )
+            elif progress is not None and not result.passed:
+                progress.error(phase=phase, message=f"Stage {stage.id} failed: {result.message}", step=step)
 
             if not result.passed and plan.on_fail == "halt":
                 failed = True

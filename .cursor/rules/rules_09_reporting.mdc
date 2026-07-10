@@ -21,6 +21,32 @@ C. Deploy
 D. Testy
 E. Następny krok
 
+Następnie dodaj obowiązkowo sekcję:
+
+`## Decyzje dla ChatGPT`
+
+Sekcja ma zawierać wyłącznie pytania/decyzje wymagające oceny ChatGPT.
+Jeśli nie ma decyzji, wpisz dokładnie:
+
+`Brak.`
+
+Sekcja `## Decyzje dla ChatGPT` ma być umieszczona bezpośrednio przed:
+
+`## Wygenerowane raporty`
+
+Po sekcji **E. Następny krok** (tylko gdy podczas pracy pojawiły się wartościowe obserwacje) dodaj opcjonalne sekcje Debt:
+
+- `## UX Debt`
+- `## Technical Debt`
+- `## Architecture Debt`
+- `## Performance Debt`
+
+Nie twórz pustych sekcji. Każdy wpis: priorytet (`LOW` / `MEDIUM` / `HIGH`), tytuł, opis, przewidywana wartość, uzasadnienie odłożenia (świadomie poza zakresem bieżącego GWO).
+
+Debt to nie backlog implementacyjny — to spostrzeżenia rozwojowe zrealizowanego zadania.
+
+Szczegóły standardu: `docs/guardian/core/GUARDIAN_REPORT_DEBT_STANDARD.md`
+
 Nagłówki zapisuj wielkimi literami.
 Używaj emoji dla szybkiej identyfikacji statusu.
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ifg_guardian.core.progress.mapping import deploy_phase_index, phase_for_shell_command
+from ifg_guardian.core.progress.tracker import ProgressTracker
 from ifg_guardian.core.workflow.executors.compose_executor import ComposeExecutor
 from ifg_guardian.core.workflow.executors.context import DeployExecutorContext
 from ifg_guardian.core.workflow.executors.docker_executor import DockerExecutor
@@ -36,9 +38,11 @@ class IntentExecutor:
         *,
         root: Path,
         deploy_context: DeployExecutorContext | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> None:
         self.root = root
         self.deploy_context = deploy_context or DeployExecutorContext()
+        self._progress_tracker = progress_tracker
         self._git = git_mod.GitExecutor(root=root)
         self._fs = fs_mod.FilesystemExecutor(root=root)
         self._local = LocalExecutor(root=root)
@@ -79,7 +83,37 @@ class IntentExecutor:
     def _execute_local_exec(self, intent: LocalExecIntent) -> IntentResult:
         shell_cmd = shell_command_from_intent(intent.command)
         kind = classify_deploy_command(shell_cmd)
+        tracker = self._progress_tracker
+        phase = phase_for_shell_command(shell_cmd)
+        step = deploy_phase_index(phase) or 0
+        track_deploy_intent = tracker is not None and kind != DeployCommandKind.LOCAL
 
+        if track_deploy_intent:
+            tracker.note_action(shell_cmd)
+            tracker.intent_started(
+                phase=phase,
+                step=step or None,
+                message=shell_cmd,
+            )
+
+        result = self._dispatch_local_exec(intent, shell_cmd, kind)
+
+        if track_deploy_intent:
+            message = result.error or result.output or "ok"
+            tracker.intent_finished(
+                phase=phase,
+                step=step or None,
+                ok=result.ok,
+                message=message,
+            )
+        return result
+
+    def _dispatch_local_exec(
+        self,
+        intent: LocalExecIntent,
+        shell_cmd: str,
+        kind: DeployCommandKind,
+    ) -> IntentResult:
         if kind == DeployCommandKind.LOCAL_GIT:
             self.deploy_context.record(shell_cmd)
             local_result = self._local.execute(intent)

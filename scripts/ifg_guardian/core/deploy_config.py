@@ -23,6 +23,7 @@ class DS723Config:
     compose_file: str
     env_file: str
     docker_path: str
+    remote_rsync_path: str
     branch: str
 
     @property
@@ -52,6 +53,7 @@ class DS723Config:
                 "DS723_DOCKER_PATH",
                 "/var/packages/ContainerManager/target/usr/bin",
             ),
+            remote_rsync_path=values.get("DS723_REMOTE_RSYNC_PATH", ""),
             branch=values.get("DS723_DEPLOY_BRANCH", TARGET_BRANCH),
         )
 

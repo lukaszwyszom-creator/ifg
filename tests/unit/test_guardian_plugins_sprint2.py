@@ -128,7 +128,7 @@ class TestPluginLoader:
         assert names == {"core", "ifg"}
         assert registry.resolve_workflow("core.ping") is not None
         assert registry.resolve_workflow("ifg.doctor") is not None
-        assert registry.workflow_registry.count_for_plugin("ifg") == 3
+        assert registry.workflow_registry.count_for_plugin("ifg") == 5
 
 
 class TestCorePlugin:
@@ -153,9 +153,17 @@ class TestIFGPlugin:
 
     def test_workflows_contains_all_ifg_workflows(self):
         ids = [wf.id for wf in IFGPlugin().workflows()]
-        assert ids == ["ifg.doctor", "ifg.release.plan", "ifg.deploy.run"]
+        assert ids == [
+            "ifg.doctor",
+            "ifg.release.plan",
+            "ifg.release.evaluate",
+            "ifg.deploy.run",
+            "ifg.container.cutover",
+        ]
         assert IFGPlugin().workflows()[1].depends_on == ["ifg.doctor"]
-        deploy = IFGPlugin().workflows()[2]
+        release_evaluate = IFGPlugin().workflows()[2]
+        assert release_evaluate.depends_on == ["ifg.doctor"]
+        deploy = IFGPlugin().workflows()[3]
         assert deploy.depends_on == ["ifg.release.plan"]
         assert deploy.mutating is True
 
@@ -191,4 +199,4 @@ class TestPluginListCLI:
         assert "IFG" in output
         assert "version: 1.0.0" in output
         assert "workflows: 2" in output
-        assert "workflows: 3" in output
+        assert "workflows: 5" in output

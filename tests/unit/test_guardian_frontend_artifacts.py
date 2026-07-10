@@ -78,11 +78,20 @@ class TestCommandRouting:
     def test_classify_artifact_gate_commands(self):
         assert classify_deploy_command("ifg_guardian_frontend_artifact_gate local") == DeployCommandKind.ARTIFACT_GATE_LOCAL
         assert classify_deploy_command("ifg_guardian_frontend_artifact_gate remote") == DeployCommandKind.ARTIFACT_GATE_REMOTE
+        assert (
+            classify_deploy_command("python3 scripts/ifg_guardian_frontend_artifact_gate.py local")
+            == DeployCommandKind.ARTIFACT_GATE_LOCAL
+        )
+        assert (
+            classify_deploy_command("python3 scripts/ifg_guardian_frontend_artifact_gate.py remote")
+            == DeployCommandKind.ARTIFACT_GATE_REMOTE
+        )
 
     def test_rsync_includes_ssh(self):
         cmd = build_rsync_dist_command()
         assert "rsync" in cmd
         assert "ssh -p" in cmd
+        assert "--rsync-path=/bin/rsync" in cmd
 
 
 class TestIntentExecutorArtifactGate:

@@ -24,14 +24,35 @@ class LocalExecutor:
                 check=False,
             )
         except OSError as exc:
-            return IntentResult(intent=intent, ok=False, error=str(exc))
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                error=str(exc),
+                data={"exit_code": None, "stdout": "", "stderr": str(exc)},
+            )
 
-        output = (result.stdout or result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        output = (stdout or stderr or "").strip()
         if result.returncode != 0:
             return IntentResult(
                 intent=intent,
                 ok=False,
                 output=output,
                 error=f"exit {result.returncode}",
+                data={
+                    "exit_code": result.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                },
             )
-        return IntentResult(intent=intent, ok=True, output=output)
+        return IntentResult(
+            intent=intent,
+            ok=True,
+            output=output,
+            data={
+                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+            },
+        )

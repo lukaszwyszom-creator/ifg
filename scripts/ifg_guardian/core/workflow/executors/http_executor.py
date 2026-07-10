@@ -41,7 +41,12 @@ class HTTPExecutor:
             with urlopen(url, timeout=10) as response:
                 body = response.read().decode("utf-8", errors="replace").strip()
         except (URLError, OSError) as exc:
-            return IntentResult(intent=intent, ok=False, error=str(exc), data={"url": url})
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                error=str(exc),
+                data={"url": url, "exit_code": None, "stdout": "", "stderr": str(exc)},
+            )
 
         return IntentResult(
             intent=intent,
@@ -61,9 +66,27 @@ class HTTPExecutor:
                 check=False,
             )
         except OSError as exc:
-            return IntentResult(intent=intent, ok=False, error=str(exc))
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                error=str(exc),
+                data={"exit_code": None, "stdout": "", "stderr": str(exc)},
+            )
 
-        output = (result.stdout or result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        output = (stdout or stderr or "").strip()
         if result.returncode != 0:
-            return IntentResult(intent=intent, ok=False, output=output, error=f"curl exit {result.returncode}")
-        return IntentResult(intent=intent, ok=True, output=output, data={"executor": "http"})
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=output,
+                error=f"curl exit {result.returncode}",
+                data={"exit_code": result.returncode, "stdout": stdout, "stderr": stderr},
+            )
+        return IntentResult(
+            intent=intent,
+            ok=True,
+            output=output,
+            data={"executor": "http", "exit_code": result.returncode, "stdout": stdout, "stderr": stderr},
+        )

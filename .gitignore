@@ -12,6 +12,9 @@ frontend-react/dist/
 mobile-expo/node_modules/
 mobile-expo/.expo/
 
+# Guardian runtime state (local only)
+.state/
+
 # Temp
 _tmp_session.py
 test_check.db

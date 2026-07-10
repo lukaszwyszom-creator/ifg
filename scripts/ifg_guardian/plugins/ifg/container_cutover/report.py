@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from ifg_guardian.core.reporting.debt import finish_markdown
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction
 from ifg_guardian.plugins.ifg.container_cutover.models import CutoverRunState
 
 
-def render_markdown(state: CutoverRunState, *, transaction: WorkflowTransaction) -> str:
+def render_markdown(
+    state: CutoverRunState,
+    *,
+    transaction: WorkflowTransaction,
+    debt=None,
+) -> str:
     lines = [
         "# IFG Container Manager Cutover — Guardian Report",
         "",
@@ -58,4 +65,5 @@ def render_markdown(state: CutoverRunState, *, transaction: WorkflowTransaction)
         "```",
         "",
     ])
-    return "\n".join(lines)
+    lines.extend(render_timeline_section(transaction.audit.get("progress_timeline")))
+    return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
