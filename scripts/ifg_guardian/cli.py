@@ -313,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_handoff = ifg_sub.add_parser("handoff", help="Cursor -> ChatGPT handoff reports")
     ifg_handoff_sub = ifg_handoff.add_subparsers(dest="handoff_action", required=True)
     ifg_handoff_latest = ifg_handoff_sub.add_parser("latest", help="Merge latest markdown reports")
-    ifg_handoff_latest.add_argument("--limit", type=int, default=10, help="Max number of merged reports")
+    ifg_handoff_latest.add_argument("--limit", type=int, default=1, help="Max number of merged GWO task reports")
     ifg_handoff_latest.add_argument("--all", action="store_true", help="Ignore handoff state and include all reports")
     ifg_handoff_latest.add_argument("--reset", action="store_true", help="Reset handoff memory before selecting reports")
     ifg_handoff_latest.add_argument(
