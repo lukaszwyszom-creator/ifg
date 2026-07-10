@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.plugins.ifg.release_plan.models import DeploymentRisk, ReleasePlanState
 
 
@@ -15,7 +17,12 @@ def plan_from_transaction(transaction: WorkflowTransaction) -> ReleasePlanState:
     return ReleasePlanState.from_dict(payload)
 
 
-def render_markdown(state: ReleasePlanState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    state: ReleasePlanState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [
         "# IFG Guardian — Release Plan",
@@ -67,8 +74,12 @@ def render_markdown(state: ReleasePlanState, *, transaction: WorkflowTransaction
     lines.extend(["", "## Risk rationale", ""])
     for item in state.risk_rationale:
         lines.append(f"- {item}")
-    lines.append("")
-    return "\n".join(lines)
+
+    if transaction is not None:
+        timeline = transaction.audit.get("progress_timeline")
+        lines.extend(render_timeline_section(timeline))
+
+    return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: ReleasePlanState, *, transaction: WorkflowTransaction) -> str:

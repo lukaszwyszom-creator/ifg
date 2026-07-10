@@ -34,21 +34,37 @@ class SSHExecutor:
                 intent=LocalExecIntent(command=command, mutating=True),
                 ok=False,
                 error=str(exc),
+                data={"exit_code": None, "stdout": "", "stderr": str(exc), "host": cfg.ssh_target},
             )
 
-        output = (result.stdout or result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        output = (stdout or stderr or "").strip()
         if result.returncode != 0:
             return IntentResult(
                 intent=LocalExecIntent(command=command, mutating=True),
                 ok=False,
                 output=output,
                 error=f"ssh exit {result.returncode}",
+                data={
+                    "exit_code": result.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "host": cfg.ssh_target,
+                    "label": label,
+                },
             )
         return IntentResult(
             intent=LocalExecIntent(command=command, mutating=True),
             ok=True,
             output=output,
-            data={"host": cfg.ssh_target, "label": label},
+            data={
+                "host": cfg.ssh_target,
+                "label": label,
+                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+            },
         )
 
     def execute_rsync(self, intent: LocalExecIntent, shell_cmd: str) -> IntentResult:
@@ -62,12 +78,30 @@ class SSHExecutor:
                 check=False,
             )
         except OSError as exc:
-            return IntentResult(intent=intent, ok=False, error=str(exc))
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                error=str(exc),
+                data={"exit_code": None, "stdout": "", "stderr": str(exc)},
+            )
 
-        output = (result.stdout or result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        output = (stdout or stderr or "").strip()
         if result.returncode != 0:
-            return IntentResult(intent=intent, ok=False, output=output, error=f"rsync exit {result.returncode}")
-        return IntentResult(intent=intent, ok=True, output=output or "rsync ok", data={"synced": True})
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=output,
+                error=f"rsync exit {result.returncode}",
+                data={"exit_code": result.returncode, "stdout": stdout, "stderr": stderr},
+            )
+        return IntentResult(
+            intent=intent,
+            ok=True,
+            output=output or "rsync ok",
+            data={"synced": True, "exit_code": result.returncode, "stdout": stdout, "stderr": stderr},
+        )
 
     def capture_rollback_snapshot(self) -> dict[str, str]:
         cfg = self.deploy_context.config()

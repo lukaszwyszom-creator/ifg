@@ -10,11 +10,20 @@ from ifg_guardian import __version__
 from ifg_guardian.config import DEFAULT_REMOTE_PATH, TARGET_BRANCH
 from ifg_guardian.core.git import resolve_ds723_host
 from ifg_guardian.modules.api_mobile import run_api_guardian
+from ifg_guardian.modules.deferred_decisions import (
+    run_deferred_add,
+    run_deferred_cancel,
+    run_deferred_done,
+    run_deferred_list,
+    run_deferred_review,
+    run_deferred_show,
+)
 from ifg_guardian.modules.deploy import run_deploy_check
 from ifg_guardian.modules.doctor import run_doctor
 from ifg_guardian.modules.ifg_container_cutover import run_ifg_container_cutover, run_ifg_container_cutover_rollback
 from ifg_guardian.modules.ifg_deploy_run import run_ifg_deploy_run
 from ifg_guardian.modules.ifg_doctor import run_ifg_doctor
+from ifg_guardian.modules.ifg_handoff import run_ifg_handoff_latest
 from ifg_guardian.modules.ifg_release_evaluate import run_ifg_release_evaluate, run_ifg_release_explain
 from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
 from ifg_guardian.modules.frontend import run_frontend_check
@@ -95,7 +104,7 @@ def _handle_legacy(argv: list[str]) -> int | None:
     """Map legacy flags to v3 commands. Returns None if not legacy mode."""
     if not argv:
         return None
-    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "release", "version", "-h", "--help"):
+    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "release", "deferred", "version", "-h", "--help"):
         return None
     if not any(a in LEGACY_FLAGS or a.startswith("--remote") for a in argv):
         if not any(a.startswith("-") for a in argv):
@@ -301,6 +310,19 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_cut_rb.add_argument("--remote-host", default=None)
     ifg_cut_rb.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
 
+    ifg_handoff = ifg_sub.add_parser("handoff", help="Cursor -> ChatGPT handoff reports")
+    ifg_handoff_sub = ifg_handoff.add_subparsers(dest="handoff_action", required=True)
+    ifg_handoff_latest = ifg_handoff_sub.add_parser("latest", help="Merge latest markdown reports")
+    ifg_handoff_latest.add_argument("--limit", type=int, default=10, help="Max number of merged reports")
+    ifg_handoff_latest.add_argument("--all", action="store_true", help="Ignore handoff state and include all reports")
+    ifg_handoff_latest.add_argument("--reset", action="store_true", help="Reset handoff memory before selecting reports")
+    ifg_handoff_latest.add_argument(
+        "--clipboard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Copy generated handoff markdown to clipboard on macOS (pbcopy)",
+    )
+
     wf = sub.add_parser("workflow", help="Workflow engine commands")
     wf_sub = wf.add_subparsers(dest="action", required=True)
     wf_run = wf_sub.add_parser("run", help="Run a registered workflow")
@@ -312,6 +334,47 @@ def build_parser() -> argparse.ArgumentParser:
     plugin = sub.add_parser("plugin", help="Plugin management")
     plugin_sub = plugin.add_subparsers(dest="action", required=True)
     plugin_sub.add_parser("list", help="List registered plugins")
+
+    deferred = sub.add_parser("deferred", help="Guardian Deferred Decisions (GDD) registry")
+    deferred_sub = deferred.add_subparsers(dest="action", required=True)
+
+    def_add = deferred_sub.add_parser("add", help="Add a deferred decision entry")
+    def_add.add_argument("--project", default="IFG", help="Project name (default: IFG)")
+    def_add.add_argument("--module", required=True, help="Module or area")
+    def_add.add_argument(
+        "--type",
+        required=True,
+        dest="decision_type",
+        help="Architecture / UX / Performance / Refactor / Technical Debt / Process / Other",
+    )
+    def_add.add_argument("--priority", default="Medium", help="Low / Medium / High")
+    def_add.add_argument("--reason", required=True, dest="defer_reason", help="Why deferred")
+    def_add.add_argument("--description", required=True, help="Decision description")
+    def_add.add_argument("--review-when", required=True, dest="review_when", help="When to revisit")
+    def_add.add_argument("--source", required=True, help="Source GWO/report/review")
+
+    def_list = deferred_sub.add_parser("list", help="List deferred decisions")
+    def_list.add_argument("--project", default=None, help="Filter by project")
+    def_list.add_argument("--status", default="OPEN", help="OPEN / DONE / CANCELLED / all")
+    def_list.add_argument("--type", default=None, dest="decision_type", help="Filter by type")
+    def_list.add_argument("--priority", default=None, help="Filter by priority")
+    def_list.add_argument("--json", action="store_true", help="JSON output")
+
+    def_show = deferred_sub.add_parser("show", help="Show one deferred decision")
+    def_show.add_argument("item_id", help="GDD ID, e.g. GDD-0001")
+    def_show.add_argument("--json", action="store_true", help="JSON output")
+
+    def_done = deferred_sub.add_parser("done", help="Mark deferred decision as DONE")
+    def_done.add_argument("item_id", help="GDD ID")
+
+    def_cancel = deferred_sub.add_parser("cancel", help="Mark deferred decision as CANCELLED")
+    def_cancel.add_argument("item_id", help="GDD ID")
+
+    def_review = deferred_sub.add_parser("review", help="Review open deferred decisions")
+    def_review.add_argument("--project", default=None, help="Filter by project (default: all)")
+    def_review.add_argument("--json", action="store_true", help="JSON output")
+    def_review.add_argument("--markdown", action="store_true", help="Markdown output")
+    def_review.add_argument("--report", default=None, help="Write markdown report to path")
 
     return parser
 
@@ -506,6 +569,17 @@ def main(argv: list[str] | None = None) -> int:
             remote_path=args.remote_path,
         )
 
+    if domain == "ifg" and args.action == "handoff" and args.handoff_action == "latest":
+        if args.limit < 1:
+            print("--limit must be >= 1", file=sys.stderr)
+            return 2
+        return run_ifg_handoff_latest(
+            limit=args.limit,
+            copy_to_clipboard=args.clipboard,
+            include_all=args.all,
+            reset_state=args.reset,
+        )
+
     if domain == "workflow" and args.action == "run":
         return _run_with_display(
             run_workflow,
@@ -517,6 +591,50 @@ def main(argv: list[str] | None = None) -> int:
 
     if domain == "plugin" and args.action == "list":
         return run_plugin_list()
+
+    if domain == "deferred":
+        if args.action == "add":
+            return run_deferred_add(
+                project=args.project,
+                module=args.module,
+                decision_type=args.decision_type,
+                priority=args.priority,
+                defer_reason=args.defer_reason,
+                description=args.description,
+                review_when=args.review_when,
+                source=args.source,
+            )
+        if args.action == "list":
+            status = None if str(args.status).lower() == "all" else args.status
+            output_format = "json" if args.json else "terminal"
+            return run_deferred_list(
+                project=args.project,
+                status=status,
+                decision_type=args.decision_type,
+                priority=args.priority,
+                output_format=output_format,
+            )
+        if args.action == "show":
+            output_format = "json" if args.json else "terminal"
+            return run_deferred_show(
+                item_id=args.item_id,
+                output_format=output_format,
+            )
+        if args.action == "done":
+            return run_deferred_done(item_id=args.item_id)
+        if args.action == "cancel":
+            return run_deferred_cancel(item_id=args.item_id)
+        if args.action == "review":
+            if args.json and args.markdown:
+                print("Use either --json or --markdown, not both.", file=sys.stderr)
+                return 2
+            review_format = "json" if args.json else "markdown" if args.markdown else "terminal"
+            report = Path(args.report) if args.report else None
+            return run_deferred_review(
+                project=args.project,
+                report_path=report,
+                output_format=review_format,
+            )
 
     if domain == "version":
         print(f"IFG Guardian {__version__}")

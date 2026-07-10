@@ -163,6 +163,40 @@ class TestListTransmissions:
         assert len(body["items"]) == 1
         assert body["items"][0]["invoice_id"] is None
         assert body["items"][0]["operation_type"] == "SESSION_RENEWED"
+        assert body["items"][0]["invoice_snapshot"] is None
+
+    def test_list_includes_invoice_snapshot_when_invoice_linked(self, client, mock_transmission_service):
+        from datetime import date
+        from decimal import Decimal
+
+        t = _make_transmission_orm(
+            status=TransmissionStatus.SUCCESS,
+            ksef_reference_number="KSeF-2026-001",
+            operation_type="SALE_SEND",
+        )
+        invoice = MagicMock()
+        invoice.number_local = "FV/2026/001"
+        invoice.direction = "sale"
+        invoice.seller_snapshot_json = {"nip": "1111111111", "name": "Sprzedawca"}
+        invoice.buyer_snapshot_json = {"nip": "2222222222", "name": "Nabywca SA"}
+        invoice.totals_json = {"total_gross": Decimal("1230.00")}
+        invoice.issue_date = date(2026, 7, 1)
+        invoice.ksef_reference_number = "KSeF-2026-001"
+        invoice.status = "accepted"
+        invoice.currency = "PLN"
+        t.invoice = invoice
+        mock_transmission_service.list_all.return_value = ([t], 1)
+
+        res = client.get("/api/v1/transmissions/", params={"page": 1, "size": 20})
+
+        assert res.status_code == 200
+        snap = res.json()["items"][0]["invoice_snapshot"]
+        assert snap is not None
+        assert snap["number"] == "FV/2026/001"
+        assert snap["counterparty_name"] == "Nabywca SA"
+        assert snap["counterparty_nip"] == "2222222222"
+        assert snap["gross_total"] == "1230.00"
+        assert snap["direction"] == "sale"
 
 
 # ---------------------------------------------------------------------------

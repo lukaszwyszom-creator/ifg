@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TARGET_BRANCH = "production"
@@ -24,6 +25,8 @@ KSEF_CONNECT_DIST_MARKERS = (
 )
 
 REPORTS_DIR = ROOT / "docs" / "guardian"
+
+DEPLOYMENT_PROFILE = os.getenv("GUARDIAN_DEPLOYMENT_PROFILE", "single_production")
 
 # Patterns treated as gitignore-like (should not be committed)
 IGNORE_PATTERNS = (

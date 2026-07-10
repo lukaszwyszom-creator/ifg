@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ifg_guardian.config import ROOT
 from ifg_guardian.core.git import parse_porcelain_line
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.core.repo_audit.service import parse_changed_paths
 
 
@@ -232,7 +233,7 @@ def run_eol_check(*, root: Path | None = None) -> EolCheckResult:
     )
 
 
-def render_markdown(result: EolCheckResult) -> str:
+def render_markdown(result: EolCheckResult, *, debt=None) -> str:
     lines = [
         "# Guardian EOL Check (`repo.eol_check`)",
         "",
@@ -302,7 +303,7 @@ def render_markdown(result: EolCheckResult) -> str:
             "",
         ]
     )
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=result, transaction=None)
 
 
 def exit_code_for_verdict(verdict: EolVerdict) -> int:

@@ -14,6 +14,7 @@ from app.schemas.transmission import (
     KSeFStatusResponse,
     RetryTransmissionResponse,
     SubmitInvoiceResponse,
+    TransmissionInvoiceSnapshot,
     TransmissionListResponse,
     TransmissionPageResponse,
     TransmissionResponse,
@@ -48,6 +49,42 @@ _TRANSMISSION_RESPONSE_FIELDS = (
 )
 
 
+def _build_invoice_snapshot(transmission) -> TransmissionInvoiceSnapshot | None:
+    invoice = getattr(transmission, "invoice", None)
+    if invoice is None:
+        return None
+
+    direction = (getattr(invoice, "direction", None) or "sale").strip().lower()
+    seller = getattr(invoice, "seller_snapshot_json", None) or {}
+    buyer = getattr(invoice, "buyer_snapshot_json", None) or {}
+    totals = getattr(invoice, "totals_json", None) or {}
+    if not isinstance(seller, dict):
+        seller = {}
+    if not isinstance(buyer, dict):
+        buyer = {}
+    if not isinstance(totals, dict):
+        totals = {}
+
+    party = seller if direction == "purchase" else buyer
+    gross = totals.get("total_gross")
+    issue_date = getattr(invoice, "issue_date", None)
+    ksef_ref = getattr(invoice, "ksef_reference_number", None) or getattr(
+        transmission, "ksef_reference_number", None
+    )
+
+    return TransmissionInvoiceSnapshot(
+        number=getattr(invoice, "number_local", None),
+        counterparty_name=party.get("name"),
+        counterparty_nip=party.get("nip"),
+        gross_total=str(gross) if gross is not None else None,
+        currency=getattr(invoice, "currency", None) or "PLN",
+        issue_date=issue_date,
+        ksef_reference_number=ksef_ref,
+        status=getattr(invoice, "status", None),
+        direction=direction,
+    )
+
+
 def _transmission_to_response(transmission) -> TransmissionResponse:
     invoice = getattr(transmission, "invoice", None)
     raw_number = getattr(invoice, "number_local", None) if invoice is not None else None
@@ -57,6 +94,7 @@ def _transmission_to_response(transmission) -> TransmissionResponse:
     return TransmissionResponse(
         **{field: getattr(transmission, field) for field in _TRANSMISSION_RESPONSE_FIELDS},
         invoice_number_local=invoice_number_local,
+        invoice_snapshot=_build_invoice_snapshot(transmission),
     )
 
 

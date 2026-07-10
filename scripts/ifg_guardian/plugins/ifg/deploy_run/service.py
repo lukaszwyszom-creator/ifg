@@ -3,6 +3,7 @@ from __future__ import annotations
 from ifg_guardian.core.workflow.context import WorkflowContext
 from ifg_guardian.core.workflow.state import WorkflowState
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployRunState
+from ifg_guardian.plugins.ifg.release_evaluate.models import ReleaseEvaluateState
 from ifg_guardian.plugins.ifg.release_plan.models import ReleasePlanState
 
 
@@ -26,3 +27,18 @@ def get_release_plan_dependency(ctx: WorkflowContext) -> ReleasePlanState:
     if not payload:
         raise RuntimeError("ifg.release.plan dependency produced no release_plan snapshot")
     return ReleasePlanState.from_dict(payload)
+
+
+def get_release_evaluate_dependency(ctx: WorkflowContext) -> ReleaseEvaluateState:
+    deps = ctx.data.get("dependency_contexts", {})
+    evaluate_ctx = deps.get("ifg.release.evaluate")
+    if evaluate_ctx is None:
+        raise RuntimeError("ifg.release.evaluate dependency was not executed by Workflow Engine")
+    if evaluate_ctx.state_machine.state != WorkflowState.SUCCESS:
+        raise RuntimeError(
+            f"ifg.release.evaluate dependency failed: {evaluate_ctx.transaction.outcome}"
+        )
+    payload = evaluate_ctx.transaction.release_evaluate
+    if not payload:
+        raise RuntimeError("ifg.release.evaluate dependency produced no release_evaluate snapshot")
+    return ReleaseEvaluateState.from_dict(payload)

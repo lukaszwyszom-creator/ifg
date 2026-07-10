@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from guardian_platform.core.reporting.debt import finish_markdown
+
 
 def render_terminal(payload: dict[str, Any]) -> str:
     lines = [payload.get("title", "Guardian Report"), "=" * 40]
@@ -36,7 +38,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         else:
             lines.append(str(value))
         lines.append("")
-    return "\n".join(lines)
+    next_step = payload.get("next_step")
+    if next_step:
+        lines.extend(["## Następny krok", "", str(next_step), ""])
+    return finish_markdown(lines, debt=payload.get("debt"))
 
 
 def render_report(payload: dict[str, Any], fmt: str) -> str:

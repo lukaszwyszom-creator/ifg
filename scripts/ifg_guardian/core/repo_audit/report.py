@@ -6,6 +6,7 @@ from datetime import datetime
 from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
+from ifg_guardian.core.reporting.debt import finish_markdown
 from ifg_guardian.config import TARGET_BRANCH
 from ifg_guardian.core.git import short_sha
 from ifg_guardian.core.repo_audit.models import RepoAuditState
@@ -18,7 +19,12 @@ def audit_from_transaction(transaction: WorkflowTransaction) -> RepoAuditState:
     return RepoAuditState.from_dict(payload)
 
 
-def render_markdown(audit: RepoAuditState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    audit: RepoAuditState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [
         "# IFG Guardian — Repo Audit",
@@ -76,8 +82,7 @@ def render_markdown(audit: RepoAuditState, *, transaction: WorkflowTransaction |
     lines.extend(["", "## RECOMMENDED ACTION", ""])
     for i, action in enumerate(audit.recommended_actions, 1):
         lines.append(f"{i}. {action}")
-    lines.append("")
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=audit, transaction=transaction)
 
 
 def render_json(audit: RepoAuditState, *, transaction: WorkflowTransaction) -> str:

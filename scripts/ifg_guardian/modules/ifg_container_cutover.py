@@ -28,6 +28,7 @@ def execute_ifg_container_cutover(
     precheck_report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
     root: Path | None = None,
 ):
     if not dry_run and not assume_yes:
@@ -53,6 +54,7 @@ def execute_ifg_container_cutover(
                 "assume_yes": assume_yes,
                 "confirm_functional": confirm_functional,
                 "cleanup": cleanup,
+                "progress_enabled": progress_enabled,
             },
             plugin_registry=runtime.plugin_registry,
         )
@@ -70,6 +72,7 @@ def run_ifg_container_cutover(
     report_path: Path | None = None,
     remote_host: str | None = None,
     remote_path: str = DEFAULT_REMOTE_PATH,
+    progress_enabled: bool | None = None,
 ) -> int:
     if not dry_run and not assume_yes:
         print(LIVE_REQUIRES_YES)
@@ -85,6 +88,7 @@ def run_ifg_container_cutover(
             report_path=report_path,
             remote_host=remote_host,
             remote_path=remote_path,
+            progress_enabled=progress_enabled,
         )
     except RuntimeError as exc:
         print(f"\n❌ Container cutover failed: {exc}")

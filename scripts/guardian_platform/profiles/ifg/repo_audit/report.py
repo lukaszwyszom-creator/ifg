@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from guardian_platform.core.reporting.debt import finish_markdown
 from guardian_platform.core.workflow.context import WorkflowTransaction
 from guardian_platform.profiles.ifg.config.defaults import TARGET_BRANCH
 from guardian_platform.profiles.ifg.infra.git import short_sha
@@ -16,7 +17,12 @@ def audit_from_transaction(transaction: WorkflowTransaction) -> RepoAuditState:
     return RepoAuditState.from_dict(payload)
 
 
-def render_markdown(audit: RepoAuditState, *, transaction: WorkflowTransaction | None = None) -> str:
+def render_markdown(
+    audit: RepoAuditState,
+    *,
+    transaction: WorkflowTransaction | None = None,
+    debt=None,
+) -> str:
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = [
         "# IFG Guardian — Repo Audit",
@@ -74,8 +80,7 @@ def render_markdown(audit: RepoAuditState, *, transaction: WorkflowTransaction |
     lines.extend(["", "## RECOMMENDED ACTION", ""])
     for i, action in enumerate(audit.recommended_actions, 1):
         lines.append(f"{i}. {action}")
-    lines.append("")
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=audit, transaction=transaction)
 
 
 def render_json(audit: RepoAuditState, *, transaction: WorkflowTransaction) -> str:

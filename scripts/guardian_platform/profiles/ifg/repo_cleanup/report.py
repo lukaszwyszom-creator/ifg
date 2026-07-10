@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from guardian_platform.core.reporting.debt import finish_markdown
 from guardian_platform.profiles.ifg.repo_cleanup.policy import CleanupPlan
 
 
@@ -10,7 +11,7 @@ def _reports_dir(root: Path) -> Path:
     return root / "docs" / "reports"
 
 
-def render_plan_markdown(plan: CleanupPlan, *, root: Path) -> str:
+def render_plan_markdown(plan: CleanupPlan, *, root: Path, debt=None) -> str:
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "# IFG Repository Cleanup Plan",
@@ -64,7 +65,7 @@ def render_plan_markdown(plan: CleanupPlan, *, root: Path) -> str:
                 "",
             ])
 
-    return "\n".join(lines)
+    return finish_markdown(lines, debt=debt, state=plan, transaction=None)
 
 
 def write_plan_report(root: Path, plan: CleanupPlan) -> Path:
