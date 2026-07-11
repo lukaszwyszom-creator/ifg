@@ -13,27 +13,30 @@
 |--------|--------|
 | Implementacja | ✅ Zakończona |
 | Testy jednostkowe | ✅ 50 passed |
-| `guardian ifg smtp check` | ✅ READY (REMOTE) |
-| `guardian ifg smtp test --yes` | ✅ PASS — mail wysłany |
-| Commit NOTIFY-0003 | ❌ Brak (zmiany niezacommitowane) |
-| Deploy IFG (Guardian) | ❌ Nie wykonany |
+| Commit NOTIFY-0003 | ✅ `1f05f86` |
+| Push `production` | ✅ `origin/production` zsynchronizowany |
+| Deploy IFG (Guardian) | ✅ SUCCESS (`ifg deploy run --yes --allow-dirty-build`) |
+| Env reload api/worker | ✅ SUCCESS (restart po deploy) |
 | Health produkcji (DS723+) | ✅ OK |
-| Fix aktywny w workerze prod | ⚠️ Po deploy |
+| `guardian ifg smtp check` | ✅ READY (REMOTE) — post-deploy |
+| `guardian ifg smtp test --yes` | ✅ PASS — mail wysłany post-deploy |
+| Fix aktywny na DS723+ | ✅ `1f05f86` + `parse_smtp_from` na hoście |
 
 ✅ Co działa
 - Parsowanie `SMTP_FROM` z display name i nawiasami kwadratowymi
 - Envelope sender = czysty adres (`ds723@ikonastudio.pl`)
-- Nagłówek `From` z poprawnie cytowaną nazwą wyświetlaną
+- Nagłówek `From`: `"IFG [DS 723+]" <ds723@ikonastudio.pl>`
 - Walidacja błędnej konfiguracji przed połączeniem SMTP
-- Guardian SMTP check/test z konfiguracją REMOTE (DS723+)
-- Test mail wysłany pomyślnie po fixie (lokalny kod na Mac mini)
+- Kod na DS723+ (`1f05f86`) z `parse_smtp_from`
+- Guardian SMTP check/test PASS po deploy i env reload
+- Produkcja `/health` OK
 
 ⚠️ Znane problemy
-- Fix nie jest jeszcze na produkcji (brak commit + deploy)
-- Worker `PurchaseSyncEmailNotifier` na DS723+ nadal używa starego kodu do czasu deploy
+- Deploy wykonany z `--allow-dirty-build` (lokalne niezacommitowane zmiany Guardiana poza zakresem NOTIFY-0003)
+- `docker build` SKIP — kod z git pull + env reload (bind-mount), bez rebuild obrazu
 
 ❌ Co nie działa
-- Wysyłka z kontenera produkcyjnego przed deployem — nadal może używać błędnego envelope sender
+- Brak
 
 ---
 
@@ -181,7 +184,7 @@ python3 scripts/guardian.py ifg smtp check
 | **SMTP_FROM** | PASS — `envelope sender: ds***@ikonastudio.pl` |
 | **connectivity:AUTH** | PASS — login accepted |
 | **Exit code** | `0` |
-| **Czas** | ~1131 ms |
+| **Czas** | ~1038 ms (post-deploy) |
 
 Raport auto: `docs/guardian/IFG_SMTP_CHECK_2026_07_11.md`
 
@@ -202,9 +205,9 @@ python3 scripts/guardian.py ifg smtp test --yes
 | **Recipients** | `lukasz@ikonastudio.pl` |
 | **Message** | `test mail sent to 1 recipient(s)` |
 | **Exit code** | `0` |
-| **Czas** | ~1772 ms |
+| **Czas** | ~1881 ms (post-deploy) |
 
-**Uwaga:** Test wykonany z Mac mini z lokalnym kodem (po fixie), konfiguracja odczytana z DS723+ (REMOTE). To potwierdza poprawność envelope sender po fixie, ale **nie oznacza**, że worker produkcyjny ma już nowy kod.
+Potwierdzone po deploy + env reload. Brak błędu 554 Zenbox.
 
 Raport auto: `docs/guardian/IFG_SMTP_TEST_2026_07_11.md`
 
@@ -214,45 +217,68 @@ Raport auto: `docs/guardian/IFG_SMTP_TEST_2026_07_11.md`
 
 | Pole | Wartość |
 |------|---------|
-| **Commit NOTIFY-0003** | Brak — zmiany w working tree |
-| **HEAD (repo)** | `1926228` — `docs(notify): post-deploy verification report for NOTIFY-0002` |
-| **Stan** | `app/integrations/email/smtp_client.py` i testy — modified/untracked |
-
-**Następny krok operatora:** commit na `production` z message np. `fix(notify): parse SMTP_FROM display name for envelope sender`.
+| **Commit NOTIFY-0003** | `1f05f8674053b4dd3771979010c4219f3b67e90e` |
+| **Short hash** | `1f05f86` |
+| **Message** | `fix(notify): parse SMTP_FROM display name for envelope sender` |
+| **Branch** | `production` |
+| **Push** | ✅ `1926228..1f05f86 production -> production` |
+| **Remote HEAD** | `1f05f8674053b4dd3771979010c4219f3b67e90e` |
+| **DS723+ HEAD** | `1f05f86` (zweryfikowany SSH) |
 
 ---
 
 ## Deploy wykonany przez Guardiana
 
-| Operacja | Status |
-|----------|--------|
-| `guardian ifg deploy run` | ❌ Nie wykonany dla NOTIFY-0003 |
-| `guardian ifg env reload` | ❌ Nie wymagany (zmiana kodu Python, nie `.env`) |
-| Deploy wymagany | ✅ Tak — `api` + `worker` (zmiana `smtp_client.py`) |
+```bash
+python3 scripts/guardian.py ifg deploy run --yes --allow-dirty-build
+```
 
-Fix jest zweryfikowany diagnostycznie (Guardian SMTP test z Mac mini). Aby produkcyjny worker wysyłał powiadomienia KSeF z poprawnym envelope sender, wymagany jest standardowy deploy IFG przez Guardiana po commicie.
+| Pole | Wartość |
+|------|---------|
+| **Workflow** | `2026-07-11T225655Z_ifg_deploy_run` |
+| **Status** | ✅ SUCCESS — LIVE COMPLETE |
+| **Duration** | 36909 ms |
+| **Release decision** | `READY_WITH_OVERRIDE` (dirty tree override) |
+| **Rollback commit** | `1f05f86` |
+
+Wykonane kroki:
+
+| # | Krok | Status |
+|---|------|--------|
+| 1 | `git pull origin production` | ✅ → `1f05f86` |
+| 2 | `npm run build` + artifact gate | ✅ |
+| 3 | rsync frontend dist | ✅ |
+| 4 | `docker build` | SKIP (bind-mount) |
+| 5 | `alembic upgrade` | SKIP (at head) |
+| 6 | `compose up -d` | ✅ api/worker Running |
+| 7 | health check | ✅ 200 OK |
+| 8 | log verification | ✅ |
+
+Dodatkowo po deploy:
+
+```bash
+python3 scripts/guardian.py ifg env reload --yes
+```
+
+Restart `api` + `worker` w celu załadowania nowego `smtp_client.py` (workflow `2026-07-11T225740Z_ifg_env_reload`, READY).
+
+Raport deploy: `docs/guardian/IFG_DEPLOY_RUN_2026_07_11.md`
 
 ---
 
 ## Wynik health
 
-### Produkcja (DS723+)
+### Produkcja (DS723+) — post-deploy
 
 ```bash
-curl http://127.0.0.1:8000/health  # via SSH
+curl http://127.0.0.1:8000/health  # via SSH / deploy pipeline
 ```
 
 ```json
-{"status":"ok","app_name":"IFG Faktury","version":"1.0.0","environment":"production",...}
+{"status":"ok","app_name":"IFG Faktury","version":"1.0.0","environment":"production","db_timezone":"Europe/Warsaw","db_timezone_utc":false,"regon":{"environment":"production","configured":true}}
 ```
 
-**Status:** ✅ OK (przed deployem NOTIFY-0003 — bez regresji)
-
-### Lokalnie (dev)
-
-```json
-{"status":"ok","app_name":"Imperium Faktur G","version":"1.0.0","environment":"local",...}
-```
+**Status:** ✅ OK (po deploy NOTIFY-0003)
 
 ---
 
@@ -270,7 +296,7 @@ Cudzysłowy wokół display name są wymagane przez RFC 5322 (nawiasy kwadratowe
 
 > **IFG [DS 723+]** `<ds723@ikonastudio.pl>`
 
-Potwierdzone testem jednostkowym i wysyłką Guardian `ifg smtp test --yes` (exit 0, Sent: True).
+Potwierdzone testem jednostkowym, deployem na DS723+ (`1f05f86`) i wysyłką Guardian `ifg smtp test --yes` post-deploy (exit 0, Sent: True).
 
 ---
 
@@ -278,10 +304,10 @@ Potwierdzone testem jednostkowym i wysyłką Guardian `ifg smtp test --yes` (exi
 
 | Priorytet | Opis |
 |-----------|------|
-| **HIGH** | Deploy NOTIFY-0003 na produkcję — worker nadal bez fixu |
-| **LOW** | Guardian maskuje `SMTP_FROM` jako `IF***@ikonastudio.pl>` (artefakt maskowania, trailing `>`) |
-| **LOW** | `TestMailResult` powoduje PytestCollectionWarning w `test_guardian_smtp_workflow.py` |
-| **LOW** | Brak dedykowanego testu E2E na DS723+ po deploy (tylko Guardian test z orchestration host) |
+| **LOW** | Deploy z `--allow-dirty-build` — lokalne niezacommitowane zmiany Guardiana (poza NOTIFY-0003) |
+| **LOW** | Guardian maskuje `SMTP_FROM` jako `IF***@ikonastudio.pl>` (artefakt maskowania) |
+| **LOW** | `docker build` SKIP — architektura bind-mount; wymaga env reload po zmianach Python |
+| **LOW** | Brak testu E2E wysyłki z kontenera worker (tylko Guardian test + unit tests) |
 
 ---
 
@@ -307,8 +333,10 @@ Brak.
 ## Wygenerowane raporty
 
 - `/Users/lukasz/projekty/ifg_standalone/docs/reports/2026-07-12_GWO-IFG-NOTIFY-0003_SMTP_FROM_ENVELOPE_FIX.md` (ten dokument)
+- `/Users/lukasz/projekty/ifg_standalone/docs/guardian/IFG_DEPLOY_RUN_2026_07_11.md`
 - `/Users/lukasz/projekty/ifg_standalone/docs/guardian/IFG_SMTP_CHECK_2026_07_11.md`
 - `/Users/lukasz/projekty/ifg_standalone/docs/guardian/IFG_SMTP_TEST_2026_07_11.md`
+- `/Users/lukasz/projekty/ifg_standalone/docs/reports/2026-07-11_GWO-GUARDIAN-0079_ENV_RELOAD.md`
 
 ## Wygenerowane handoffy
 
@@ -316,10 +344,14 @@ Brak.
 
 ## Status operatora
 
-| Akcja | Rekomendacja |
-|-------|--------------|
-| Commit NOTIFY-0003 | **Wymagany** — zmiany niezacommitowane |
-| Deploy IFG (`api` + `worker`) | **Wymagany** — aby worker produkcyjny używał fixu |
-| `guardian ifg smtp test --yes` | ✅ Wykonany — PASS (diagnostyka z Mac mini) |
-| Weryfikacja skrzynki | Sprawdź dostarczenie maila testowego na `lukasz@ikonastudio.pl` |
-| Po deploy | Uruchom sync testowy lub poczekaj na kolejny auto-sync KSeF i potwierdź brak błędu 554 |
+| Akcja | Status |
+|-------|--------|
+| Commit NOTIFY-0003 | ✅ `1f05f86` |
+| Push `production` | ✅ Zsynchronizowany z `origin/production` |
+| Deploy Guardian | ✅ SUCCESS (36.9s, LIVE COMPLETE) |
+| Env reload api/worker | ✅ SUCCESS |
+| Health DS723+ | ✅ OK |
+| SMTP check post-deploy | ✅ READY |
+| SMTP test post-deploy | ✅ PASS (Sent: True) |
+| Weryfikacja skrzynki | Sprawdź `lukasz@ikonastudio.pl` — mail testowy post-deploy |
+| Kolejny auto-sync KSeF | Oczekiwany brak błędu 554 przy wysyłce powiadomień |
