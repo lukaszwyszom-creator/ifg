@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from typing import Any
@@ -96,16 +96,43 @@ class DeferredDecision:
     source: str
     created_at: str
     closed_at: str | None = None
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["type"] = self.type.value
-        payload["priority"] = self.priority.value
-        payload["status"] = self.status.value
+        payload = {
+            "id": self.id,
+            "project": self.project,
+            "module": self.module,
+            "type": self.type.value,
+            "priority": self.priority.value,
+            "status": self.status.value,
+            "defer_reason": self.defer_reason,
+            "description": self.description,
+            "review_when": self.review_when,
+            "source": self.source,
+            "created_at": self.created_at,
+            "closed_at": self.closed_at,
+        }
+        payload.update(self.extra_fields)
         return payload
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DeferredDecision:
+        known = {
+            "id",
+            "project",
+            "module",
+            "type",
+            "priority",
+            "status",
+            "defer_reason",
+            "description",
+            "review_when",
+            "source",
+            "created_at",
+            "closed_at",
+        }
+        extra = {key: value for key, value in raw.items() if key not in known}
         return cls(
             id=str(raw["id"]),
             project=str(raw["project"]),
@@ -119,6 +146,7 @@ class DeferredDecision:
             source=str(raw["source"]),
             created_at=str(raw["created_at"]),
             closed_at=str(raw["closed_at"]) if raw.get("closed_at") else None,
+            extra_fields=extra,
         )
 
 

@@ -132,6 +132,13 @@ guardian deferred add \
   --review-when "Gdy >500 rekordów na stronę" \
   --source "GWO-IFG-0059"
 
+# Walidacja integralności rejestru
+guardian deferred validate
+
+# Naprawa jednoznacznych naruszeń (najpierw dry-run)
+guardian deferred repair --dry-run
+guardian deferred repair --yes
+
 # Lista otwartych
 guardian deferred list
 guardian deferred list --project IFG --status OPEN --json
@@ -152,7 +159,63 @@ Lokalnie (repo):
 
 ```bash
 PYTHONPATH=scripts python3 -m ifg_guardian.cli deferred list
+PYTHONPATH=scripts python3 -m ifg_guardian.cli deferred validate
 ```
+
+---
+
+## Model integralności (GWO-GUARDIAN-0074)
+
+Rejestr GDD jest **wersjonowanym artefaktem** w `docs/guardian/deferred_decisions.json`.  
+Wszystkie zapisy przechodzą przez wspólny store (`store.py` + `service.py`).
+
+### Reguły
+
+| Reguła | Opis |
+|--------|------|
+| Unikalność `id` | Każde `id` występuje dokładnie raz w `items` |
+| Format standardowy | `GDD-NNNN` (4 cyfry) |
+| Przestrzenie nazw | Np. `GDD-MAC-0001` — dozwolone, nie wpływają na `next_id` |
+| `next_id` | Pierwszy wolny numer w sekwencji `GDD-NNNN` |
+| Status | `OPEN` / `DONE` / `CANCELLED` |
+| `closed_at` | Wymagane dla `DONE`; zakazane dla `OPEN` |
+| Nieznane pola | Zachowywane (np. `lamus_status`) dla kompatybilności wstecznej |
+
+### Idempotencja
+
+Klucz logiczny wpisu: `project` + `module` + `type` + znormalizowany `description`.
+
+| Wynik | Znaczenie |
+|-------|-----------|
+| `CREATED` | Nowy wpis zapisany |
+| `ALREADY_EXISTS` | Ta sama decyzja — zwrócone istniejące ID, bez zmian |
+| `ID_CONFLICT` | To samo ID, inna treść — zapis przerwany |
+| `DUPLICATE_DECISION` | Ten sam klucz logiczny pod innym ID — wymaga ręcznej naprawy |
+
+### Atomowy zapis i blokada
+
+1. Walidacja stanu wejściowego i wynikowego
+2. Kopia zapasowa w `.state/gdd_backups/` (poza git)
+3. Zapis do pliku tymczasowego + `fsync` + atomowy `replace`
+4. Blokada plikowa `fcntl.flock` na `.state/gdd_registry.lock` (timeout 10s)
+
+### LAMUS / workflow
+
+Rejestracja decyzji LAMUS **musi** używać `guardian deferred add` lub `DeferredDecisionService.add()` —  
+**nie** bezpośredniej edycji JSON. Po każdej operacji modyfikującej GDD uruchom `guardian deferred validate`.
+
+Hook dla workflow: `ensure_registry_valid()` — przy naruszeniu integralności rzuca `GddIntegrityError`.
+
+### Repair
+
+`repair --dry-run` — tylko propozycje zmian.  
+`repair --yes` — automatycznie naprawia wyłącznie:
+
+- techniczne duplikaty tego samego ID (zachowuje pełniejszy wpis),
+- błędne `next_id`,
+- `closed_at` niespójne ze statusem.
+
+**Nie scala** semantycznie różnych wpisów ani konfliktów logicznych pod różnymi ID.
 
 ---
 

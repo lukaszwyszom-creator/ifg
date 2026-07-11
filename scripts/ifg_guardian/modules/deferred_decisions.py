@@ -6,7 +6,12 @@ from datetime import date
 from pathlib import Path
 
 from ifg_guardian.config import ROOT
-from ifg_guardian.core.deferred_decisions.service import DeferredDecisionService
+from ifg_guardian.core.deferred_decisions.service import (
+    AddDecisionResult,
+    DeferredDecisionService,
+    ensure_registry_valid,
+)
+from ifg_guardian.core.deferred_decisions.store import GddIntegrityError
 
 
 def _service(store_path: Path | None = None) -> DeferredDecisionService:
@@ -26,7 +31,7 @@ def run_deferred_add(
     store_path: Path | None = None,
 ) -> int:
     try:
-        item = _service(store_path).add(
+        response = _service(store_path).add(
             project=project,
             module=module,
             decision_type=decision_type,
@@ -36,10 +41,26 @@ def run_deferred_add(
             review_when=review_when,
             source=source,
         )
-    except ValueError as exc:
+    except (ValueError, GddIntegrityError) as exc:
         print(f"deferred add failed: {exc}", file=sys.stderr)
         return 2
-    print(f"Created {item.id}")
+
+    item = response.item
+    if item is None:
+        print(f"deferred add failed: {response.message}", file=sys.stderr)
+        return 2
+
+    if response.result == AddDecisionResult.CREATED:
+        print(f"Created {item.id}")
+    elif response.result == AddDecisionResult.ALREADY_EXISTS:
+        print(f"Already exists: {item.id} ({response.result.value})")
+    elif response.result == AddDecisionResult.ID_CONFLICT:
+        print(f"ID conflict: {response.message}", file=sys.stderr)
+        return 3
+    elif response.result == AddDecisionResult.DUPLICATE_DECISION:
+        print(f"Duplicate decision: {response.message}", file=sys.stderr)
+        return 4
+
     print(f"Project: {item.project}")
     print(f"Module: {item.module}")
     print(f"Type: {item.type.value}")
@@ -161,3 +182,49 @@ def run_deferred_review(
             rel = out_path
         print(f"\nReport: {rel}")
     return 0
+
+
+def run_deferred_validate(*, store_path: Path | None = None) -> int:
+    report = _service(store_path).validate()
+    if report.valid:
+        print("GDD registry valid.")
+        return 0
+    print("GDD registry integrity violations:", file=sys.stderr)
+    for issue in report.issues:
+        prefix = f"[{issue.item_id}] " if issue.item_id else ""
+        print(f"  {prefix}{issue.code.value}: {issue.message}", file=sys.stderr)
+    return report.exit_code
+
+
+def run_deferred_repair(*, apply: bool = False, store_path: Path | None = None) -> int:
+    service = _service(store_path)
+    before, repair_report = service.repair(apply=False)
+    if not repair_report.actions:
+        print("No repair actions proposed.")
+        return 0 if before.valid else before.exit_code
+
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"GDD repair ({mode}) — proposed actions: {len(repair_report.actions)}")
+    for action in repair_report.actions:
+        prefix = f"[{action.item_id}] " if action.item_id else ""
+        print(f"  {prefix}{action.action}: {action.description}")
+
+    if not apply:
+        print("\nDry-run only — no changes written. Use --yes to apply.")
+        return 0
+
+    try:
+        after, applied = service.repair(apply=True)
+    except GddIntegrityError as exc:
+        print(f"Repair failed: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"\nApplied {len(applied.actions)} repair action(s).")
+    if after.valid:
+        print("GDD registry valid after repair.")
+        return 0
+    print("GDD registry still invalid after repair:", file=sys.stderr)
+    for issue in after.issues:
+        prefix = f"[{issue.item_id}] " if issue.item_id else ""
+        print(f"  {prefix}{issue.code.value}: {issue.message}", file=sys.stderr)
+    return after.exit_code

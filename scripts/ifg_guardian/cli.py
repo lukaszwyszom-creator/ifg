@@ -15,8 +15,10 @@ from ifg_guardian.modules.deferred_decisions import (
     run_deferred_cancel,
     run_deferred_done,
     run_deferred_list,
+    run_deferred_repair,
     run_deferred_review,
     run_deferred_show,
+    run_deferred_validate,
 )
 from ifg_guardian.modules.deploy import run_deploy_check
 from ifg_guardian.modules.doctor import run_doctor
@@ -416,6 +418,12 @@ def build_parser() -> argparse.ArgumentParser:
     def_review.add_argument("--markdown", action="store_true", help="Markdown output")
     def_review.add_argument("--report", default=None, help="Write markdown report to path")
 
+    deferred_sub.add_parser("validate", help="Validate GDD registry integrity")
+
+    def_repair = deferred_sub.add_parser("repair", help="Propose or apply GDD registry repairs")
+    def_repair.add_argument("--dry-run", action="store_true", help="Show proposed repairs only")
+    def_repair.add_argument("--yes", action="store_true", help="Apply unambiguous repairs")
+
     return parser
 
 
@@ -711,6 +719,16 @@ def main(argv: list[str] | None = None) -> int:
                 report_path=report,
                 output_format=review_format,
             )
+        if args.action == "validate":
+            return run_deferred_validate()
+        if args.action == "repair":
+            if args.dry_run and args.yes:
+                print("Use either --dry-run or --yes, not both.", file=sys.stderr)
+                return 2
+            if not args.dry_run and not args.yes:
+                print("Specify --dry-run or --yes.", file=sys.stderr)
+                return 2
+            return run_deferred_repair(apply=args.yes)
 
     if domain == "version":
         print(f"IFG Guardian {__version__}")

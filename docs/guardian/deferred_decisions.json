@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "next_id": 13,
+  "next_id": 16,
   "items": [
     {
       "id": "GDD-0001",
@@ -185,6 +185,51 @@
       "description": "Workflow release evaluate i doctor generują lub aktualizują pliki raportowe w repozytorium (docs/guardian/), a policy dirty_working_tree_blocks_production może traktować te pliki jako blocker — tworząc pętlę: clean tree → evaluate → raporty zaktualizowane → dirty tree → PRODUCTION_BLOCKED. Częściowy fix (report_paths w policy_engine, GWO-0064) wyklucza docs/guardian/ z dirty-tree, ale nie rozwiązuje w pełni semantyki artefaktów runtime vs wersjonowanych raportów ani plików poza report_paths (np. docs/reports/, reports/CHATGPT_HANDOFF).",
       "review_when": "Po GWO-IFG-0068 finalizacji release; przed kolejnym cyklem evaluate/deploy gdy pojawi się regresja dirty tree po samym uruchomieniu gate.",
       "source": "GWO-IFG-0068 LAMUS + obserwacja pętli evaluate/doctor w GWO-0064/0067",
+      "created_at": "2026-07-11",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0013",
+      "project": "Guardian Core",
+      "module": "Notification Engine",
+      "type": "Architecture",
+      "priority": "High",
+      "status": "OPEN",
+      "lamus_status": "Odroczone (LAMUS)",
+      "defer_reason": "GWO-IFG-0073 — architektura Core; implementacja po wydzieleniu interfejsu adapterów.",
+      "description": "Notification Engine z adapterami: Email, Slack, Discord, Telegram, Webhook, Pushover, SMS, Desktop Notification, Log sink. Neutralny interfejs bez sekretów w repo; konfiguracja operatora poza Git.",
+      "review_when": "Po GWO wydzielającym guardian_core/notifications/ z runtime_notify.py.",
+      "source": "GWO-IFG-0073 LAMUS + GWO-IFG-0072 runtime monitor",
+      "created_at": "2026-07-11",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0014",
+      "project": "Guardian Core",
+      "module": "Runtime State Engine",
+      "type": "Architecture",
+      "priority": "High",
+      "status": "OPEN",
+      "lamus_status": "Odroczone (LAMUS)",
+      "defer_reason": "GWO-IFG-0073 — zaprojektowany event sourcing + reducer; obecny runtime_monitor.json wystarcza na IFG v1.",
+      "description": "Runtime State Engine zamiast pojedynczego runtime_monitor.json: event sourcing → state reducer → runtime state → history → alerts → dashboard. Zastępuje bezpośredni zapis stanu monitora.",
+      "review_when": "Przed Guardian GUI lub multi-project Conductor; po Event Bus Etap 1.",
+      "source": "GWO-IFG-0073 LAMUS (żądane jako GDD-0012-State — ID GDD-0012 zajęte przez dirty-tree loop)",
+      "created_at": "2026-07-11",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0015",
+      "project": "Guardian Core",
+      "module": "Audit Engine / Rotation",
+      "type": "Architecture",
+      "priority": "Medium",
+      "status": "OPEN",
+      "lamus_status": "Odroczone (LAMUS)",
+      "defer_reason": "GWO-IFG-0073 — obecny runtime_audit.jsonl + rotacja 5MB wystarcza; struktura YYYY/MM/DD wymaga migracji ścieżek.",
+      "description": "Rotacja runtime_audit do struktury katalogów YYYY/MM/DD z indeksami, wyszukiwaniem, filtrowaniem, eksportem i polityką retencji.",
+      "review_when": "Gdy audit trail przekroczy praktyczny limit wyszukiwania liniowego lub przed multi-project Conductor.",
+      "source": "GWO-IFG-0073 LAMUS (żądane jako GDD-0011-Audit — ID GDD-0011 zajęte przez Report Metadata DONE)",
       "created_at": "2026-07-11",
       "closed_at": null
     }

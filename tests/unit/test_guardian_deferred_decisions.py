@@ -20,7 +20,7 @@ from ifg_guardian.core.deferred_decisions.models import (  # noqa: E402
     coerce_decision_type,
     coerce_priority,
 )
-from ifg_guardian.core.deferred_decisions.service import DeferredDecisionService  # noqa: E402
+from ifg_guardian.core.deferred_decisions.service import AddDecisionResult, DeferredDecisionService  # noqa: E402
 from ifg_guardian.core.deferred_decisions.store import load_store  # noqa: E402
 from ifg_guardian.modules.deferred_decisions import (  # noqa: E402
     run_deferred_add,
@@ -53,7 +53,7 @@ class TestDeferredDecisionStore(unittest.TestCase):
     def test_add_and_allocate_id(self):
         path = _store_path(self.tmp_path)
         service = DeferredDecisionService(store_path=path)
-        item = service.add(
+        response = service.add(
             project="IFG",
             module="Test Module",
             decision_type="UX",
@@ -64,6 +64,9 @@ class TestDeferredDecisionStore(unittest.TestCase):
             source="unit-test",
             created_at="2026-07-09",
         )
+        self.assertEqual(response.result, AddDecisionResult.CREATED)
+        item = response.item
+        self.assertIsNotNone(item)
         self.assertEqual(item.id, "GDD-0001")
         reloaded = load_store(path)
         self.assertEqual(len(reloaded.items), 1)
@@ -93,7 +96,7 @@ class TestDeferredDecisionStore(unittest.TestCase):
             review_when="later",
             source="t",
             created_at="2026-07-09",
-        )
+        ).item
         service.mark_done(item2.id)
 
         open_ifg = service.list_items(project="IFG", status="OPEN")
@@ -107,7 +110,7 @@ class TestDeferredDecisionStore(unittest.TestCase):
     def test_mark_done_sets_closed_at(self):
         path = _store_path(self.tmp_path)
         service = DeferredDecisionService(store_path=path)
-        item = service.add(
+        response = service.add(
             project="IFG",
             module="A",
             decision_type="Refactor",
@@ -118,9 +121,10 @@ class TestDeferredDecisionStore(unittest.TestCase):
             source="t",
             created_at="2026-07-09",
         )
-        updated = service.mark_done(item.id)
+        updated = service.mark_done(response.item.id)
         self.assertEqual(updated.status, DeferredDecisionStatus.DONE)
-        self.assertEqual(updated.closed_at, "2026-07-09")
+        self.assertIsNotNone(updated.closed_at)
+        self.assertRegex(updated.closed_at, r"^\d{4}-\d{2}-\d{2}$")
 
     def test_render_review_markdown(self):
         path = _store_path(self.tmp_path)
@@ -207,7 +211,7 @@ class TestDeferredDecisionMigration(unittest.TestCase):
         self.assertIn("GDD-0006", ids)
         handoff = next(item for item in store.items if item.id == "GDD-0001")
         self.assertEqual(handoff.module, "Guardian Handoff")
-        self.assertEqual(handoff.status, DeferredDecisionStatus.OPEN)
+        self.assertEqual(handoff.status, DeferredDecisionStatus.DONE)
 
 
 class TestDeferredDecisionCli(unittest.TestCase):
