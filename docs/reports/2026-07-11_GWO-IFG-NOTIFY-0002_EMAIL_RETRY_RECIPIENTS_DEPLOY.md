@@ -9,7 +9,14 @@
 
 ## 1. Status końcowy
 
-**STATUS:** `SUCCESS_CODE` — kod, testy, commit i push gotowe; deploy i weryfikacja produkcyjna opisane w sekcji 11–13 (wykonane przez workflow Guardiana po push).
+**STATUS:** `SUCCESS_CODE / BLOCKED_CONFIG`
+
+- Kod, testy, commit `4a71c14`, push i deploy Guardian **LIVE COMPLETE**
+- Migracje `o5p6q7r8s9t0` + `p6q7r8s9t0u1` zastosowane na DS723+ (head=`p6q7r8s9t0u1`)
+- API `/health` OK, worker uruchomiony, tabela `purchase_sync_notifications` istnieje
+- **Funkcja e-mail wyłączona na produkcji** — brak zmiennych `PURCHASE_SYNC_NOTIFY_*` i `SMTP_*` w `.env.production`
+
+**Uwaga deploy:** Guardian pominął `docker build` i `alembic upgrade` (fałszywie: schema at head). Operator wykonał ręcznie na DS723+: `docker compose build api worker && up -d && alembic upgrade head` — wymagane, bo kod aplikacji jest w obrazie Docker, nie w bind-mount.
 
 ---
 
@@ -132,43 +139,47 @@ Scenariusze NOTIFY-0002: sukces 1. próby, FAILED+attempt_count, respekt `next_a
 
 ## 9. Commit i push
 
-Commit: `feat(ksef): harden purchase sync email notifications`  
-Hash: *(uzupełnione po push — patrz sekcja operatora)*
-
----
+- **Commit:** `4a71c14` — `feat(ksef): harden purchase sync email notifications`
+- **Push:** `production` → `origin/production` (33c8d17..4a71c14)
 
 ## 10. Workflow Guardiana
 
 ```bash
-python3 scripts/guardian.py ifg deploy run --yes
+python3 scripts/guardian.py ifg deploy run --yes --allow-dirty-build
 ```
 
-Pipeline: release plan → evaluate → backup → git pull DS723+ → frontend build → rsync dist → alembic upgrade → compose up → health check.
-
----
+- **Workflow ID:** `2026-07-11T212532Z_ifg_deploy_run`
+- **Decyzja:** `READY_WITH_OVERRIDE` (dirty tree — niezwiązane pliki poza commitem NOTIFY)
+- **Raport:** `docs/guardian/IFG_DEPLOY_RUN_2026_07_11.md`
+- **Wykonane:** git pull DS723+, frontend build, rsync dist, compose up, health OK
+- **Pominięte (błąd detekcji):** `docker build`, `alembic upgrade` — naprawione ręcznie post-deploy
 
 ## 11. Deploy produkcyjny
 
-*(Uzupełnione po wykonaniu deploy — patrz log `docs/guardian/IFG_DEPLOY_RUN_*.md`)*
-
----
+| Krok | Wynik |
+|------|-------|
+| git pull DS723+ | `4a71c14` |
+| frontend build + rsync | OK |
+| docker build api/worker | Wykonane post-deploy (Guardian SKIP) |
+| compose up -d | api/worker recreated |
+| health `/health` | `{"status":"ok",...}` |
 
 ## 12. Migracja produkcyjna
 
-Oczekiwany head po deploy: `p6q7r8s9t0u1`
-
-Weryfikacja:
-```bash
-ssh ds723 'cd /volume1/docker/ifg_v2/ifg_standalone && docker compose -f docker/docker-compose.prod.yml exec -T api alembic current'
+```
+a9b1c2d3e4f5 -> o5p6q7r8s9t0 (purchase_sync_notification_queue)
+o5p6q7r8s9t0 -> p6q7r8s9t0u1 (purchase_sync_notification_hardening)
 ```
 
----
+**Head:** `p6q7r8s9t0u1` — potwierdzone `alembic current` w kontenerze `api`.
 
 ## 13. Health produkcyjny
 
-- `curl -fsS http://127.0.0.1:8000/health` (z DS723+)
-- `docker compose ps` — api, worker, db healthy
-- Monitor KSeF ładuje się bez błędów
+- `ifg-api-1` — Up, healthy
+- `ifg-worker-1` — Up
+- `ifg-db-1` — Up, healthy
+- `purchase_sync_notifications` — 0 rekordów (oczekiwane — brak nowych faktur / notify disabled)
+- Monitor KSeF — frontend zaktualizowany (dist rsync)
 
 ---
 
@@ -198,7 +209,8 @@ ssh ds723 'cd /volume1/docker/ifg_v2/ifg_standalone && docker compose -f docker/
 |-----------|------|
 | LOW | Brak przycisku ręcznego „Wyślij ponownie” w Monitorze |
 | LOW | Slot 08:00/14:00 rozpoznawany heurystycznie z `finished_at` (Europe/Warsaw) |
-| MEDIUM | Test współbieżności dwóch workerów wymaga PostgreSQL (SKIP LOCKED) — nie pokryty w SQLite |
+| MEDIUM | Guardian `build_detector` nie wymusza `docker build` przy zmianach `app/` — wymaga ręcznego rebuild obrazu |
+| MEDIUM | Test współbieżności dwóch workerów wymaga PostgreSQL (SKIP LOCKED) |
 
 ---
 
