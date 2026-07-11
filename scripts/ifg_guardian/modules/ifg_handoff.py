@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from ifg_guardian.config import ROOT
 from ifg_guardian.core.clipboard import copy_text_to_clipboard
+from ifg_guardian.core.handoff_journal.models import HandoffMetadata, HandoffStatus
+from ifg_guardian.core.handoff_journal.store import load_index
+from ifg_guardian.core.handoff_journal.service import (
+    HandoffJournalService,
+    PublishStep,
+    infer_workflow_type,
+    utc_now_iso,
+)
 from ifg_guardian.core.report_metadata import (
     ReportMetadata,
     metadata_created_on,
@@ -219,6 +228,7 @@ def _render_handoff_markdown(
     output_path: Path,
     root: Path = ROOT,
     today: date | None = None,
+    journal_handoff_id: int | None = None,
 ) -> str:
     stamp = _today_stamp(today)
     chosen = selection.reports
@@ -289,11 +299,59 @@ def _render_handoff_markdown(
 
     lines.append("## Wygenerowane raporty")
     lines.append("")
+    if journal_handoff_id is not None:
+        lines.append(f"- `docs/handoff/handoff-{journal_handoff_id:04d}.md`")
+        lines.append("- `docs/handoff/latest.md`")
     lines.append(f"- `{output_path}`")
     for rel in rel_paths:
         lines.append(f"- `{rel}`")
     lines.append("")
     return "\n".join(lines)
+
+
+def _build_handoff_metadata(
+    *,
+    selection: HandoffSelection,
+    root: Path,
+    today: date | None = None,
+    parent_handoff: int | None = None,
+) -> HandoffMetadata:
+    chosen = selection.reports
+    rel_paths = [str(p.relative_to(root)) for p in chosen]
+    gwo_tokens: set[str] = set()
+    project = "IFG"
+    for path in chosen:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        metadata = parse_report_metadata(content)
+        if metadata is not None:
+            if metadata.workflow:
+                gwo_tokens.add(metadata.workflow.upper().replace("_", "-"))
+            if metadata.project:
+                project = metadata.project
+        gwo_tokens.update(_extract_gwo_tokens(content))
+        gwo_tokens.update(_extract_gwo_tokens(path.name))
+
+    workflow = sorted(gwo_tokens)[0] if gwo_tokens else "IFG-HANDOFF"
+    return HandoffMetadata(
+        handoff_id=0,
+        previous_handoff=None,
+        parent_handoff=parent_handoff,
+        project=project,
+        workflow=workflow,
+        workflow_type=infer_workflow_type(workflow),
+        status=HandoffStatus.SUCCESS,
+        created_at=utc_now_iso(),
+        source_reports=rel_paths,
+    )
+
+
+def _print_handoff_failure(*, failed_step: PublishStep, message: str) -> None:
+    print("✗ Handoff workflow FAILED", file=sys.stderr)
+    print(f"  Etap: {failed_step.value}", file=sys.stderr)
+    print(f"  Powód: {message}", file=sys.stderr)
 
 
 def _print_handoff_summary(
@@ -302,14 +360,24 @@ def _print_handoff_summary(
     merged_count: int,
     copy_to_clipboard: bool,
     content: str,
+    journal_path: Path | None = None,
+    clipboard_done: bool = False,
 ) -> None:
     rel = output_path
     print("✓ Handoff wygenerowany")
     print(f"  Plik: {rel}")
+    if journal_path is not None:
+        print(f"  Journal: {journal_path}")
+        print("  Latest: docs/handoff/latest.md")
     print(f"  Scalono raportów: {merged_count}")
 
     if not copy_to_clipboard:
         print("ℹ Kopiowanie do schowka wyłączone (--no-clipboard)")
+        return
+
+    if clipboard_done:
+        print("✓ Skopiowano do schowka")
+        print("✓ Gotowy do wklejenia do ChatGPT")
         return
 
     try:
@@ -334,6 +402,7 @@ def run_ifg_handoff_latest(
     reset_state: bool = False,
     root: Path = ROOT,
     today: date | None = None,
+    parent_handoff: int | None = None,
 ) -> int:
     if reset_state:
         _clear_handoff_state(root)
@@ -349,16 +418,59 @@ def run_ifg_handoff_latest(
     out_dir.mkdir(parents=True, exist_ok=True)
     output_path = out_dir / f"CHATGPT_HANDOFF_{stamp}.md"
 
-    content = _render_handoff_markdown(
+    if not selection.reports:
+        content = _render_handoff_markdown(
+            selection=selection,
+            output_path=output_path,
+            root=root,
+            today=today,
+        )
+        output_path.write_text(content, encoding="utf-8")
+        _print_handoff_summary(
+            output_path=output_path.relative_to(root),
+            merged_count=0,
+            copy_to_clipboard=False,
+            content=content,
+        )
+        return 0
+
+    journal = HandoffJournalService(root=root)
+    journal.initialize()
+    next_id = load_index(root / "docs" / "handoff" / "index.json").next_handoff_id
+
+    metadata = _build_handoff_metadata(
         selection=selection,
-        output_path=output_path,
         root=root,
         today=today,
+        parent_handoff=parent_handoff,
     )
-    output_path.write_text(content, encoding="utf-8")
 
-    # Mark reports as sent only after successful handoff generation.
-    if selection.reports and not include_all:
+    body = _render_handoff_markdown(
+        selection=selection,
+        output_path=output_path.relative_to(root),
+        root=root,
+        today=today,
+        journal_handoff_id=next_id,
+    )
+    journal_body_start = body.find("# CHATGPT HANDOFF")
+    journal_body = body[journal_body_start:] if journal_body_start >= 0 else body
+
+    output_path.write_text(body, encoding="utf-8")
+
+    publish = journal.publish(
+        metadata=metadata,
+        body=journal_body,
+        report_saved=True,
+        copy_to_clipboard=copy_to_clipboard,
+    )
+    if not publish.ok:
+        _print_handoff_failure(
+            failed_step=publish.failed_step or PublishStep.CLIPBOARD_UPDATED,
+            message=publish.message,
+        )
+        return publish.exit_code
+
+    if not include_all:
         state = _load_handoff_state(root)
         sent = list(state.get("sent_reports", []))
         sent_set = set(sent)
@@ -369,11 +481,15 @@ def run_ifg_handoff_latest(
                 sent_set.add(rel)
         _save_handoff_state(root, sent)
 
+    rel_journal = publish.handoff_path.relative_to(root) if publish.handoff_path else None
+    published_document = publish.handoff_path.read_text(encoding="utf-8") if publish.handoff_path else body
     _print_handoff_summary(
         output_path=output_path.relative_to(root),
         merged_count=len(selection.reports),
         copy_to_clipboard=copy_to_clipboard,
-        content=content,
+        content=published_document,
+        journal_path=rel_journal,
+        clipboard_done=copy_to_clipboard and PublishStep.CLIPBOARD_UPDATED in publish.completed_steps,
     )
 
     return 0

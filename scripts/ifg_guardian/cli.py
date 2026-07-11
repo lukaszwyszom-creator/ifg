@@ -25,6 +25,12 @@ from ifg_guardian.modules.doctor import run_doctor
 from ifg_guardian.modules.ifg_container_cutover import run_ifg_container_cutover, run_ifg_container_cutover_rollback
 from ifg_guardian.modules.ifg_deploy_run import run_ifg_deploy_run
 from ifg_guardian.modules.ifg_doctor import run_ifg_doctor
+from ifg_guardian.modules.handoff_journal import (
+    run_handoff_doctor,
+    run_handoff_rebuild_index,
+    run_handoff_rebuild_latest,
+    run_handoff_validate,
+)
 from ifg_guardian.modules.ifg_handoff import run_ifg_handoff_latest
 from ifg_guardian.modules.ifg_release_evaluate import run_ifg_release_evaluate, run_ifg_release_explain
 from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
@@ -118,7 +124,7 @@ def _handle_legacy(argv: list[str]) -> int | None:
     """Map legacy flags to v3 commands. Returns None if not legacy mode."""
     if not argv:
         return None
-    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "release", "deferred", "version", "-h", "--help"):
+    if argv[0] in ("repo", "deploy", "ksef", "prod", "frontend", "warehouse", "doctor", "ifg", "workflow", "plugin", "release", "deferred", "handoff", "version", "-h", "--help"):
         return None
     if not any(a in LEGACY_FLAGS or a.startswith("--remote") for a in argv):
         if not any(a.startswith("-") for a in argv):
@@ -423,6 +429,13 @@ def build_parser() -> argparse.ArgumentParser:
     def_repair = deferred_sub.add_parser("repair", help="Propose or apply GDD registry repairs")
     def_repair.add_argument("--dry-run", action="store_true", help="Show proposed repairs only")
     def_repair.add_argument("--yes", action="store_true", help="Apply unambiguous repairs")
+
+    handoff = sub.add_parser("handoff", help="Workflow handoff journal (Artifact Engine v1)")
+    handoff_sub = handoff.add_subparsers(dest="action", required=True)
+    handoff_sub.add_parser("validate", help="Validate handoff journal integrity")
+    handoff_sub.add_parser("rebuild-index", help="Rebuild index.json from handoff files")
+    handoff_sub.add_parser("rebuild-latest", help="Rebuild latest.md from latest handoff")
+    handoff_sub.add_parser("doctor", help="Diagnose handoff journal issues")
 
     return parser
 
@@ -729,6 +742,16 @@ def main(argv: list[str] | None = None) -> int:
                 print("Specify --dry-run or --yes.", file=sys.stderr)
                 return 2
             return run_deferred_repair(apply=args.yes)
+
+    if domain == "handoff":
+        if args.action == "validate":
+            return run_handoff_validate()
+        if args.action == "rebuild-index":
+            return run_handoff_rebuild_index()
+        if args.action == "rebuild-latest":
+            return run_handoff_rebuild_latest()
+        if args.action == "doctor":
+            return run_handoff_doctor()
 
     if domain == "version":
         print(f"IFG Guardian {__version__}")

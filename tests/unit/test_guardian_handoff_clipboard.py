@@ -78,15 +78,12 @@ def test_handoff_prints_clipboard_failure_message(tmp_path: Path, capsys, monkey
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "ifg_guardian.modules.ifg_handoff.copy_text_to_clipboard",
-        lambda content: (False, "pbcopy exit 1"),
+        "ifg_guardian.core.clipboard.copy_text_to_clipboard",
+        lambda _content: (False, "pbcopy exit 1"),
     )
 
     code = run_ifg_handoff_latest(root=tmp_path, copy_to_clipboard=True)
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert code == 0
-    assert "✓ Handoff wygenerowany" in output
-    assert "⚠ Nie udało się skopiować do schowka" in output
-    assert "Powód: pbcopy exit 1" in output
-    assert "✓ Skopiowano do schowka" not in output
+    assert code == 1
+    assert "✗ Handoff workflow FAILED" in captured.err
