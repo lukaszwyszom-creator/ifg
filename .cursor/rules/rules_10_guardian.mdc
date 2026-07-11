@@ -46,3 +46,13 @@ Skrypt `scripts/guardian.py` skanuje wyłącznie:
 | ⚠️ | Router zdefiniowany, nie zarejestrowany w `app/main.py` |
 
 Jeżeli występuje choć jeden ❌ lub ⚠️ — **nie deployuj**.
+
+## Zakres rozwoju (GWO-GUARDIAN-0074A)
+
+**Nie rozwijaj Guardian Core w repo IFG bez jawnego GWO projektu Guardian.**
+
+W repo IFG dozwolone są wyłącznie: utrzymanie istniejących workflow Guardiana, poprawki błędów, minimalne capabilities wymagane operacjami IFG oraz funkcje biznesowe IFG korzystające z istniejącego Guardiana.
+
+Nie rozpoczynaj w tym repo: Event Bus, Runtime State Engine, uniwersalnego Notification Engine, Conductora, multi-project registry ani wydzielenia Guardian Core. Nie rozwijaj ani nie refaktoryzuj `guardian_platform` bez dedykowanego GWO migracyjnego.
+
+Kanoniczny zapis: `docs/guardian/core/GUARDIAN_CORE_STATUS.md`.

@@ -2,7 +2,8 @@
 
 **Data:** 2026-07-11  
 **Branch:** production  
-**Werdykt:** IMPLEMENTED
+**Werdykt:** IMPLEMENTED  
+**Formalnie zamknięte:** 2026-07-11 (GWO-GUARDIAN-0074A) — patrz `docs/reports/2026-07-11_GWO-GUARDIAN-0074A_CLOSEOUT_AND_IFG_SCOPE_FREEZE.md`
 
 ---
 
