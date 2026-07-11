@@ -18,6 +18,29 @@ from ifg_guardian.modules.ifg_handoff import (  # noqa: E402
 )
 
 
+def _init_journal(root: Path) -> None:
+    handoff_dir = root / "docs" / "handoff"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    (handoff_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "next_handoff_id": 1,
+                "latest_handoff_id": None,
+                "count": 0,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (handoff_dir / "latest.md").write_text("", encoding="utf-8")
+
+
+def _latest_handoff_text(root: Path) -> str:
+    return (root / "docs" / "handoff" / "latest.md").read_text(encoding="utf-8")
+
+
 def _write_report(path: Path, content: str, *, mtime_offset_s: int = 0) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -41,7 +64,8 @@ def test_select_latest_reports_prefers_newest_gwo_by_mtime(tmp_path: Path):
     assert selection.reports[0].name == "2026-07-09_GWO-IFG-0055_NEW.md"
 
 
-def test_run_ifg_handoff_latest_writes_aggregate_report(tmp_path: Path):
+def test_run_ifg_handoff_latest_writes_journal_handoff(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(
         reports / "2026-07-09_GWO-IFG-0062_A.md",
@@ -60,22 +84,35 @@ def test_run_ifg_handoff_latest_writes_aggregate_report(tmp_path: Path):
         limit=2,
     )
     assert code == 0
-    out = tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md"
-    assert out.exists()
-    text = out.read_text(encoding="utf-8")
-    assert "Liczba znalezionych raportów: 2" in text
+    handoff_file = tmp_path / "docs" / "handoff" / "HANDOFF-0001.md"
+    assert handoff_file.exists()
+    text = handoff_file.read_text(encoding="utf-8")
+    assert text == _latest_handoff_text(tmp_path)
+    assert "artifact_format_version: 1" in text
+    assert "project_id: IFG" in text
+    assert "generated_artifacts:" in text
+    assert "## Wynik workflow" in text
+    assert "IMPLEMENTED" in text
+    assert "## Źródła" in text
+    assert "## Następny oczekiwany krok" in text
+    assert "## Raport 1:" not in text
     assert "GWO-IFG-0062" in text
     assert "GWO-IFG-0055" in text
     assert "Czy wdrożyć zmianę na produkcję?" in text
     assert "Brak." in text
     assert "Treść A" in text
-    assert "Treść B" in text
+    assert "Liczba znalezionych raportów: 2" in text
+    assert "handoff_id: HANDOFF-0001" in text
+    assert "# HANDOFF-0001" in text
+    assert "# CHATGPT HANDOFF" not in text
     assert "## Co wymaga decyzji ChatGPT" in text
-    assert "## Wygenerowane raporty" in text
-    assert "reports/CHATGPT_HANDOFF_2026-07-09.md" in text
+    assert "docs/handoff/HANDOFF-0001.md" in text
+    assert "docs/handoff/latest.md" in text
+    assert "END OF HANDOFF" in text
+    assert text.rstrip().endswith("HANDOFF-0001")
     assert text.index("## Streszczenie") < text.index("## Co wymaga decyzji ChatGPT")
-    assert text.index("## Co wymaga decyzji ChatGPT") < text.index("## Raport 1:")
-    assert text.index("## Raport 1:") < text.index("## Wygenerowane raporty")
+    assert text.index("## Co wymaga decyzji ChatGPT") < text.index("## Źródła")
+    assert not list((tmp_path / "reports").glob("CHATGPT_HANDOFF_*")) if (tmp_path / "reports").exists() else True
 
 
 def test_cli_ifg_handoff_latest_dispatch(monkeypatch):
@@ -153,6 +190,7 @@ Wszystko działa poprawnie.
 
 
 def test_handoff_aggregate_preserves_report_order(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(
         reports / "2026-07-09_GWO-IFG-0001_A.md",
@@ -169,11 +207,12 @@ def test_handoff_aggregate_preserves_report_order(tmp_path: Path):
         copy_to_clipboard=False,
         limit=2,
     )
-    text = (tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md").read_text(encoding="utf-8")
+    text = _latest_handoff_text(tmp_path)
     assert text.index("### GWO-IFG-0002") < text.index("### GWO-IFG-0001")
 
 
 def test_handoff_pending_first_then_empty_then_new(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(reports / "2026-07-09_GWO-IFG-1001_A.md", "# GWO-IFG-1001\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
     _write_report(
@@ -184,23 +223,21 @@ def test_handoff_pending_first_then_empty_then_new(tmp_path: Path):
 
     code1 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code1 == 0
-    out = tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md"
-    text1 = out.read_text(encoding="utf-8")
+    text1 = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text1
     assert "GWO-IFG-1002" in text1
+    assert "HANDOFF-0001" in text1
 
     code2 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code2 == 0
-    text2 = out.read_text(encoding="utf-8")
+    text2 = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text2
     assert "GWO-IFG-1001" in text2
+    assert "HANDOFF-0002" in text2
 
     code3 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code3 == 0
-    text3 = out.read_text(encoding="utf-8")
-    assert "# CHATGPT HANDOFF" in text3
-    assert "Brak nowych raportów do przekazania." in text3
-    assert "## Streszczenie" not in text3
+    assert "HANDOFF-0002" in _latest_handoff_text(tmp_path)
 
     _write_report(
         reports / "2026-07-09_GWO-IFG-1003_C.md",
@@ -209,12 +246,14 @@ def test_handoff_pending_first_then_empty_then_new(tmp_path: Path):
     )
     code4 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code4 == 0
-    text4 = out.read_text(encoding="utf-8")
+    text4 = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text4
     assert "GWO-IFG-1003" in text4
+    assert "HANDOFF-0003" in text4
 
 
 def test_handoff_all_ignores_state(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(reports / "2026-07-09_GWO-IFG-2001_A.md", "# GWO-IFG-2001\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
     _write_report(
@@ -232,20 +271,22 @@ def test_handoff_all_ignores_state(tmp_path: Path):
         limit=2,
     )
     assert code == 0
-    text = (tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md").read_text(encoding="utf-8")
+    text = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 2" in text
 
 
 def test_handoff_reset_clears_memory(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(reports / "2026-07-09_GWO-IFG-3001_A.md", "# GWO-IFG-3001\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
     run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False, reset_state=True)
-    text = (tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md").read_text(encoding="utf-8")
+    text = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text
 
 
 def test_handoff_corrupted_state_file_is_treated_as_empty(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(reports / "2026-07-09_GWO-IFG-4001_A.md", "# GWO-IFG-4001\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
     state_path = tmp_path / ".state" / "handoff.json"
@@ -254,7 +295,7 @@ def test_handoff_corrupted_state_file_is_treated_as_empty(tmp_path: Path):
 
     code = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code == 0
-    text = (tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-09.md").read_text(encoding="utf-8")
+    text = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert "sent_reports" in payload
@@ -285,6 +326,7 @@ def test_handoff_latest_ignores_non_gwo_artifacts(tmp_path: Path):
 
 
 def test_handoff_latest_selects_yesterday_gwo_when_no_today_report(tmp_path: Path):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(
         reports / "2026-07-10_GWO-IFG-0064_RELEASE_GATE_UNBLOCK.md",
@@ -293,10 +335,11 @@ def test_handoff_latest_selects_yesterday_gwo_when_no_today_report(tmp_path: Pat
 
     code = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 11), copy_to_clipboard=False)
     assert code == 0
-    text = (tmp_path / "reports" / "CHATGPT_HANDOFF_2026-07-11.md").read_text(encoding="utf-8")
+    text = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text
     assert "GWO-IFG-0064" in text
     assert "repository_orphans" not in text
+    assert "HANDOFF-0001" in text
 
 
 def test_handoff_metadata_selects_non_gwo_filename(tmp_path: Path):
@@ -314,7 +357,7 @@ kind: review
 project: IFG
 workflow: GWO-GUARDIAN-0066
 handoff: true
-created_at: 2026-07-11T12:00:00Z
+created_at: 2099-12-31T23:59:59Z
 ---
 
 # Review
@@ -323,6 +366,7 @@ created_at: 2026-07-11T12:00:00Z
 
 Brak.
 """,
+        mtime_offset_s=10,
     )
 
     selection = select_latest_reports(root=tmp_path, today=dt.date(2026, 7, 11), limit=1)

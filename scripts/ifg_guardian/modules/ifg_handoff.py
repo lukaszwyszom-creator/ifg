@@ -9,8 +9,11 @@ from pathlib import Path
 
 from ifg_guardian.config import ROOT
 from ifg_guardian.core.clipboard import copy_text_to_clipboard
-from ifg_guardian.core.handoff_journal.models import HandoffMetadata, HandoffStatus
-from ifg_guardian.core.handoff_journal.store import load_index
+from ifg_guardian.core.handoff_journal.models import (
+    HANDOFF_GENERATOR_GUARDIAN,
+    HandoffMetadata,
+    HandoffStatus,
+)
 from ifg_guardian.core.handoff_journal.service import (
     HandoffJournalService,
     PublishStep,
@@ -222,18 +225,60 @@ def select_latest_reports(
     return HandoffSelection(reports=selected, preferred_today=preferred_today)
 
 
-def _render_handoff_markdown(
+def _describe_source_report(content: str, decision_points: list[DecisionPoint]) -> str:
+    normalized = [p.text.lower().strip().strip(".") for p in decision_points]
+    if normalized and normalized != ["brak"]:
+        if any("czy " in text or "wymaga" in text or "decyzj" in text for text in normalized):
+            return "Raport zawiera decyzję wymagającą oceny ChatGPT."
+        return "Przeanalizowano raport; zidentyfikowano punkty wymagające uwagi operatora."
+
+    lower = content.lower()
+    if any(token in lower for token in ("wdroż", "deploy", "production deploy")):
+        if any(token in lower for token in ("sukces", "success", "zakończon", "implemented")):
+            return "Wdrożenie zakończone sukcesem; brak kroków operatorskich wynikających z raportu."
+    if "brak decyzji" in lower:
+        return "Przeanalizowano; raport nie zawiera decyzji wymagających eskalacji."
+    if normalized == ["brak"] or (
+        len(normalized) == 1
+        and "(raport nie zawiera sekcji" in normalized[0]
+    ):
+        return "Przeanalizowano; raport nie zawiera decyzji wymagających eskalacji."
+    return "Przeanalizowano raport źródłowy; istotne ustalenia przeniesiono do sekcji streszczenia i decyzji."
+
+
+def _extract_next_step(content: str) -> str | None:
+    headings = (
+        "## Następny oczekiwany krok",
+        "## Następny krok",
+        "E. Następny krok",
+    )
+    for heading in headings:
+        found, snippets = _extract_named_section(content, heading)
+        if found and snippets:
+            return "\n".join(snippets).strip()
+    return None
+
+
+def _resolve_next_step(chosen: list[Path], root: Path) -> str:
+    for path in chosen:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        step = _extract_next_step(content)
+        if step and step.lower().strip(".") != "brak":
+            return step
+    return "Brak."
+
+
+def _render_handoff_body(
     *,
     selection: HandoffSelection,
-    output_path: Path,
     root: Path = ROOT,
-    today: date | None = None,
-    journal_handoff_id: int | None = None,
 ) -> str:
-    stamp = _today_stamp(today)
     chosen = selection.reports
     if not chosen:
-        return "# CHATGPT HANDOFF\n\nBrak nowych raportów do przekazania.\n"
+        return ""
 
     lines: list[str] = []
     rel_paths = [str(p.relative_to(root)) for p in chosen]
@@ -254,8 +299,6 @@ def _render_handoff_markdown(
         except OSError:
             continue
 
-    lines.append(f"# CHATGPT HANDOFF {stamp}")
-    lines.append("")
     lines.append("## Streszczenie")
     lines.append("")
     lines.append(f"- Liczba znalezionych raportów: {len(chosen)}")
@@ -265,11 +308,8 @@ def _render_handoff_markdown(
         lines.append("- Zakres GWO: brak jawnych identyfikatorów GWO")
     lines.append(f"- Preferencja raportów z dzisiaj: {'TAK' if selection.preferred_today else 'NIE'}")
     lines.append("- Scalono pliki:")
-    if rel_paths:
-        for rel in rel_paths:
-            lines.append(f"  - `{rel}`")
-    else:
-        lines.append("  - brak plików do scalenia")
+    for rel in rel_paths:
+        lines.append(f"  - `{rel}`")
     lines.append("")
     lines.append("## Co wymaga decyzji ChatGPT")
     lines.append("")
@@ -289,37 +329,37 @@ def _render_handoff_markdown(
     else:
         lines.append("Brak jawnych punktów decyzyjnych w scalonych raportach.")
     lines.append("")
-
-    for idx, report_path in enumerate(chosen, start=1):
-        rel = report_path.relative_to(root)
-        lines.append(f"## Raport {idx}: `{rel}`")
-        lines.append("")
-        lines.append(report_path.read_text(encoding="utf-8").rstrip())
-        lines.append("")
-
-    lines.append("## Wygenerowane raporty")
+    lines.append("## Źródła")
     lines.append("")
-    if journal_handoff_id is not None:
-        lines.append(f"- `docs/handoff/handoff-{journal_handoff_id:04d}.md`")
-        lines.append("- `docs/handoff/latest.md`")
-    lines.append(f"- `{output_path}`")
-    for rel in rel_paths:
-        lines.append(f"- `{rel}`")
+    for report_path in chosen:
+        rel = str(report_path.relative_to(root))
+        try:
+            content = report_path.read_text(encoding="utf-8")
+        except OSError:
+            content = ""
+        points = extract_decision_points(content, rel)
+        lines.append(f"### {rel}")
+        lines.append("")
+        lines.append(_describe_source_report(content, points))
+        lines.append("")
+    lines.append("## Następny oczekiwany krok")
     lines.append("")
-    return "\n".join(lines)
+    lines.append(_resolve_next_step(chosen, root))
+    lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def _build_handoff_metadata(
     *,
     selection: HandoffSelection,
     root: Path,
-    today: date | None = None,
-    parent_handoff: int | None = None,
+    parent_handoff: str | None = None,
 ) -> HandoffMetadata:
     chosen = selection.reports
     rel_paths = [str(p.relative_to(root)) for p in chosen]
     gwo_tokens: set[str] = set()
-    project = "IFG"
+    project_id = "IFG"
     for path in chosen:
         try:
             content = path.read_text(encoding="utf-8")
@@ -330,7 +370,7 @@ def _build_handoff_metadata(
             if metadata.workflow:
                 gwo_tokens.add(metadata.workflow.upper().replace("_", "-"))
             if metadata.project:
-                project = metadata.project
+                project_id = metadata.project
         gwo_tokens.update(_extract_gwo_tokens(content))
         gwo_tokens.update(_extract_gwo_tokens(path.name))
 
@@ -339,12 +379,14 @@ def _build_handoff_metadata(
         handoff_id=0,
         previous_handoff=None,
         parent_handoff=parent_handoff,
-        project=project,
+        project_id=project_id,
         workflow=workflow,
         workflow_type=infer_workflow_type(workflow),
         status=HandoffStatus.SUCCESS,
         created_at=utc_now_iso(),
         source_reports=rel_paths,
+        generated_artifacts=[],
+        handoff_generator=HANDOFF_GENERATOR_GUARDIAN,
     )
 
 
@@ -356,16 +398,13 @@ def _print_handoff_failure(*, failed_step: PublishStep, message: str) -> None:
 
 def _print_handoff_summary(
     *,
-    output_path: Path,
     merged_count: int,
     copy_to_clipboard: bool,
     content: str,
     journal_path: Path | None = None,
     clipboard_done: bool = False,
 ) -> None:
-    rel = output_path
     print("✓ Handoff wygenerowany")
-    print(f"  Plik: {rel}")
     if journal_path is not None:
         print(f"  Journal: {journal_path}")
         print("  Latest: docs/handoff/latest.md")
@@ -402,7 +441,7 @@ def run_ifg_handoff_latest(
     reset_state: bool = False,
     root: Path = ROOT,
     today: date | None = None,
-    parent_handoff: int | None = None,
+    parent_handoff: str | None = None,
 ) -> int:
     if reset_state:
         _clear_handoff_state(root)
@@ -413,59 +452,28 @@ def run_ifg_handoff_latest(
         limit=limit,
         include_all=include_all,
     )
-    stamp = _today_stamp(today)
-    out_dir = root / "reports"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    output_path = out_dir / f"CHATGPT_HANDOFF_{stamp}.md"
 
     if not selection.reports:
-        content = _render_handoff_markdown(
-            selection=selection,
-            output_path=output_path,
-            root=root,
-            today=today,
-        )
-        output_path.write_text(content, encoding="utf-8")
-        _print_handoff_summary(
-            output_path=output_path.relative_to(root),
-            merged_count=0,
-            copy_to_clipboard=False,
-            content=content,
-        )
+        print("Brak nowych raportów do przekazania — handoff journal bez zmian.")
         return 0
 
     journal = HandoffJournalService(root=root)
-    journal.initialize()
-    next_id = load_index(root / "docs" / "handoff" / "index.json").next_handoff_id
-
     metadata = _build_handoff_metadata(
         selection=selection,
         root=root,
-        today=today,
         parent_handoff=parent_handoff,
     )
-
-    body = _render_handoff_markdown(
-        selection=selection,
-        output_path=output_path.relative_to(root),
-        root=root,
-        today=today,
-        journal_handoff_id=next_id,
-    )
-    journal_body_start = body.find("# CHATGPT HANDOFF")
-    journal_body = body[journal_body_start:] if journal_body_start >= 0 else body
-
-    output_path.write_text(body, encoding="utf-8")
+    body = _render_handoff_body(selection=selection, root=root)
 
     publish = journal.publish(
         metadata=metadata,
-        body=journal_body,
+        body=body,
         report_saved=True,
         copy_to_clipboard=copy_to_clipboard,
     )
     if not publish.ok:
         _print_handoff_failure(
-            failed_step=publish.failed_step or PublishStep.CLIPBOARD_UPDATED,
+            failed_step=publish.failed_step or PublishStep.JOURNAL_VALIDATED,
             message=publish.message,
         )
         return publish.exit_code
@@ -482,9 +490,8 @@ def run_ifg_handoff_latest(
         _save_handoff_state(root, sent)
 
     rel_journal = publish.handoff_path.relative_to(root) if publish.handoff_path else None
-    published_document = publish.handoff_path.read_text(encoding="utf-8") if publish.handoff_path else body
+    published_document = publish.handoff_path.read_text(encoding="utf-8") if publish.handoff_path else ""
     _print_handoff_summary(
-        output_path=output_path.relative_to(root),
         merged_count=len(selection.reports),
         copy_to_clipboard=copy_to_clipboard,
         content=published_document,

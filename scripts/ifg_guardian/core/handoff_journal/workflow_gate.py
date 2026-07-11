@@ -15,6 +15,7 @@ REQUIRED_STEPS = (
     PublishStep.HANDOFF_SAVED,
     PublishStep.LATEST_UPDATED,
     PublishStep.INDEX_UPDATED,
+    PublishStep.JOURNAL_VALIDATED,
 )
 
 

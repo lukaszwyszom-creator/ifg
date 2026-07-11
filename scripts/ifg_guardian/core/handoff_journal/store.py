@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from ifg_guardian.config import ROOT
-from ifg_guardian.core.handoff_journal.models import HandoffIndex
+from ifg_guardian.core.handoff_journal.models import HandoffIndex, format_handoff_id
 
 HANDOFF_DIR = ROOT / "docs" / "handoff"
 INDEX_PATH = HANDOFF_DIR / "index.json"
@@ -15,6 +15,13 @@ LATEST_PATH = HANDOFF_DIR / "latest.md"
 
 class HandoffStoreError(ValueError):
     pass
+
+
+class HandoffJournalRebuildError(ValueError):
+    def __init__(self, issues: list) -> None:
+        self.issues = issues
+        messages = "; ".join(getattr(item, "message", str(item)) for item in issues)
+        super().__init__(messages or "rebuild-index failed")
 
 
 def ensure_handoff_dir(path: Path | None = None) -> Path:
@@ -64,7 +71,7 @@ def save_index(index: HandoffIndex, path: Path | None = None) -> Path:
 
 def handoff_path(handoff_id: int, root: Path | None = None) -> Path:
     handoff_dir = ensure_handoff_dir(root or HANDOFF_DIR)
-    return handoff_dir / f"handoff-{handoff_id:04d}.md"
+    return handoff_dir / f"{format_handoff_id(handoff_id)}.md"
 
 
 def write_latest(content: str, path: Path | None = None) -> Path:

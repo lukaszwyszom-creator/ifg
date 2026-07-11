@@ -12,6 +12,16 @@ from ifg_guardian.core.clipboard import copy_text_to_clipboard  # noqa: E402
 from ifg_guardian.modules.ifg_handoff import run_ifg_handoff_latest  # noqa: E402
 
 
+def _init_journal(root: Path) -> None:
+    handoff_dir = root / "docs" / "handoff"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    (handoff_dir / "index.json").write_text(
+        '{"schema_version": 1, "next_handoff_id": 1, "latest_handoff_id": null, "count": 0}\n',
+        encoding="utf-8",
+    )
+    (handoff_dir / "latest.md").write_text("", encoding="utf-8")
+
+
 def test_copy_text_to_clipboard_verifies_round_trip(monkeypatch):
     state = {"value": ""}
 
@@ -50,6 +60,7 @@ def test_copy_text_to_clipboard_reports_mismatch(monkeypatch):
 
 
 def test_handoff_prints_clipboard_success_message(tmp_path: Path, capsys, monkeypatch):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     reports.mkdir(parents=True)
     (reports / "2026-07-11_GWO-IFG-9001_A.md").write_text(
@@ -71,6 +82,7 @@ def test_handoff_prints_clipboard_success_message(tmp_path: Path, capsys, monkey
 
 
 def test_handoff_prints_clipboard_failure_message(tmp_path: Path, capsys, monkeypatch):
+    _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     reports.mkdir(parents=True)
     (reports / "2026-07-11_GWO-IFG-9002_A.md").write_text(
