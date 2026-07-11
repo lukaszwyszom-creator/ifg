@@ -99,76 +99,49 @@ class TestMaintenanceMarker:
 
 class TestMaintenanceWorkflowOrder:
     def test_start_writes_marker_before_stop(self, tmp_path, monkeypatch):
-        calls: list[str] = []
         marker_path = tmp_path / "maintenance.json"
+        order: list[str] = []
         monkeypatch.setattr("ifg_guardian.core.runtime_maintenance.MAINTENANCE_FILE", marker_path)
+        monkeypatch.setattr("ifg_guardian.core.runtime_audit.AUDIT_FILE", tmp_path / "audit.jsonl")
         monkeypatch.setattr(
-            "ifg_guardian.modules.production_maintenance.collect_prod_health_snapshot",
-            lambda *a, **k: type(
-                "S",
-                (),
-                {
-                    "reachable": True,
-                    "runtime": type("R", (), {"status": ProductionRuntimeStatus.PRODUCTION_RUNNING, "problems": []})(),
-                },
-            )(),
+            "ifg_guardian.modules.production_maintenance.enforce_mutating_live_orchestration",
+            lambda **k: None,
         )
+
+        pre = type(
+            "S",
+            (),
+            {
+                "reachable": True,
+                "runtime": type("R", (), {"status": ProductionRuntimeStatus.PRODUCTION_RUNNING, "problems": []})(),
+            },
+        )()
+        post = type(
+            "S",
+            (),
+            {
+                "reachable": True,
+                "runtime": type("R", (), {"status": ProductionRuntimeStatus.PRODUCTION_MAINTENANCE, "problems": []})(),
+            },
+        )()
+
+        def snapshot(*args, **kwargs):
+            return pre if not marker_path.is_file() else post
+
+        monkeypatch.setattr("ifg_guardian.modules.production_maintenance.collect_prod_health_snapshot", snapshot)
 
         def fake_stop(*args, **kwargs):
-            calls.append("stop")
-            assert marker_path.is_file()
+            order.append("stop")
+            assert marker_path.is_file(), "marker must exist before compose stop"
 
         monkeypatch.setattr("ifg_guardian.modules.production_maintenance.remote_compose_stop", fake_stop)
-        monkeypatch.setattr(
-            "ifg_guardian.modules.production_maintenance.collect_prod_health_snapshot",
-            lambda *a, **k: type(
-                "S",
-                (),
-                {
-                    "reachable": True,
-                    "runtime": type(
-                        "R",
-                        (),
-                        {"status": ProductionRuntimeStatus.PRODUCTION_MAINTENANCE, "problems": [], "value": "x"},
-                    )(),
-                },
-            )(),
-            raising=False,
-        )
 
         from ifg_guardian.modules.production_maintenance import run_prod_maintenance_start
 
-        # Re-patch post-stop snapshot only
-        snapshots = [
-            type(
-                "S",
-                (),
-                {
-                    "reachable": True,
-                    "runtime": type("R", (), {"status": ProductionRuntimeStatus.PRODUCTION_RUNNING, "problems": []})(),
-                },
-            )(),
-            type(
-                "S",
-                (),
-                {
-                    "reachable": True,
-                    "runtime": type(
-                        "R",
-                        (),
-                        {"status": ProductionRuntimeStatus.PRODUCTION_MAINTENANCE, "problems": []},
-                    )(),
-                },
-            )(),
-        ]
-        monkeypatch.setattr(
-            "ifg_guardian.modules.production_maintenance.collect_prod_health_snapshot",
-            lambda *a, **k: snapshots.pop(0) if snapshots else snapshots[0],
-        )
-
         code = run_prod_maintenance_start(reason="test", assume_yes=True, remote_host="ds723")
         assert code == 0
-        assert marker_path.is_file() or calls  # marker written before stop in flow
+        assert order == ["stop"]
+        assert marker_path.is_file()
 
 
 class TestAuditTrail:

@@ -157,7 +157,7 @@ class RuntimeAuditSession:
         self.target = target
         self.operation_id = operation_id or new_operation_id()
 
-    def started(self, **extra: Any) -> Path:
+    def started(self, extra: dict[str, Any] | None = None) -> Path:
         return record_audit_event(
             operation_id=self.operation_id,
             event_type=self.event_type,
@@ -165,10 +165,10 @@ class RuntimeAuditSession:
             phase="started",
             reason=self.reason,
             target=self.target,
-            extra=extra or None,
+            extra=extra,
         )
 
-    def completed(self, result: str = "ok", **extra: Any) -> Path:
+    def completed(self, result: str = "ok", extra: dict[str, Any] | None = None) -> Path:
         return record_audit_event(
             operation_id=self.operation_id,
             event_type=self.event_type,
@@ -177,10 +177,10 @@ class RuntimeAuditSession:
             result=result,
             reason=self.reason,
             target=self.target,
-            extra=extra or None,
+            extra=extra,
         )
 
-    def failed(self, error_summary: str, **extra: Any) -> Path:
+    def failed(self, error_summary: str, extra: dict[str, Any] | None = None) -> Path:
         return record_audit_event(
             operation_id=self.operation_id,
             event_type=self.event_type,
@@ -190,7 +190,7 @@ class RuntimeAuditSession:
             reason=self.reason,
             error_summary=error_summary,
             target=self.target,
-            extra=extra or None,
+            extra=extra,
         )
 
 

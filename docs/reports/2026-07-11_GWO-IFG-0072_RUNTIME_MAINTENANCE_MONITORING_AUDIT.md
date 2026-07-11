@@ -136,13 +136,25 @@ Pokrycie minimum GWO: maintenance classification, marker atomowy, audit phases, 
 
 ## ETAP 7 — Commit, push, deploy
 
-*(Uzupełniane po wykonaniu)*
+| Krok | Wynik |
+|---|---|
+| Commit | `d46be0c` — GWO-IFG-0071/0072 |
+| Push | `5b906c2..d46be0c` → `origin/production` ✅ |
+| Release evaluate | `PRODUCTION_BLOCKED` (dirty tree) → deploy z `--allow-dirty-build` |
+| Deploy | `guardian ifg deploy run --yes --allow-dirty-build` → **LIVE COMPLETE** ✅ |
+| DS723+ HEAD | `d46be0c` |
+| deploy check | PRODUKCJA ZGODNA Z LOKALNYM KODEM ✅ |
+| Runtime | `PRODUCTION_RUNNING` ✅ |
+| `/health` | HTTP 200 ✅ |
+| restart policy | `always` (api/worker/db) ✅ |
+| CM project | `ifg` registered ✅ |
+| audit trail | rekordy deploy + monitor ✅ |
+| monitor check | single iteration OK ✅ |
+| launchd | installed, running ✅ |
 
 ---
 
 ## ETAP 8 — Dokumentacja
-
-- `docs/guardian/core/GUARDIAN_RUNTIME_OPERATIONS.md`
 
 ---
 
@@ -167,8 +179,19 @@ Pokrycie minimum GWO: maintenance classification, marker atomowy, audit phases, 
 🩷 STATUS KOŃCOWY
 
 ✅ Co działa
+- GWO-IFG-0071 utrwalone w `origin/production` (`d46be0c`)
+- Maintenance mode, audit trail, monitor stanowy — wdrożone
+- `prod health` → `PRODUCTION_RUNNING`
+- launchd monitor co 5 min — zainstalowany
+- Deploy Guardian LIVE COMPLETE
+
 ⚠️ Znane problemy
+- Brak zewnętrznego kanału powiadomień (tylko `.state/runtime_notifications.log`)
+- Aktor stopu 02:14 CEST nadal nieustalony
+- Release gate wymaga `--allow-dirty-build` przy dirty tree (GDD-0012)
+
 ❌ Co nie działa
+- Brak
 
 ## Decyzje dla ChatGPT
 
