@@ -149,14 +149,14 @@
       "module": "Guardian Release / Production Status",
       "type": "Architecture",
       "priority": "High",
-      "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
-      "defer_reason": "Nie blokuje bieżącego recovery operacyjnego; wymaga osobnego projektu zmiany modelu statusów Guardiana i aktualizacji workflow/reportów.",
+      "status": "DONE",
+      "lamus_status": "DONE",
+      "defer_reason": "Wdrożono rozdzielenie statusów runtime (PRODUCTION_RUNNING/STOPPED/DEGRADED) od release gate (READY_FOR_DEPLOY/PRODUCTION_BLOCKED) w prod health + testy jednostkowe.",
       "description": "Rozdzielić dwa niezależne stany Guardiana: (1) runtime produkcji — PRODUCTION_RUNNING / PRODUCTION_STOPPED / PRODUCTION_DEGRADED; (2) gotowość nowego release — PRODUCTION_READY / PRODUCTION_BLOCKED. Obecnie PRODUCTION_BLOCKED dla release może maskować fakt, że istniejąca produkcja jest całkowicie zatrzymana.",
-      "review_when": "Po domknięciu GWO-IFG-0063 (operational recovery) i przed kolejnym cyklem release/deploy Monitora KSeF.",
-      "source": "GWO-IFG-0063 LAMUS + GWO-IFG-0062 Production Recovery",
+      "review_when": "Przy rozszerzaniu alertów runtime — stosować model z GDD-0010.",
+      "source": "GWO-IFG-0063 LAMUS + GWO-IFG-0062 Production Recovery + GWO-IFG-0071",
       "created_at": "2026-07-10",
-      "closed_at": null
+      "closed_at": "2026-07-11"
     },
     {
       "id": "GDD-0011",

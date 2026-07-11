@@ -29,6 +29,18 @@ from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
 from ifg_guardian.modules.frontend import run_frontend_check
 from ifg_guardian.modules.ksef import run_ksef_check, run_ksef_sync
 from ifg_guardian.modules.production import run_prod_health, run_prod_recover
+from ifg_guardian.modules.production_audit import run_prod_audit
+from ifg_guardian.modules.production_maintenance import (
+    run_prod_maintenance_end,
+    run_prod_maintenance_start,
+    run_prod_maintenance_status,
+)
+from ifg_guardian.modules.production_monitor import (
+    run_prod_monitor_check,
+    run_prod_monitor_install,
+    run_prod_monitor_status,
+    run_prod_monitor_uninstall,
+)
 from ifg_guardian.modules.repo import run_repo_clean_dry_run, run_repo_status, run_repo_sync
 from ifg_guardian.modules.repo_audit import run_repo_audit
 from ifg_guardian.modules.repo_eol_check import run_repo_eol_check
@@ -209,6 +221,34 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--dry-run", action="store_true")
     pr.add_argument("--yes", action="store_true")
     pr.add_argument("--remote-host", default=None)
+
+    pm = prod_sub.add_parser("maintenance", help="Controlled maintenance mode")
+    pm_sub = pm.add_subparsers(dest="maintenance_action", required=True)
+    pm_start = pm_sub.add_parser("start", help="Start maintenance (marker then compose stop)")
+    pm_start.add_argument("--reason", default=None, help="Optional maintenance reason")
+    pm_start.add_argument("--yes", action="store_true")
+    pm_start.add_argument("--dry-run", action="store_true")
+    pm_start.add_argument("--remote-host", default=None)
+    pm_start.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    pm_end = pm_sub.add_parser("end", help="End maintenance (recover then clear marker)")
+    pm_end.add_argument("--yes", action="store_true")
+    pm_end.add_argument("--dry-run", action="store_true")
+    pm_end.add_argument("--remote-host", default=None)
+    pm_end.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    pm_sub.add_parser("status", help="Maintenance marker status")
+
+    pa = prod_sub.add_parser("audit", help="Runtime audit trail (JSON Lines)")
+    pa.add_argument("--last", type=int, default=None, help="Show last N records")
+    pa.add_argument("--since", default=None, help="Filter since duration, e.g. 24h")
+
+    pmon = prod_sub.add_parser("monitor", help="Stateful runtime monitor (Mac mini)")
+    pmon_sub = pmon.add_subparsers(dest="monitor_action", required=True)
+    pmon_check = pmon_sub.add_parser("check", help="Single monitor iteration")
+    pmon_check.add_argument("--remote-host", default=None)
+    pmon_check.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    pmon_sub.add_parser("install", help="Install launchd schedule (5 min)")
+    pmon_sub.add_parser("status", help="Monitor scheduler status")
+    pmon_sub.add_parser("uninstall", help="Remove launchd schedule")
 
     # frontend / warehouse / doctor / version
     fe = sub.add_parser("frontend", help="Frontend checks")
@@ -462,6 +502,42 @@ def main(argv: list[str] | None = None) -> int:
                 print("prod recover wymaga --yes (operacja mutująca).", file=sys.stderr)
                 return 1
             return run_prod_recover(dry_run=args.dry_run, assume_yes=args.yes, remote_host=host)
+        if args.action == "maintenance":
+            if args.maintenance_action == "status":
+                return run_prod_maintenance_status()
+            if args.maintenance_action == "start":
+                return run_prod_maintenance_start(
+                    reason=args.reason,
+                    assume_yes=args.yes,
+                    dry_run=args.dry_run,
+                    remote_host=host,
+                    remote_path=args.remote_path,
+                )
+            if args.maintenance_action == "end":
+                return run_prod_maintenance_end(
+                    assume_yes=args.yes,
+                    dry_run=args.dry_run,
+                    remote_host=host,
+                    remote_path=args.remote_path,
+                )
+        if args.action == "audit":
+            since_hours = None
+            if args.since:
+                raw = str(args.since).strip().lower()
+                if raw.endswith("h"):
+                    since_hours = float(raw[:-1])
+                else:
+                    since_hours = float(raw)
+            return run_prod_audit(last=args.last, since_hours=since_hours)
+        if args.action == "monitor":
+            if args.monitor_action == "check":
+                return run_prod_monitor_check(remote_host=host, remote_path=args.remote_path)
+            if args.monitor_action == "install":
+                return run_prod_monitor_install()
+            if args.monitor_action == "status":
+                return run_prod_monitor_status()
+            if args.monitor_action == "uninstall":
+                return run_prod_monitor_uninstall()
 
     if domain == "frontend" and args.action == "check":
         return run_frontend_check()

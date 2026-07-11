@@ -86,6 +86,19 @@ def run_ifg_deploy_run(
         print(LIVE_REQUIRES_YES)
         return 2
 
+    from ifg_guardian.core.runtime_audit import RuntimeAuditSession
+
+    audit = RuntimeAuditSession(
+        workflow="ifg.deploy.run",
+        event_type="deploy",
+        reason="allow_dirty_build" if allow_dirty_build else None,
+        target=remote_path,
+    )
+    if dry_run:
+        audit.started(extra={"dry_run": True})
+    else:
+        audit.started()
+
     try:
         ctx = execute_ifg_deploy_run(
             dry_run=dry_run,
@@ -99,10 +112,14 @@ def run_ifg_deploy_run(
             progress_enabled=progress_enabled,
         )
     except RuntimeError as exc:
+        if not dry_run:
+            audit.failed(str(exc))
         print(f"\n❌ Deploy run failed: {exc}")
         return 1
 
     if ctx.state_machine.state != WorkflowState.SUCCESS:
+        if not dry_run:
+            audit.failed(ctx.transaction.outcome or "workflow failed")
         print(f"\n❌ Deploy workflow failed: {ctx.transaction.outcome}")
         for record in ctx.transaction.stages:
             if record.status in ("fail", "FAIL"):
@@ -113,19 +130,26 @@ def run_ifg_deploy_run(
 
     if output_format == "json":
         print(render_json(state, transaction=ctx.transaction))
-        return exit_code_for_deploy(state)
-
-    if output_format == "markdown":
+        code = exit_code_for_deploy(state)
+    elif output_format == "markdown":
         print(render_markdown(state, transaction=ctx.transaction))
-        return exit_code_for_deploy(state)
+        code = exit_code_for_deploy(state)
+    else:
+        print(render_terminal(state, transaction=ctx.transaction))
+        report_file = ctx.data.get("report_file")
+        if report_file:
+            try:
+                rel = Path(report_file).relative_to(ROOT)
+            except ValueError:
+                rel = report_file
+            print(f"\nReport: {rel}")
+        code = exit_code_for_deploy(state)
 
-    print(render_terminal(state, transaction=ctx.transaction))
-    report_file = ctx.data.get("report_file")
-    if report_file:
-        try:
-            rel = Path(report_file).relative_to(ROOT)
-        except ValueError:
-            rel = report_file
-        print(f"\nReport: {rel}")
-
-    return exit_code_for_deploy(state)
+    if not dry_run:
+        if code == 0:
+            audit.completed(result="ok", extra={"release_decision": state.release_decision})
+        else:
+            audit.failed(f"deploy exit {code}")
+    else:
+        audit.completed(result="dry_run")
+    return code

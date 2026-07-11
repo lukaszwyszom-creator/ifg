@@ -20,7 +20,7 @@
 # Różnice względem dev:
 #   - frontend React build montowany do kontenera API
 #   - brak expose portu DB na host
-#   - restart: unless-stopped
+#   - restart: always (GWO-IFG-0071 — auto-resume after manual stop; unless-stopped left stack STOPPED)
 #
 # Container Manager / Compose project:
 #   name: ifg (Synology Container Manager → Project `ifg`)
@@ -44,7 +44,7 @@ services:
     volumes:
       - ../frontend-react/dist:/app/frontend-react/dist:ro
       - ../.env.production:/app/.env:ro
-    restart: unless-stopped
+    restart: always
     depends_on:
       db:
         condition: service_healthy
@@ -69,7 +69,7 @@ services:
       TZ: Europe/Warsaw
     volumes:
       - ../.env.production:/app/.env:ro
-    restart: unless-stopped
+    restart: always
     depends_on:
       db:
         condition: service_healthy
@@ -92,7 +92,7 @@ services:
       retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    restart: always
     networks:
       - ifg_prod
 
