@@ -18,7 +18,7 @@ if not hasattr(SQLiteTypeCompiler, "visit_UUID"):
     SQLiteTypeCompiler.visit_UUID = lambda self, type_, **kw: "CHAR(36)"  # type: ignore[attr-defined]
 
 from app.domain.enums import KSeFOperationType
-from app.integrations.email.smtp_client import SmtpSendError
+from app.integrations.email.smtp_client import SmtpConfig, SmtpSendError
 from app.persistence.base import Base
 from app.persistence.models import (  # noqa: F401
     AuditLog,
@@ -490,4 +490,57 @@ def test_smtp_failure_does_not_affect_sync_status(mock_send, mock_settings, db_s
     db_session.commit()
     row = db_session.execute(select(NotifyORM).where(NotifyORM.correlation_id == corr_id)).scalar_one()
     assert row.sync_status == "SUCCESS"
+    assert row.status == "FAILED"
+
+
+@patch("app.integrations.email.smtp_client.smtplib.SMTP")
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock(
+    smtp_from='IFG [DS 723+] <ds723@ikonastudio.pl>',
+))
+def test_notifier_uses_parsed_envelope_sender(mock_settings, mock_smtp_cls, db_session: Session) -> None:
+    instance = MagicMock()
+    mock_smtp_cls.return_value.__enter__.return_value = instance
+
+    inv_id = _insert_purchase_invoice(db_session, number="FV/ENV/2026")
+    corr_id = uuid.uuid4()
+    notifier = PurchaseSyncEmailNotifier(db_session)
+    audit = _make_audit(saved_ids=[inv_id])
+    notifier.maybe_enqueue_after_sync(
+        correlation_id=corr_id,
+        operation_type=KSeFOperationType.PURCHASE_SYNC_AUTO,
+        audit=audit,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    db_session.commit()
+    notifier.process_pending()
+    db_session.commit()
+
+    _, kwargs = instance.send_message.call_args
+    assert kwargs["from_addr"] == "ds723@ikonastudio.pl"
+    message = instance.send_message.call_args.args[0]
+    assert message["From"] == '"IFG [DS 723+]" <ds723@ikonastudio.pl>'
+
+
+@patch("app.integrations.email.smtp_client.smtplib.SMTP")
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock(
+    smtp_from="IFG",
+))
+def test_notifier_invalid_smtp_from_no_send(mock_settings, mock_smtp_cls, db_session: Session) -> None:
+    inv_id = _insert_purchase_invoice(db_session, number="FV/BADFROM/2026")
+    corr_id = uuid.uuid4()
+    notifier = PurchaseSyncEmailNotifier(db_session)
+    audit = _make_audit(saved_ids=[inv_id])
+    notifier.maybe_enqueue_after_sync(
+        correlation_id=corr_id,
+        operation_type=KSeFOperationType.PURCHASE_SYNC_AUTO,
+        audit=audit,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    db_session.commit()
+    notifier.process_pending()
+    db_session.commit()
+    mock_smtp_cls.assert_not_called()
+    row = db_session.execute(select(NotifyORM).where(NotifyORM.correlation_id == corr_id)).scalar_one()
     assert row.status == "FAILED"
