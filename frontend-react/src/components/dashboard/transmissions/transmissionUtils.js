@@ -86,6 +86,7 @@ const PURCHASE_OPS = new Set([
   'PURCHASE_METADATA_FETCH',
   'PURCHASE_INVOICE_FETCH',
   'PURCHASE_IMPORT_SUMMARY',
+  'PURCHASE_SYNC_EMAIL',
   'RESUME',
 ]);
 
@@ -138,6 +139,7 @@ const OPERATION_LABELS = {
   PURCHASE_METADATA_FETCH: 'Pobranie metadanych zakupów',
   PURCHASE_INVOICE_FETCH: 'Pobranie XML zakupu',
   PURCHASE_IMPORT_SUMMARY: 'Podsumowanie importu',
+  PURCHASE_SYNC_EMAIL: 'Powiadomienie e-mail',
   RETRY: 'Ponowienie',
   RESUME: 'Wznowienie',
   ERROR: 'Błąd',
@@ -757,6 +759,31 @@ export function summarizeGroup(rows) {
   const saleRef = rows.find((r) => r.ksef_reference_number)?.ksef_reference_number;
   const upoOk = rows.some((r) => r.upo_status === 'fetched');
   const isPurchase = groupHasAny(rows, PURCHASE_OPS);
+  const emailNotifyRows = rows.filter((r) => r.operation_type === 'PURCHASE_SYNC_EMAIL');
+  let emailNotification = null;
+  let emailAttempt = null;
+  let emailMaxAttempts = null;
+  if (emailNotifyRows.length) {
+    const permanent = emailNotifyRows.find((r) => String(r.status || '').toLowerCase() === 'email_failed_permanent');
+    const sent = emailNotifyRows.find((r) => String(r.status || '').toLowerCase() === 'email_sent');
+    const attemptFailed = [...emailNotifyRows]
+      .reverse()
+      .find((r) => String(r.status || '').toLowerCase() === 'email_attempt_failed');
+    if (sent) {
+      emailNotification = 'sent';
+    } else if (permanent) {
+      emailNotification = 'permanent_failed';
+      emailAttempt = permanent.metadata_json?.attempt;
+      emailMaxAttempts = permanent.metadata_json?.max_attempts;
+    } else if (attemptFailed) {
+      emailNotification = 'attempt_failed';
+      emailAttempt = attemptFailed.metadata_json?.attempt;
+      emailMaxAttempts = attemptFailed.metadata_json?.max_attempts;
+    } else {
+      const legacyFailed = emailNotifyRows.find((r) => String(r.status || '').toLowerCase() === 'email_failed');
+      if (legacyFailed) emailNotification = 'failed';
+    }
+  }
 
   return {
     stageCount: rows.length,
@@ -769,6 +796,9 @@ export function summarizeGroup(rows) {
     saleRef,
     upoOk,
     isPurchase,
+    emailNotification,
+    emailAttempt,
+    emailMaxAttempts,
     hasRetryable: rows.some((r) => rowStatus(r) === 'failed_retryable'),
     retryRow: rows.find((r) => rowStatus(r) === 'failed_retryable') || null,
   };
@@ -808,6 +838,15 @@ export function buildSummaryLines(summary, status, title) {
 
   if (summary.upoOk) effects.push('UPO odebrane');
   if (summary.saleRef && !summary.upoOk) effects.push('Numer KSeF nadany');
+  if (summary.emailNotification === 'sent') {
+    effects.push('Powiadomienie e-mail wysłane');
+  } else if (summary.emailNotification === 'permanent_failed') {
+    effects.push(`Powiadomienie e-mail nie zostało wysłane po ${summary.emailMaxAttempts || 5} próbach`);
+  } else if (summary.emailNotification === 'attempt_failed') {
+    effects.push(`Powiadomienie e-mail: próba ${summary.emailAttempt}/${summary.emailMaxAttempts || 5} nieudana`);
+  } else if (summary.emailNotification === 'failed') {
+    effects.push('Powiadomienie e-mail nie zostało wysłane');
+  }
 
   const meta = [];
   if (summary.durationSec != null) meta.push(`czas ${summary.durationSec} s`);

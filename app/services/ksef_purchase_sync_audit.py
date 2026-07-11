@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ class PurchaseSyncAudit:
     refs_received_from_metadata: set[str] = field(default_factory=set)
     refs_xml_downloaded: set[str] = field(default_factory=set)
     refs_saved: set[str] = field(default_factory=set)
+    saved_invoice_ids: list[UUID] = field(default_factory=list)
     refs_skipped_existing: set[str] = field(default_factory=set)
     refs_skipped_invalid: set[str] = field(default_factory=set)
     refs_skipped_error: set[str] = field(default_factory=set)
@@ -183,9 +185,11 @@ class PurchaseSyncAudit:
         self.refs_xml_downloaded.add(ref)
         self.xml_downloaded = len(self.refs_xml_downloaded)
 
-    def record_saved(self, ref: str) -> None:
+    def record_saved(self, ref: str, invoice_id: UUID | None = None) -> None:
         self.refs_saved.add(ref)
         self.saved = len(self.refs_saved)
+        if invoice_id is not None:
+            self.saved_invoice_ids.append(invoice_id)
 
     def record_skipped_existing(self, ref: str) -> None:
         self.refs_skipped_existing.add(ref)

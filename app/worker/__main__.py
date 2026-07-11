@@ -36,6 +36,7 @@ from app.worker.job_handlers.sync_purchase_invoices import (
     JobRateLimitDeferredError,
     SyncPurchaseInvoicesJobHandler,
 )
+from app.services.purchase_sync_email_notifier import PurchaseSyncEmailNotifier
 from app.worker.ksef_auto_sync_scheduler import evaluate_tick
 
 logger = logging.getLogger("app.worker")
@@ -357,6 +358,29 @@ def _release_job_to_pending(job: BackgroundJob, *, error: str) -> None:
     job.locked_by = None
 
 
+def _process_notification_queue() -> int:
+    """Wysyła oczekujące e-maile podsumowujące sesje zakupów KSeF."""
+    session = SessionLocal()
+    try:
+        journal = KSeFTransmissionJournalService(
+            session=session,
+            transmission_repository=TransmissionRepository(session),
+        )
+        notifier = PurchaseSyncEmailNotifier(session, journal_service=journal)
+        processed = notifier.process_pending(limit=5)
+        if processed:
+            session.commit()
+        else:
+            session.rollback()
+        return processed
+    except Exception:
+        session.rollback()
+        logger.exception("Purchase sync notification queue processing failed.")
+        return 0
+    finally:
+        session.close()
+
+
 def _process_batch() -> int:
     session = SessionLocal()
     try:
@@ -482,6 +506,7 @@ def main() -> None:
         try:
             _run_scheduler_tick()
             n = _process_batch()
+            _process_notification_queue()
             if n:
                 logger.info("Przetworzone joby: %s", n)
         except Exception:  # noqa: BLE001

@@ -91,6 +91,26 @@ class Settings(BaseSettings):
     ksef_auto_sync_enabled: bool = Field(default=False, alias="KSEF_AUTO_SYNC_ENABLED")
     ksef_auto_sync_cron: str = Field(default="0 8,14 * * *", alias="KSEF_AUTO_SYNC_CRON")
 
+    # Powiadomienia e-mail po synchronizacji zakupów KSeF (GWO-IFG-NOTIFY-0001/0002)
+    purchase_sync_notify_enabled: bool = Field(default=False, alias="PURCHASE_SYNC_NOTIFY_ENABLED")
+    purchase_sync_notify_recipients: str | None = Field(
+        default=None, alias="PURCHASE_SYNC_NOTIFY_RECIPIENTS"
+    )
+    purchase_sync_notify_email: str | None = Field(
+        default=None,
+        alias="PURCHASE_SYNC_NOTIFY_EMAIL",
+        description="Deprecated — użyj PURCHASE_SYNC_NOTIFY_RECIPIENTS",
+    )
+    purchase_sync_notify_max_attempts: int = Field(
+        default=5, alias="PURCHASE_SYNC_NOTIFY_MAX_ATTEMPTS"
+    )
+    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str | None = Field(default=None, alias="SMTP_USER")
+    smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
+    smtp_from: str | None = Field(default=None, alias="SMTP_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
     @field_validator(
         "seller_nip",
         "seller_name",

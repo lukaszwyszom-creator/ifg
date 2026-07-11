@@ -21,6 +21,10 @@ _ALLOWED_METADATA_KEYS = {
     "error_code",
     "source",
     "duration_ms",
+    "email_status",
+    "attempt",
+    "max_attempts",
+    "recipient_count",
 }
 
 

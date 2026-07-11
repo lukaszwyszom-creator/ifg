@@ -36,6 +36,7 @@ from app.services.ksef_purchase_sync_audit import (
     PurchaseSyncAudit,
     resolve_purchase_sync_window_details,
 )
+from app.services.purchase_sync_email_notifier import PurchaseSyncEmailNotifier
 from app.services.ksef_token_store import (
     KEY_ACCESS_TOKEN,
     KEY_IV,
@@ -598,6 +599,7 @@ class KSeFSessionService:
             else KSeFOperationType.PURCHASE_SYNC_MANUAL
         )
         corr_id = uuid4()
+        session_started_at = datetime.now(UTC)
         if self._journal_service is not None:
             self._journal_service.log_event(
                 operation_type=operation_type,
@@ -726,6 +728,17 @@ class KSeFSessionService:
                         "skipped": report["errors"],
                         "source": "auto" if operation_type == KSeFOperationType.PURCHASE_SYNC_AUTO else "manual",
                     },
+                )
+            if not audit.is_sync_incomplete() and report["status"] == "ok":
+                PurchaseSyncEmailNotifier(
+                    self.session,
+                    journal_service=self._journal_service,
+                ).maybe_enqueue_after_sync(
+                    correlation_id=corr_id,
+                    operation_type=operation_type,
+                    audit=audit,
+                    started_at=session_started_at,
+                    finished_at=datetime.now(UTC),
                 )
             return report
         except Exception as exc:
@@ -1063,7 +1076,7 @@ class KSeFSessionService:
             self.invoice_repository.add(invoice, source_system="ksef_import")
             logger.info("KSeF sync: zapisano fakturę zakupową %s", ksef_reference_number)
             if audit is not None:
-                audit.record_saved(ksef_reference_number)
+                audit.record_saved(ksef_reference_number, invoice_id=invoice.id)
             return "saved"
         except Exception as exc:  # noqa: BLE001
             logger.warning(
