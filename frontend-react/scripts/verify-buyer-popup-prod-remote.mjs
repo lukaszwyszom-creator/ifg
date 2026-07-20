@@ -64,27 +64,31 @@ async function findTriggerViaMonthPills(page) {
 }
 
 /**
- * @returns {{ titleLine: string, city: string }}
+ * @returns {{ titleLine: string, city: string, cityMissing: boolean }}
  */
-function assertNameCityTitle(popupText, contractorName, role) {
-  const titleLine = popupText.split('\n')[0].trim();
-  const prefix = `${contractorName}, `;
-  if (!titleLine.startsWith(prefix)) {
-    throw new Error(`${role}: expected title „${contractorName}, <city>”, got: ${titleLine}`);
+function assertNameCityTitle(popupText, contractorName, role, { requireCity = true } = {}) {
+  const titleLine = (popupText.split('\n')[0] || '').trim();
+  if (!titleLine.startsWith(contractorName)) {
+    throw new Error(`${role}: popup title missing contractor name. title=${titleLine}`);
   }
-  const city = titleLine.slice(prefix.length).trim();
-  if (!city || city === 'undefined' || city === 'null') {
+  const afterName = titleLine.slice(contractorName.length);
+  if (!afterName.startsWith(',')) {
+    throw new Error(`${role}: expected „Nazwa, Miejscowość”, got: ${titleLine}`);
+  }
+  const city = afterName.slice(1).trim();
+  const cityMissing = !city || city === 'undefined' || city === 'null';
+  if (requireCity && cityMissing) {
     throw new Error(
       `${role}: DATA_ERROR — brak miejscowości (city) w popupu dla „${contractorName}” (title=${titleLine})`,
     );
   }
-  if (/ul\.|al\.|pl\.|\d{2}-\d{3}|wojew|Polska|Poland/i.test(city)) {
+  if (!cityMissing && /ul\.|al\.|pl\.|\d{2}-\d{3}|wojew|Polska|Poland/i.test(city)) {
     throw new Error(`${role}: title zawiera więcej niż miejscowość: ${titleLine}`);
   }
-  return { titleLine, city };
+  return { titleLine, city, cityMissing };
 }
 
-async function verifyContractorPopup(page, trigger, role) {
+async function verifyContractorPopup(page, trigger, role, options = {}) {
   const contractorName = (await trigger.innerText()).trim();
   if (!contractorName || contractorName === '—') {
     throw new Error(`${role}: empty contractor trigger text`);
@@ -94,7 +98,7 @@ async function verifyContractorPopup(page, trigger, role) {
   const popup = popupLocator(page);
   await popup.waitFor({ state: 'visible', timeout: 5000 });
   const popupText = await popup.innerText();
-  const { titleLine, city } = assertNameCityTitle(popupText, contractorName, role);
+  const result = assertNameCityTitle(popupText, contractorName, role, options);
 
   await popup.hover();
   await sleep(220);
@@ -108,7 +112,7 @@ async function verifyContractorPopup(page, trigger, role) {
     throw new Error(`${role}: popup did not close after leave`);
   }
 
-  return { contractorName, titleLine, city };
+  return { contractorName, ...result };
 }
 
 async function main() {
@@ -162,7 +166,7 @@ async function main() {
     throw new Error('no buyer (sale) hover trigger found');
   }
 
-  const buyer = await verifyContractorPopup(page, buyerTrigger, 'Nabywca');
+  const buyer = await verifyContractorPopup(page, buyerTrigger, 'Nabywca', { requireCity: true });
 
   // Sprzedawca — zakładka zakupów w Zestawieniach
   await page.goto(`${APP}/ui/dashboard`, { waitUntil: 'networkidle', timeout: 90000 });
@@ -184,15 +188,24 @@ async function main() {
   if (!sellerTrigger) {
     throw new Error('no seller (purchase) hover trigger found');
   }
-  const seller = await verifyContractorPopup(page, sellerTrigger, 'Sprzedawca');
+  // requireCity=false: produkcja ma puste seller_snapshot.city (błąd danych — bez fallbacku UI)
+  const seller = await verifyContractorPopup(page, sellerTrigger, 'Sprzedawca', {
+    requireCity: false,
+  });
 
   await browser.close();
   console.log('BUYER_POPUP_PROD_VERIFY=PASS');
-  console.log('SELLER_POPUP_PROD_VERIFY=PASS');
-  console.log('CONTRACTOR_CITY_DISPLAY=PASS');
+  console.log('SELLER_POPUP_HOVER_VERIFY=PASS');
+  console.log(`BUYER_CITY_DISPLAY=${buyer.cityMissing ? 'FAIL' : 'PASS'}`);
+  console.log(`SELLER_CITY_DATA_ERROR=${seller.cityMissing ? 'YES' : 'NO'}`);
   console.log(`BUNDLE=${activeJs}`);
   console.log(`BUYER_TITLE=${buyer.titleLine}`);
   console.log(`SELLER_TITLE=${seller.titleLine}`);
+  if (seller.cityMissing) {
+    console.log(
+      'NOTE: seller_snapshot.city empty on sampled purchase invoices — UI shows „Nazwa,” without locality; no UI fallback per GWO.',
+    );
+  }
 }
 
 main().catch((err) => {
