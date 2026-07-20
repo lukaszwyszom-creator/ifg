@@ -67,6 +67,17 @@ def test_infer_session_slot_14() -> None:
     assert infer_session_slot_label(finished) == "14:00"
 
 
+def test_infer_session_slot_20() -> None:
+    finished = datetime(2026, 7, 11, 18, 5, tzinfo=UTC)  # 20:05 Warsaw (CEST +2)
+    assert infer_session_slot_label(finished) == "20:00"
+
+
+def test_infer_session_slot_20_winter_time() -> None:
+    # Europe/Warsaw CET (UTC+1) — 20:05 local = 19:05 UTC
+    finished = datetime(2026, 1, 15, 19, 5, tzinfo=UTC)
+    assert infer_session_slot_label(finished) == "20:00"
+
+
 def test_infer_session_slot_unknown() -> None:
     finished = datetime(2026, 7, 11, 10, 0, tzinfo=UTC)
     assert infer_session_slot_label(finished) is None

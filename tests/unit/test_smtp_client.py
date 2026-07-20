@@ -100,6 +100,27 @@ class TestSendEmailEnvelope:
         mock_smtp_cls.assert_not_called()
 
     @patch("app.integrations.email.smtp_client.smtplib.SMTP")
+    def test_production_recipient_not_used_as_envelope_sender(self, mock_smtp_cls):
+        """Regression: PURCHASE_SYNC_NOTIFY_RECIPIENTS must not become MAIL FROM."""
+        instance = MagicMock()
+        mock_smtp_cls.return_value.__enter__.return_value = instance
+
+        send_email(
+            config=self._config("IFG [DS 723+] <ds723@ikonastudio.pl>"),
+            to_addrs=["lukasz@ikonastudio.pl"],
+            subject="IFG — nowe faktury zakupowe z KSeF",
+            body_text="body",
+        )
+
+        _, kwargs = instance.send_message.call_args
+        envelope = kwargs["from_addr"]
+        recipients = kwargs["to_addrs"]
+        assert envelope == "ds723@ikonastudio.pl"
+        assert recipients == ["lukasz@ikonastudio.pl"]
+        assert envelope not in recipients
+        assert recipients[0] != envelope
+
+    @patch("app.integrations.email.smtp_client.smtplib.SMTP")
     def test_multiple_recipients(self, mock_smtp_cls):
         instance = MagicMock()
         mock_smtp_cls.return_value.__enter__.return_value = instance

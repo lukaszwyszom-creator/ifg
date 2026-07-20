@@ -57,7 +57,7 @@ def retry_delay_seconds(attempt_count: int) -> int:
 
 
 def infer_session_slot_label(finished_at: datetime | None) -> str | None:
-    """Rozpoznaje slot 08:00 / 14:00 na podstawie czasu zakończenia (Europe/Warsaw)."""
+    """Rozpoznaje slot 08:00 / 14:00 / 20:00 na podstawie czasu zakończenia (Europe/Warsaw)."""
     if finished_at is None:
         return None
     try:
@@ -72,4 +72,6 @@ def infer_session_slot_label(finished_at: datetime | None) -> str | None:
         return "08:00"
     if hour == 14 and minute < 30:
         return "14:00"
+    if hour == 20 and minute < 30:
+        return "20:00"
     return None

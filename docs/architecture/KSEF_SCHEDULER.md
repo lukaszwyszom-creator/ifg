@@ -53,6 +53,20 @@ Operator **nie musi** klikać „Połącz” przed planowym sync zakupów. Wysy�
 - `last_executed_slot` jest persistowany w `ksef_sync_states`.
 - Ponowny start workera w tym samym slocie nie powoduje podwójnego enqueue.
 
+## Harmonogram (Europe/Warsaw)
+
+Worker kontenera ma `TZ=Europe/Warsaw` (`docker-compose.prod.yml`).
+Scheduler używa `datetime.now().astimezone()` — godziny CRON są lokalne PL (CEST/CET).
+
+Domyślne / docelowe ENV:
+
+```
+KSEF_AUTO_SYNC_CRON=0 8,14,20 * * *
+```
+
+Trzy niezależne sloty dziennie: **08:00**, **14:00**, **20:00**.
+Każdy slot ma własny `slot_key` i osobną decyzję enqueue.
+
 ## Telemetria w Monitorze KSeF
 
 Scheduler zapisuje zdarzenia przez `KSeFTransmissionJournalService`:

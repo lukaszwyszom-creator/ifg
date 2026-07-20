@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     ksef_purchase_sync_full_days: int = Field(default=365, alias="KSEF_PURCHASE_SYNC_FULL_DAYS")
     ksef_purchase_sync_overlap_days: int = Field(default=2, alias="KSEF_PURCHASE_SYNC_OVERLAP_DAYS")
     ksef_auto_sync_enabled: bool = Field(default=False, alias="KSEF_AUTO_SYNC_ENABLED")
-    ksef_auto_sync_cron: str = Field(default="0 8,14 * * *", alias="KSEF_AUTO_SYNC_CRON")
+    ksef_auto_sync_cron: str = Field(default="0 8,14,20 * * *", alias="KSEF_AUTO_SYNC_CRON")
 
     # Powiadomienia e-mail po synchronizacji zakupów KSeF (GWO-IFG-NOTIFY-0001/0002)
     purchase_sync_notify_enabled: bool = Field(default=False, alias="PURCHASE_SYNC_NOTIFY_ENABLED")

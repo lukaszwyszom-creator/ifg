@@ -382,6 +382,7 @@ class PurchaseSyncEmailNotifier:
             status=status,
             short_description=description,
             correlation_id=correlation_id,
+            attempt_no=attempt_no,
             error_message=error[:512] if error else None,
             metadata_json=metadata,
         )

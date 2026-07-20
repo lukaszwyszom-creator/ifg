@@ -70,19 +70,56 @@ def test_scheduler_recovery_after_restart_1401() -> None:
 def test_scheduler_two_slots_per_day_sequence() -> None:
     morning = evaluate_tick(
         enabled=True,
-        cron_expr="0 8,14 * * *",
+        cron_expr="0 8,14,20 * * *",
         now=_dt(8, 0),
         last_executed_slot_key=None,
     )
     assert morning.should_enqueue is True
     afternoon = evaluate_tick(
         enabled=True,
-        cron_expr="0 8,14 * * *",
+        cron_expr="0 8,14,20 * * *",
         now=_dt(14, 0),
         last_executed_slot_key=morning.slot_key,
     )
     assert afternoon.should_enqueue is True
     assert afternoon.slot_key == "2026-07-07T14:00"
+
+
+def test_scheduler_three_slots_includes_2000() -> None:
+    cron = "0 8,14,20 * * *"
+    morning = evaluate_tick(
+        enabled=True,
+        cron_expr=cron,
+        now=_dt(8, 0),
+        last_executed_slot_key=None,
+    )
+    afternoon = evaluate_tick(
+        enabled=True,
+        cron_expr=cron,
+        now=_dt(14, 0),
+        last_executed_slot_key=morning.slot_key,
+    )
+    evening = evaluate_tick(
+        enabled=True,
+        cron_expr=cron,
+        now=_dt(20, 0),
+        last_executed_slot_key=afternoon.slot_key,
+    )
+    assert evening.should_enqueue is True
+    assert evening.slot_key == "2026-07-07T20:00"
+    assert evening.is_recovery is False
+
+
+def test_scheduler_recovery_after_restart_2001() -> None:
+    result = evaluate_tick(
+        enabled=True,
+        cron_expr="0 8,14,20 * * *",
+        now=_dt(20, 1),
+        last_executed_slot_key="2026-07-07T14:00",
+    )
+    assert result.should_enqueue is True
+    assert result.slot_key == "2026-07-07T20:00"
+    assert result.is_recovery is True
 
 
 def test_scheduler_cron_change_effective() -> None:
@@ -105,6 +142,12 @@ def test_scheduler_recovers_only_latest_missed_slot() -> None:
     )
     assert result.should_enqueue is True
     assert result.slot_key == "2026-07-08T08:00"
+
+
+def test_parse_cron_three_daily_hours() -> None:
+    parsed = parse_minute_hour_cron("0 8,14,20 * * *")
+    assert parsed.minutes == (0,)
+    assert parsed.hours == (8, 14, 20)
 
 
 def test_parse_cron_rejects_day_month_dow_restrictions() -> None:
