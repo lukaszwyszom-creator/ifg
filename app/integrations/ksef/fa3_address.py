@@ -18,8 +18,14 @@ import re
 from typing import Any
 
 # Kod pocztowy PL: XX-XXX lub XXXXX, potem miejscowość do końca segmentu.
-_POSTAL_CITY_RE = re.compile(
+_POSTAL_THEN_CITY_RE = re.compile(
     r"(?P<postal>\d{2}-\d{3}|\d{5})\s+(?P<city>.+?)\s*$",
+    re.UNICODE,
+)
+# Odwrócony układ spotykany w AdresL1/L2: „Miasto, XX-XXX” lub „…, Miasto XX-XXX”.
+_CITY_THEN_POSTAL_RE = re.compile(
+    r"(?P<city>[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż][A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż\.\-\s]*?)"
+    r"[,\s]+(?P<postal>\d{2}-\d{3}|\d{5})\s*$",
     re.UNICODE,
 )
 
@@ -32,18 +38,24 @@ def normalize_pl_postal_code(raw: str) -> str:
 
 
 def extract_postal_city_from_address_text(text: str) -> tuple[str, str] | None:
-    """Zwraca ``(postal_code, city)`` gdy tekst kończy się wzorcem PL kod+miasto."""
+    """Zwraca ``(postal_code, city)`` gdy tekst zawiera jednoznaczny wzorzec PL."""
     cleaned = (text or "").strip().strip(",;")
     if not cleaned:
         return None
-    match = _POSTAL_CITY_RE.search(cleaned)
-    if not match:
-        return None
-    postal = normalize_pl_postal_code(match.group("postal"))
-    city = (match.group("city") or "").strip(" ,;")
-    if not city:
-        return None
-    return postal, city
+    match = _POSTAL_THEN_CITY_RE.search(cleaned)
+    if match:
+        postal = normalize_pl_postal_code(match.group("postal"))
+        city = (match.group("city") or "").strip(" ,;")
+        if city:
+            return postal, city
+    match = _CITY_THEN_POSTAL_RE.search(cleaned)
+    if match:
+        postal = normalize_pl_postal_code(match.group("postal"))
+        city = (match.group("city") or "").strip(" ,;")
+        # odrzuć jeśli „city” wygląda na ulicę z numerem (zawiera cyfry na końcu tokenu ul.)
+        if city and not re.search(r"\d", city):
+            return postal, city
+    return None
 
 
 def strip_postal_city_suffix(text: str, postal: str, city: str) -> str:
@@ -63,7 +75,11 @@ def strip_postal_city_suffix(text: str, postal: str, city: str) -> str:
         if result.endswith(variant):
             result = result[: -len(variant)].rstrip(" ,;")
             return result
-    match = _POSTAL_CITY_RE.search(result)
+    match = _POSTAL_THEN_CITY_RE.search(result)
+    if match:
+        result = result[: match.start()].rstrip(" ,;")
+        return result
+    match = _CITY_THEN_POSTAL_RE.search(result)
     if match:
         result = result[: match.start()].rstrip(" ,;")
     return result

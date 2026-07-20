@@ -23,11 +23,27 @@ def test_backfill_dry_classification_patterns_from_production_samples() -> None:
         assert got == expected, (street, apt, got, expected)
 
 
-def test_backfill_second_pass_no_change_when_city_set() -> None:
+def test_backfill_extract_city_city_before_postal() -> None:
     assert (
         extract_city_only_from_stored_address_fields(
-            street="ul. Puławska 2 02-566 Warszawa",
-            city="Warszawa",
+            street="Sępia 13, Bydgoszcz 85-434",
+            city="",
         )
-        == "Warszawa"
+        == "Bydgoszcz"
+    )
+    assert (
+        extract_city_only_from_stored_address_fields(
+            street="ul. Ostróżki 12",
+            apartment_no="BIAŁE BŁOTA, 86-005",
+            city="",
+        )
+        == "BIAŁE BŁOTA"
+    )
+    assert (
+        extract_city_only_from_stored_address_fields(
+            street="ul. Kolonijna 3",
+            apartment_no="Osielsko, 86-031",
+            city="",
+        )
+        == "Osielsko"
     )

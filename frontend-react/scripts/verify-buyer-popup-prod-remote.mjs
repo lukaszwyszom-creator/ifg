@@ -188,24 +188,20 @@ async function main() {
   if (!sellerTrigger) {
     throw new Error('no seller (purchase) hover trigger found');
   }
-  // requireCity=false: produkcja ma puste seller_snapshot.city (błąd danych — bez fallbacku UI)
+  // Po backfillu GWO-IFG-0029 city powinno być obecne dla naprawialnych rekordów.
   const seller = await verifyContractorPopup(page, sellerTrigger, 'Sprzedawca', {
-    requireCity: false,
+    requireCity: true,
   });
 
   await browser.close();
   console.log('BUYER_POPUP_PROD_VERIFY=PASS');
   console.log('SELLER_POPUP_HOVER_VERIFY=PASS');
   console.log(`BUYER_CITY_DISPLAY=${buyer.cityMissing ? 'FAIL' : 'PASS'}`);
+  console.log(`SELLER_CITY_DISPLAY=${seller.cityMissing ? 'FAIL' : 'PASS'}`);
   console.log(`SELLER_CITY_DATA_ERROR=${seller.cityMissing ? 'YES' : 'NO'}`);
   console.log(`BUNDLE=${activeJs}`);
   console.log(`BUYER_TITLE=${buyer.titleLine}`);
   console.log(`SELLER_TITLE=${seller.titleLine}`);
-  if (seller.cityMissing) {
-    console.log(
-      'NOTE: seller_snapshot.city empty on sampled purchase invoices — UI shows „Nazwa,” without locality; no UI fallback per GWO.',
-    );
-  }
 }
 
 main().catch((err) => {

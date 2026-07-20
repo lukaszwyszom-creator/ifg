@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-07-20T17:45:58.445499+00:00",
+  "mode": "dry-run",
+  "empty_city_candidates": 3,
+  "by_category": {
+    "B_NEEDS_KSEF_REFETCH": 3
+  },
+  "proposed_repairs": [],
+  "unresolved": [
+    {
+      "id": "059f1a1c-2f2a-4a69-8d1c-82ccc116fce9",
+      "number_local": "473/F/RBAS/26",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5541018126-20260422-4C0B4A000000-11",
+      "name": "Bosch Auto Service\nMieczysław Kluszczyński",
+      "street": "Sępia 13, Bydgoszcz 85-434",
+      "apartment_no": ""
+    },
+    {
+      "id": "be9306d2-efd1-47a6-98c4-3976bbc70d47",
+      "number_local": "345/2026",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5542405210-20260430-7061634000E6-B1",
+      "name": "PPHU \"BLACHOCAR & OLEX\" S.C. Witkowski Mirosław, Witkowska Aleksandra Stacja Kon",
+      "street": "ul. Ostróżki 12",
+      "apartment_no": "BIAŁE BŁOTA, 86-005"
+    },
+    {
+      "id": "9ff0b819-fbfe-4719-9aac-797601ab1c90",
+      "number_local": "FV/00878/2026",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5541811238-20260601-884A46000002-23",
+      "name": "Stacja Kontroli Pojazdów Robert Trepka",
+      "street": "ul. Kolonijna 3",
+      "apartment_no": "Osielsko, 86-031"
+    }
+  ],
+  "apply_result": null,
+  "second_pass_a_repairable": null
+}

@@ -1,0 +1,533 @@
+{
+  "generated_at": "2026-07-20T17:45:56.163418+00:00",
+  "mode": "apply",
+  "empty_city_candidates": 84,
+  "by_category": {
+    "A_REPAIRABLE": 81,
+    "B_NEEDS_KSEF_REFETCH": 3
+  },
+  "proposed_repairs": [
+    {
+      "id": "05639f72-0412-4d7a-8b32-8e0a06f7bc14",
+      "number_local": "60311885",
+      "proposed_city": "Bydgoszcz",
+      "name": "MediaMarkt Bydgoszcz Jagiellońska"
+    },
+    {
+      "id": "475d0501-a264-4a1c-bba3-e2726432d490",
+      "number_local": "11-100080-04261",
+      "proposed_city": "Warszawa",
+      "name": "Orange Polska S.A."
+    },
+    {
+      "id": "74d76e31-dc6e-4c37-a53d-28021ffd74e5",
+      "number_local": "F 16753/0006/26",
+      "proposed_city": "PŁOCK",
+      "name": "ORLEN S.A."
+    },
+    {
+      "id": "cad2dc5e-1e93-4c40-8171-f3e9f01699ff",
+      "number_local": "015087/04/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "8caa1eba-7b5a-44ab-89ad-2174b080d052",
+      "number_local": "006410/04/2026/UB",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "89e4c7b5-97ed-4664-ba7f-85d466b31807",
+      "number_local": "F/20417712/04/26",
+      "proposed_city": "Warszawa",
+      "name": "P4 sp. z o. o."
+    },
+    {
+      "id": "90b5d737-7ece-4c2d-9dc0-e47f6387c519",
+      "number_local": "FA/92/04/2026",
+      "proposed_city": "Jurków 53/B, małopolskie, powiat brzeski, poczta Czchów",
+      "name": "\"RABEK\" Z.RABIASZ, M.RABIASZ SPÓŁKA JAWNA"
+    },
+    {
+      "id": "a643eca2-9187-451f-900b-da3958c25e56",
+      "number_local": "065303/03/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "2cbae9aa-4dea-4c92-8f4b-97f254e186aa",
+      "number_local": "065350/04/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "6e026438-ed9f-4742-9fc9-25bde571988a",
+      "number_local": "021289/05/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "24953751-89e5-4497-ad65-6b00964156ed",
+      "number_local": "005237/05/2026/UB",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "88ad17ad-a607-478e-b6d3-6a2efb61cca7",
+      "number_local": "11-114493-05269",
+      "proposed_city": "Warszawa",
+      "name": "Orange Polska S.A."
+    },
+    {
+      "id": "1dd6c331-01c9-4f97-810e-1cc1a442b0e7",
+      "number_local": "ZEN/FV/2026/05/0001448",
+      "proposed_city": "Poznań",
+      "name": "CYBER_FOLKS SPÓŁKA AKCYJNA"
+    },
+    {
+      "id": "90b95c81-097b-431a-8e1c-adb0cac9aec4",
+      "number_local": "F/20608949/05/26",
+      "proposed_city": "Warszawa",
+      "name": "P4 sp. z o. o."
+    },
+    {
+      "id": "3bf2f1aa-3133-412c-833d-32f87ad28693",
+      "number_local": "F 7345/7792/26",
+      "proposed_city": "Szczerców",
+      "name": "\"INTEROIL\" Sp.J. Kameccy-Galuba\n97-420 Szczerców, Kol.Szczercowska 4\nStacja Pali"
+    },
+    {
+      "id": "a57d8550-ff21-4bcf-ab6e-e37713429ab0",
+      "number_local": "FA/55/05/2026",
+      "proposed_city": "Jurków 53/B, małopolskie, powiat brzeski, poczta Czchów",
+      "name": "\"RABEK\" Z.RABIASZ, M.RABIASZ SPÓŁKA JAWNA"
+    },
+    {
+      "id": "dfabf78a-c185-4fc8-9f0e-e12dc2fffd87",
+      "number_local": "F 5501/7212/26",
+      "proposed_city": "Gródek n/Dunajcem",
+      "name": "GRUPA GRAND SPÓŁKA Z OGRANICZONĄ  \nODPOWIEDZIALNOŚCIĄ \nSTACJA PALIW BARTKOWA-POS"
+    },
+    {
+      "id": "e457f60a-1aab-4de5-9987-93cc01e9c3d9",
+      "number_local": "000857/05/2026/SST/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "396c75dc-1b10-47b2-9e45-7c1f19e5221f",
+      "number_local": "065976/05/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "dff66d60-8ad3-4429-93f6-068bbc54c405",
+      "number_local": "11-113360-06266",
+      "proposed_city": "Warszawa",
+      "name": "Orange Polska S.A."
+    },
+    {
+      "id": "49be4b33-6c0c-4c4e-b33d-c00dba260ad4",
+      "number_local": "FAS/BYD/798/2026",
+      "proposed_city": "Bydgoszcz",
+      "name": "PHU BER GRZEGORZ BEREND"
+    },
+    {
+      "id": "afa0bf99-f7f4-4665-82d4-7477943ae85b",
+      "number_local": "37752/3/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "508f9d61-7b89-4b1f-b826-dfde3cd8be9f",
+      "number_local": "FAS/BYD/416/2026",
+      "proposed_city": "Bydgoszcz",
+      "name": "PHU BER GRZEGORZ BEREND"
+    },
+    {
+      "id": "ed485ecc-a364-4f67-91c3-1f2dffb877ea",
+      "number_local": "3834/4/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "6c03cb95-0d5a-4a76-95f6-bf3b9bd6f635",
+      "number_local": "FV/N/2026/04/050",
+      "proposed_city": "Warszawa",
+      "name": "LOCUM SPÓŁKA AKCYJNA"
+    },
+    {
+      "id": "bb26aa7c-7ffe-411b-901c-ec134fa4b200",
+      "number_local": "041/2026",
+      "proposed_city": "Nowa Sól",
+      "name": "KRIS KRZYSZTOF KOWALEWSKI"
+    },
+    {
+      "id": "0c26905b-216e-445a-8a2e-2fdd8b984063",
+      "number_local": "0259/2026/HOTEL",
+      "proposed_city": "Raducki Folwark",
+      "name": "Sławomir Olak Wielobranżowe Przedsiębiorstwo Handlowe \"AGRAHURT\"  Export-Import"
+    },
+    {
+      "id": "843204f5-8362-4871-80ce-2206a7835966",
+      "number_local": "40217/4/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "24342d0c-3ed4-49ac-a032-4b96aa19ba75",
+      "number_local": "FAW/00037/W/04/26",
+      "proposed_city": "Osielsko",
+      "name": "BESSPOL  Spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "8fd5de90-03ca-4f19-b4cc-2bfca31c6fd6",
+      "number_local": "L003404/2026",
+      "proposed_city": "Limanowa",
+      "name": "FHU \"FAMA\" KRZYSZTOF ŻĄDŁO\n34-730 MSZANA DOLNA UL.STAROWIEJSKA 111\nSTACJA PALIW "
+    },
+    {
+      "id": "b60d55ff-eeb5-4ad8-9d8b-d93a3ba7ce1d",
+      "number_local": "404/04/2026",
+      "proposed_city": "Białe Błota",
+      "name": "INTER-REST Ryszard Maciejkowski"
+    },
+    {
+      "id": "f610f400-859e-4e62-b433-46839a506539",
+      "number_local": "FV/N/2026/05/051",
+      "proposed_city": "Warszawa",
+      "name": "LOCUM SPÓŁKA AKCYJNA"
+    },
+    {
+      "id": "874d551e-d803-461e-91fd-2410d009a373",
+      "number_local": "3769/5/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "e9bbced9-971a-452d-8c8a-74cdc01b3352",
+      "number_local": "11175\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "3f9617d2-a722-4a17-a84b-dad9e6e110eb",
+      "number_local": "11222\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "00142db5-5b28-4180-9424-610425a4ee5b",
+      "number_local": "3/eF/2026/05",
+      "proposed_city": "Olsztyn, ul. Lawendowa 2",
+      "name": "Zajazd-Restauracja-Przewóz osób mgr Leszek Gulmantowicz"
+    },
+    {
+      "id": "becca3c2-a657-4a9b-b70c-9fc305e71bb5",
+      "number_local": "7/eF/2026/05",
+      "proposed_city": "Olsztyn, ul. Lawendowa 2",
+      "name": "Zajazd-Restauracja-Przewóz osób mgr Leszek Gulmantowicz"
+    },
+    {
+      "id": "b740d0ed-7ff2-4f65-8b05-4c359ffa8f60",
+      "number_local": "11547\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "642105d0-360c-4d23-9383-216d4aaebe6a",
+      "number_local": "FVS/1/04/2026",
+      "proposed_city": "Częstochowa",
+      "name": "Studio Filmowe i Fotograficzne OSCAR Adam Tarnowski"
+    },
+    {
+      "id": "c00abf9e-141d-43f0-a049-dfd68ce40889",
+      "number_local": "13459\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "f58def14-15d8-4e03-b2fb-19b9b59d598e",
+      "number_local": "13783\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "83422f7b-123c-4102-be5b-24e476a33c56",
+      "number_local": "FAS/BYD/999/2026",
+      "proposed_city": "Bydgoszcz",
+      "name": "PHU BER GRZEGORZ BEREND"
+    },
+    {
+      "id": "90d0ed52-b559-4f46-a0fd-cbb36896b2ca",
+      "number_local": "3749/6/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "62fe8f2e-58cc-471d-ad80-816f7275b3e7",
+      "number_local": "39295/5/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "da01ddff-713d-416e-8768-3b9e2aa39d43",
+      "number_local": "FV/N/2026/06/051",
+      "proposed_city": "Warszawa",
+      "name": "LOCUM SPÓŁKA AKCYJNA"
+    },
+    {
+      "id": "f2c3a781-4623-4f5d-9a70-6a19d0c73f13",
+      "number_local": "1449/2026/HB",
+      "proposed_city": "Toruń",
+      "name": "Urbański Przedsiębiorstwo Budowlane Ryszard Urbański Hotel Bulwar"
+    },
+    {
+      "id": "ea80e897-3d9a-464b-8ad3-7a3bcce8b664",
+      "number_local": "13506\\FF\\1190\\2026",
+      "proposed_city": "Iława",
+      "name": "PRZEDSIĘBIORSTWO HANDLOWO-USŁUGOWE STACJA PALIW \"DUET\" M. ANACZKOWSKI, B. ANACZK"
+    },
+    {
+      "id": "0da5200f-eb58-4902-a410-becd4251157a",
+      "number_local": "FS 35/6/2026",
+      "proposed_city": "Białe Błota",
+      "name": "P.P.H.U KARO Kaczorowski Robert"
+    },
+    {
+      "id": "a55b03f3-8d57-47db-822a-d01239155ad7",
+      "number_local": "FVF/9544/2026/7",
+      "proposed_city": "Grudziądz",
+      "name": "GENERON Sp. z o.o.  BDO 000616277"
+    },
+    {
+      "id": "caa4030f-325d-4887-b74e-9e4d0bec51e7",
+      "number_local": "FV/0001/06/2026",
+      "proposed_city": "Warszawa",
+      "name": "CENTRUM J.W. TOMASZ PIEKUT"
+    },
+    {
+      "id": "ec454400-53cc-4467-ae0f-aec8207a5d35",
+      "number_local": "Faktura/332/2026/Fv",
+      "proposed_city": "Kamieńsk",
+      "name": "WRZOSOWA Wojtan S.C."
+    },
+    {
+      "id": "a35dc6ca-d463-4a4a-a91e-9210aa462103",
+      "number_local": "FVF/9094/2026/7",
+      "proposed_city": "Grudziądz",
+      "name": "GENERON Sp. z o.o.  BDO 000616277"
+    },
+    {
+      "id": "d8d1679b-8422-4104-9761-7742dfc6c6df",
+      "number_local": "F/20414917/06/26",
+      "proposed_city": "Warszawa",
+      "name": "P4 sp. z o. o."
+    },
+    {
+      "id": "4779aa8f-6990-4b2e-96d9-309931aa9956",
+      "number_local": "254/06/2026",
+      "proposed_city": "Białe Błota",
+      "name": "INTER-REST Ryszard Maciejkowski"
+    },
+    {
+      "id": "6e7ae8a7-88c9-4093-b8b7-506007a6fc72",
+      "number_local": "FA/2026/01403",
+      "proposed_city": "Rudniki,Żytniów 121A,pkt:Krakowskie Przedmieście 15. 98-300 Wieluń",
+      "name": "HANDEL OBWOŹNY ARTYKUŁAMI PRZEMYSŁOWO-MOTORYZACYJNYMI Grzegorz Pawlaczyk"
+    },
+    {
+      "id": "bccd066d-fda8-4f97-981f-da377c14f32f",
+      "number_local": "13/06/2026",
+      "proposed_city": "Gliwice",
+      "name": "Agencja Reklamy Kameleon Agnieszka Kubic"
+    },
+    {
+      "id": "b15d584c-cae8-450d-b7fb-4e29b4d1a3cd",
+      "number_local": "38183/6/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "5f6e9694-0b3e-48bb-89bc-a6cddf5b123b",
+      "number_local": "F 2480K2/2119/26",
+      "proposed_city": "Warszawa",
+      "name": "Shell Polska sp. z o.o."
+    },
+    {
+      "id": "b6110614-20ce-43ce-9c6d-ca09cfe707d7",
+      "number_local": "4P/06/2026",
+      "proposed_city": "Łochowo",
+      "name": "MILOR Jarosław Łangowski"
+    },
+    {
+      "id": "52e5cb6c-378f-4606-82cb-88bc06be47e0",
+      "number_local": "0184/06/26/F8",
+      "proposed_city": "Pelplin",
+      "name": "Wydawnictwo BERNARDINUM spółka z o.o."
+    },
+    {
+      "id": "7d77042e-3797-4ae2-89c5-49c78f9e83a8",
+      "number_local": "FVF/9148/2026/7",
+      "proposed_city": "Grudziądz",
+      "name": "GENERON Sp. z o.o.  BDO 000616277"
+    },
+    {
+      "id": "cdc96f27-9d3c-4d34-837f-a8cffbff7917",
+      "number_local": "F006910/26/06-02",
+      "proposed_city": "Mrągowo",
+      "name": "Przedsiębiorstwo Handlowo-Transportowe \"TRACOM\" Spółka z o.o."
+    },
+    {
+      "id": "e55e62fc-f349-4d84-90b5-2e27526540a5",
+      "number_local": "3291/26/160",
+      "proposed_city": "Wrocław",
+      "name": "Pieprzyk Oil Sp.z o.o."
+    },
+    {
+      "id": "a24660c9-7069-423c-ba6f-8327f008d24e",
+      "number_local": "F 10523/4424/26",
+      "proposed_city": "Płock",
+      "name": "ORLEN S.A."
+    },
+    {
+      "id": "3e7c179d-b8d3-4fb2-a647-e82865b0a411",
+      "number_local": "FVF/9923/2026/7",
+      "proposed_city": "Grudziądz",
+      "name": "GENERON Sp. z o.o.  BDO 000616277"
+    },
+    {
+      "id": "fa331dda-e0b3-4671-8fc5-7b3b3b8736a9",
+      "number_local": "F 18003/4430/26",
+      "proposed_city": "Płock",
+      "name": "ORLEN S.A."
+    },
+    {
+      "id": "90382418-2cfb-469d-8a08-98206c2bb31d",
+      "number_local": "FAS/BYD/1197/2026",
+      "proposed_city": "Bydgoszcz",
+      "name": "PHU BER GRZEGORZ BEREND"
+    },
+    {
+      "id": "5f84ed98-6617-4cfe-a0ed-7e8135c9867c",
+      "number_local": "067093/06/2026/RL/LO/PLN",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "0021580c-2830-4be4-be32-e123b2d10850",
+      "number_local": "3765/7/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "526f2eee-2d8e-429f-a09e-7fec63d6acef",
+      "number_local": "1/07/2026",
+      "proposed_city": "Mielec",
+      "name": "Lub.Nieruchomości Dariusz Luberda"
+    },
+    {
+      "id": "feba26bd-7a27-4139-b08b-d2bf0c80690b",
+      "number_local": "012878/06/2026/TO",
+      "proposed_city": "Warszawa",
+      "name": "Alior Leasing Sp. z o.o."
+    },
+    {
+      "id": "c7fa2650-f98f-4be7-952a-7a63c3d6c0b5",
+      "number_local": "FV/N/2026/07/050",
+      "proposed_city": "Warszawa",
+      "name": "LOCUM SPÓŁKA AKCYJNA"
+    },
+    {
+      "id": "0d1d04f4-6f7c-44c5-8a2a-b4ad52539b31",
+      "number_local": "1/FA/2026/00170",
+      "proposed_city": "OSIELSKO",
+      "name": "KAPCZYŃSKI MARCIN"
+    },
+    {
+      "id": "3ed116f8-48f8-4e51-950f-70ad1b39d463",
+      "number_local": "11-123157-07268",
+      "proposed_city": "Warszawa",
+      "name": "Orange Polska S.A."
+    },
+    {
+      "id": "6ce943f8-7acd-402d-a4e1-1faf58d3803d",
+      "number_local": "1/FA/2026/00177",
+      "proposed_city": "OSIELSKO",
+      "name": "KAPCZYŃSKI MARCIN"
+    },
+    {
+      "id": "4d40a502-2615-4caf-858b-55fe2e14925b",
+      "number_local": "F 5322K1/2118/26",
+      "proposed_city": "Warszawa",
+      "name": "Shell Polska sp. z o.o."
+    },
+    {
+      "id": "27e24f4f-a26c-4e88-acff-07f3648e0a3b",
+      "number_local": "FS 34/07/2026",
+      "proposed_city": "Pruszcz",
+      "name": "COMMON RAIL KOTLEWSKI SERWIS MATEUSZ KOTLEWSKI"
+    },
+    {
+      "id": "f4439168-5717-4666-8b25-19e30171da55",
+      "number_local": "F/20468055/07/26",
+      "proposed_city": "Warszawa",
+      "name": "P4 sp. z o. o."
+    },
+    {
+      "id": "706258e4-e4ba-4778-bcee-642fa9f4dbc3",
+      "number_local": "0427/07/26/F1",
+      "proposed_city": "Pelplin",
+      "name": "Wydawnictwo BERNARDINUM spółka z o.o."
+    },
+    {
+      "id": "3aff53b2-a2d9-4393-9feb-21e5dfc84fd9",
+      "number_local": "38279/7/AP/2026",
+      "proposed_city": "Warszawa",
+      "name": "Alsendo spółka z ograniczoną odpowiedzialnością"
+    },
+    {
+      "id": "24e0be86-bd5d-44b8-908e-23ab99207a34",
+      "number_local": "FV/26/162/480A",
+      "proposed_city": "Biadoliny Sufczyn",
+      "name": "Przedsiębiorstwo Produkcyjno-Usługowo-Handlowe \"TOMDEK\" Tomasz Dudek"
+    }
+  ],
+  "unresolved": [
+    {
+      "id": "059f1a1c-2f2a-4a69-8d1c-82ccc116fce9",
+      "number_local": "473/F/RBAS/26",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5541018126-20260422-4C0B4A000000-11",
+      "name": "Bosch Auto Service\nMieczysław Kluszczyński",
+      "street": "Sępia 13, Bydgoszcz 85-434",
+      "apartment_no": ""
+    },
+    {
+      "id": "be9306d2-efd1-47a6-98c4-3976bbc70d47",
+      "number_local": "345/2026",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5542405210-20260430-7061634000E6-B1",
+      "name": "PPHU \"BLACHOCAR & OLEX\" S.C. Witkowski Mirosław, Witkowska Aleksandra Stacja Kon",
+      "street": "ul. Ostróżki 12",
+      "apartment_no": "BIAŁE BŁOTA, 86-005"
+    },
+    {
+      "id": "9ff0b819-fbfe-4719-9aac-797601ab1c90",
+      "number_local": "FV/00878/2026",
+      "category": "B_NEEDS_KSEF_REFETCH",
+      "ksef_reference_number": "5541811238-20260601-884A46000002-23",
+      "name": "Stacja Kontroli Pojazdów Robert Trepka",
+      "street": "ul. Kolonijna 3",
+      "apartment_no": "Osielsko, 86-031"
+    }
+  ],
+  "apply_result": {
+    "updated": 81,
+    "unchanged": 0,
+    "errors": [],
+    "repairable_input": 81
+  },
+  "second_pass_a_repairable": 0
+}
