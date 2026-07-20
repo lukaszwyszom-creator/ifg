@@ -32,8 +32,13 @@ from ifg_guardian.modules.handoff_journal import (
     run_handoff_validate,
 )
 from ifg_guardian.modules.ifg_handoff import run_ifg_handoff_latest
+from ifg_guardian.modules.ifg_purchase_seller_city_backfill import (
+    run_purchase_seller_city_backfill,
+)
 from ifg_guardian.modules.ifg_release_evaluate import run_ifg_release_evaluate, run_ifg_release_explain
 from ifg_guardian.modules.ifg_release_plan import run_ifg_release_plan
+from ifg_guardian.modules.ifg_env_reload import run_ifg_env_reload
+from ifg_guardian.modules.ifg_smtp import run_ifg_smtp_check, run_ifg_smtp_report, run_ifg_smtp_test
 from ifg_guardian.modules.frontend import run_frontend_check
 from ifg_guardian.modules.ksef import run_ksef_check, run_ksef_sync
 from ifg_guardian.modules.production import run_prod_health, run_prod_recover
@@ -303,6 +308,75 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_doc.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_DOCTOR_*.md)")
     _add_progress_args(ifg_doc)
 
+    ifg_smtp = ifg_sub.add_parser("smtp", help="IFG SMTP diagnostics")
+    ifg_smtp_sub = ifg_smtp.add_subparsers(dest="smtp_action", required=True)
+    ifg_smtp_check = ifg_smtp_sub.add_parser("check", help="Validate production SMTP on DS723+ (default)")
+    ifg_smtp_check.add_argument("--local", action="store_true", help="Use local .env.production instead of DS723+")
+    ifg_smtp_check.add_argument("--json", action="store_true", help="JSON report")
+    ifg_smtp_check.add_argument("--markdown", action="store_true", help="Markdown report")
+    ifg_smtp_check.add_argument("--env-file", default=None, help="Local env file override (with --local)")
+    ifg_smtp_check.add_argument("--remote-host", default=None)
+    ifg_smtp_check.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_smtp_check.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_SMTP_CHECK_*.md)")
+    _add_progress_args(ifg_smtp_check)
+
+    ifg_smtp_test = ifg_smtp_sub.add_parser("test", help="Send diagnostic test mail from production config (default)")
+    ifg_smtp_test.add_argument("--local", action="store_true", help="Use local .env.production instead of DS723+")
+    ifg_smtp_test.add_argument("--yes", action="store_true", help="Confirm sending test mail")
+    ifg_smtp_test.add_argument("--dry-run", action="store_true", help="Validate only — do not send")
+    ifg_smtp_test.add_argument("--json", action="store_true", help="JSON report")
+    ifg_smtp_test.add_argument("--markdown", action="store_true", help="Markdown report")
+    ifg_smtp_test.add_argument("--env-file", default=None, help="Local env file override (with --local)")
+    ifg_smtp_test.add_argument("--remote-host", default=None)
+    ifg_smtp_test.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_smtp_test.add_argument("--report", default=None, help="Report path (default: docs/guardian/IFG_SMTP_TEST_*.md)")
+    _add_progress_args(ifg_smtp_test)
+
+    ifg_smtp_report = ifg_smtp_sub.add_parser("report", help="Generate SMTP check markdown report (DS723+ default)")
+    ifg_smtp_report.add_argument("--local", action="store_true", help="Use local .env.production instead of DS723+")
+    ifg_smtp_report.add_argument("--env-file", default=None, help="Local env file override (with --local)")
+    ifg_smtp_report.add_argument("--remote-host", default=None)
+    ifg_smtp_report.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_smtp_report.add_argument("--report", default=None, help="Report output path")
+    _add_progress_args(ifg_smtp_report)
+
+    ifg_env = ifg_sub.add_parser("env", help="IFG environment administration")
+    ifg_env_sub = ifg_env.add_subparsers(dest="env_action", required=True)
+    ifg_env_reload = ifg_env_sub.add_parser(
+        "reload",
+        help="Reload api/worker after .env.production change (no deploy/build)",
+    )
+    ifg_env_reload.add_argument("--yes", action="store_true", help="Confirm LIVE env reload")
+    ifg_env_reload.add_argument("--dry-run", action="store_true", help="Simulate env reload (no compose up)")
+    ifg_env_reload.add_argument("--json", action="store_true", help="JSON report")
+    ifg_env_reload.add_argument("--markdown", action="store_true", help="Markdown report")
+    ifg_env_reload.add_argument("--remote-host", default=None)
+    ifg_env_reload.add_argument("--remote-path", default=DEFAULT_REMOTE_PATH)
+    ifg_env_reload.add_argument(
+        "--report",
+        default=None,
+        help="Report path (default: docs/reports/YYYY-MM-DD_GWO-GUARDIAN-0079_ENV_RELOAD.md)",
+    )
+    _add_progress_args(ifg_env_reload)
+
+    ifg_purchase = ifg_sub.add_parser("purchase", help="IFG purchase invoice data workflows")
+    ifg_purchase_sub = ifg_purchase.add_subparsers(dest="purchase_action", required=True)
+    ifg_purchase_city = ifg_purchase_sub.add_parser(
+        "backfill-seller-city",
+        help="Backfill seller_snapshot.city for purchase invoices (GWO-IFG-0029)",
+    )
+    ifg_purchase_city.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write city values (default: dry-run)",
+    )
+    ifg_purchase_city.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max empty-city candidates to consider",
+    )
+
     ifg_rel = ifg_sub.add_parser("release", help="IFG release workflows")
     ifg_rel_sub = ifg_rel.add_subparsers(dest="release_action", required=True)
     ifg_plan = ifg_rel_sub.add_parser("plan", help="Build release plan (read-only)")
@@ -364,6 +438,11 @@ def build_parser() -> argparse.ArgumentParser:
     ifg_handoff_latest.add_argument("--limit", type=int, default=1, help="Max number of merged GWO task reports")
     ifg_handoff_latest.add_argument("--all", action="store_true", help="Ignore handoff state and include all reports")
     ifg_handoff_latest.add_argument("--reset", action="store_true", help="Reset handoff memory before selecting reports")
+    ifg_handoff_latest.add_argument(
+        "--report",
+        default=None,
+        help="Explicit workflow report path (skips discovery; must be a handoff candidate)",
+    )
     ifg_handoff_latest.add_argument(
         "--clipboard",
         action=argparse.BooleanOptionalAction,
@@ -591,6 +670,73 @@ def main(argv: list[str] | None = None) -> int:
         print(f"release {args.action} not implemented yet", file=sys.stderr)
         return 2
 
+    if domain == "ifg" and args.action == "smtp":
+        if getattr(args, "json", False) and getattr(args, "markdown", False):
+            print("Use either --json or --markdown, not both.", file=sys.stderr)
+            return 2
+        output_format = "json" if getattr(args, "json", False) else "markdown" if getattr(args, "markdown", False) else "terminal"
+        report = Path(args.report) if getattr(args, "report", None) else None
+        env_file = Path(args.env_file) if getattr(args, "env_file", None) else None
+        if args.smtp_action == "check":
+            return _run_with_display(
+                run_ifg_smtp_check,
+                args,
+                use_local=args.local,
+                output_format=output_format,
+                report_path=report,
+                env_file=env_file,
+                remote_host=host,
+                remote_path=args.remote_path,
+            )
+        if args.smtp_action == "test":
+            return _run_with_display(
+                run_ifg_smtp_test,
+                args,
+                assume_yes=args.yes,
+                dry_run=args.dry_run,
+                use_local=args.local,
+                output_format=output_format,
+                report_path=report,
+                env_file=env_file,
+                remote_host=host,
+                remote_path=args.remote_path,
+            )
+        if args.smtp_action == "report":
+            return _run_with_display(
+                run_ifg_smtp_report,
+                args,
+                use_local=args.local,
+                report_path=report,
+                env_file=env_file,
+                remote_host=host,
+                remote_path=args.remote_path,
+            )
+        print(f"smtp {args.smtp_action} not implemented", file=sys.stderr)
+        return 2
+
+    if domain == "ifg" and args.action == "env" and args.env_action == "reload":
+        if getattr(args, "json", False) and getattr(args, "markdown", False):
+            print("Use either --json or --markdown, not both.", file=sys.stderr)
+            return 2
+        output_format = (
+            "json"
+            if getattr(args, "json", False)
+            else "markdown"
+            if getattr(args, "markdown", False)
+            else "terminal"
+        )
+        report = Path(args.report) if getattr(args, "report", None) else None
+        return _run_with_display(
+            run_ifg_env_reload,
+            args,
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+            output_format=output_format,
+            report_path=report,
+            remote_host=host,
+            remote_path=args.remote_path,
+        )
+
     if domain == "ifg" and args.action == "doctor":
         if args.json and args.markdown:
             print("Use either --json or --markdown, not both.", file=sys.stderr)
@@ -675,7 +821,11 @@ def main(argv: list[str] | None = None) -> int:
             copy_to_clipboard=args.clipboard,
             include_all=args.all,
             reset_state=args.reset,
+            explicit_report=args.report,
         )
+
+    if domain == "ifg" and args.action == "purchase" and args.purchase_action == "backfill-seller-city":
+        return run_purchase_seller_city_backfill(apply=args.apply, limit=args.limit)
 
     if domain == "workflow" and args.action == "run":
         return _run_with_display(

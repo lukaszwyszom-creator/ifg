@@ -27,7 +27,11 @@ from app.integrations.ksef.client import (
     KSeFClientError,
     KSeFRateLimitDeferredError,
 )
-from app.integrations.ksef.xml_parser import parse_fa3_xml, purchase_items_validation_error
+from app.integrations.ksef.xml_parser import (
+    parse_fa3_xml,
+    purchase_items_validation_error,
+    purchase_seller_city_validation_error,
+)
 from app.persistence.models.ksef_session import KSeFSessionORM
 from app.persistence.repositories.invoice_repository import InvoiceRepository
 from app.persistence.repositories.ksef_sync_state_repository import KSeFSyncStateRepository
@@ -1004,6 +1008,20 @@ class KSeFSessionService:
             )
             if len(error_samples) < _MAX_ERROR_SAMPLES:
                 error_samples.append(f"{ksef_reference_number}: {items_error[:120]}")
+            if audit is not None:
+                audit.record_skipped_invalid(ksef_reference_number)
+            return "skipped_parse"
+
+        city_error = purchase_seller_city_validation_error(parsed)
+        if city_error:
+            logger.error(
+                "KSeF sync: faktura %s (nr=%s) — integralność adresu sprzedawcy: %s — pomijam zapis",
+                ksef_reference_number,
+                parsed.get("number_local"),
+                city_error,
+            )
+            if len(error_samples) < _MAX_ERROR_SAMPLES:
+                error_samples.append(f"{ksef_reference_number}: {city_error[:120]}")
             if audit is not None:
                 audit.record_skipped_invalid(ksef_reference_number)
             return "skipped_parse"

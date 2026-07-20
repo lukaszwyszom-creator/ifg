@@ -12,6 +12,11 @@ from typing import Any
 
 from lxml import etree
 
+from app.integrations.ksef.fa3_address import (
+    purchase_seller_city_integrity_error,
+    split_fa3_address_lines,
+)
+
 logger = logging.getLogger(__name__)
 
 _NS = "http://crd.gov.pl/wzor/2025/06/25/13775/"
@@ -95,14 +100,46 @@ def _parse_address(subject_el: etree._Element) -> dict[str, str]:
         addr = _first_child_by_local_name(subject_el, "Adres")
     if addr is None:
         return {}
-    return {
-        "street": _txt(_find(addr, "fa:AdresL1")) or _first_text_by_local_name(addr, "AdresL1", "Ulica"),
-        "building_no": "",
-        "apartment_no": _txt(_find(addr, "fa:AdresL2")) or _first_text_by_local_name(addr, "AdresL2", "NrLokalu"),
-        "postal_code": _txt(_find(addr, "fa:KodPocztowy")) or _first_text_by_local_name(addr, "KodPocztowy"),
-        "city": _txt(_find(addr, "fa:Miejscowosc")) or _first_text_by_local_name(addr, "Miejscowosc"),
-        "country": _txt(_find(addr, "fa:KodKraju")) or _first_text_by_local_name(addr, "KodKraju") or "PL",
-    }
+
+    adres_l1 = _txt(_find(addr, "fa:AdresL1")) or _first_text_by_local_name(addr, "AdresL1")
+    adres_l2 = _txt(_find(addr, "fa:AdresL2")) or _first_text_by_local_name(addr, "AdresL2")
+    structured_street = _first_text_by_local_name(addr, "Ulica")
+    structured_postal = _txt(_find(addr, "fa:KodPocztowy")) or _first_text_by_local_name(
+        addr, "KodPocztowy"
+    )
+    structured_city = _txt(_find(addr, "fa:Miejscowosc")) or _first_text_by_local_name(
+        addr, "Miejscowosc"
+    )
+    # Legacy NrLokalu — nie mylić z FA(3) AdresL2 (druga linia adresu).
+    structured_apartment = _first_text_by_local_name(addr, "NrLokalu")
+    country = _txt(_find(addr, "fa:KodKraju")) or _first_text_by_local_name(addr, "KodKraju") or "PL"
+
+    return split_fa3_address_lines(
+        adres_l1=adres_l1,
+        adres_l2=adres_l2,
+        structured_street=structured_street,
+        structured_postal=structured_postal,
+        structured_city=structured_city,
+        structured_apartment=structured_apartment,
+        country=country,
+    )
+
+
+def _raw_adres_lines(subject_el: etree._Element | None) -> tuple[str, str, bool]:
+    """Zwraca (AdresL1, AdresL2, czy XML ma niepuste Miejscowosc)."""
+    if subject_el is None:
+        return "", "", False
+    addr = _find(subject_el, "fa:Adres")
+    if addr is None:
+        addr = _first_child_by_local_name(subject_el, "Adres")
+    if addr is None:
+        return "", "", False
+    l1 = _txt(_find(addr, "fa:AdresL1")) or _first_text_by_local_name(addr, "AdresL1")
+    l2 = _txt(_find(addr, "fa:AdresL2")) or _first_text_by_local_name(addr, "AdresL2")
+    structured_city = _txt(_find(addr, "fa:Miejscowosc")) or _first_text_by_local_name(
+        addr, "Miejscowosc"
+    )
+    return l1, l2, bool(structured_city.strip())
 
 
 def _parse_subject(subject_el: etree._Element) -> dict[str, Any]:
@@ -350,6 +387,17 @@ def purchase_items_validation_error(parsed: dict[str, Any]) -> str | None:
     )
 
 
+def purchase_seller_city_validation_error(parsed: dict[str, Any]) -> str | None:
+    """Integralność: źródło ma miejscowość sprzedawcy, a snapshot.city jest puste."""
+    meta = parsed.get("_seller_address_raw") or {}
+    return purchase_seller_city_integrity_error(
+        seller_snapshot=parsed.get("seller_snapshot") or {},
+        adres_l1=str(meta.get("adres_l1") or ""),
+        adres_l2=str(meta.get("adres_l2") or ""),
+        structured_city_present_in_xml=bool(meta.get("structured_city")),
+    )
+
+
 def _parse_items(fa_el: etree._Element) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for idx, row_el in enumerate(_findall_fawiersz(fa_el), start=1):
@@ -458,8 +506,15 @@ def parse_fa3_xml(xml_bytes: bytes) -> dict[str, Any]:
     fa_el, sprzedawca_el, nabywca_el = _extract_required_structure(root)
     seller_snapshot = _parse_subject(sprzedawca_el)
     buyer_snapshot = _parse_subject(nabywca_el)
-    return _build_parsed_invoice_payload(
+    payload = _build_parsed_invoice_payload(
         fa_el=fa_el,
         seller_snapshot=seller_snapshot,
         buyer_snapshot=buyer_snapshot,
     )
+    l1, l2, structured_city = _raw_adres_lines(sprzedawca_el)
+    payload["_seller_address_raw"] = {
+        "adres_l1": l1,
+        "adres_l2": l2,
+        "structured_city": structured_city,
+    }
+    return payload
