@@ -5,7 +5,7 @@ handoff_id: HANDOFF-0014
 previous_handoff: HANDOFF-0013
 parent_handoff: null
 project_id: IFG
-workflow: GWO-IFG-0026
+workflow: GWO-IFG-0027
 workflow_type: IMPLEMENTATION
 status: SUCCESS
 created_at: 2026-07-20T17:13:37Z
@@ -24,7 +24,7 @@ Projekt:
 IFG
 
 Workflow:
-GWO-IFG-0026
+GWO-IFG-0027
 
 Typ:
 IMPLEMENTATION
@@ -42,7 +42,7 @@ IMPLEMENTED
 ## Streszczenie
 
 - Liczba znalezionych raportów: 1
-- Zakres GWO: GWO-IFG-0026, GWO-IFG-0027
+- Zakres GWO: GWO-IFG-0027
 - Preferencja raportów z dzisiaj: TAK
 - Scalono pliki:
   - `docs/reports/2026-07-20_GWO-IFG-0027_BUYER_POPUP_HOVER_BINDING_REGRESSION_FIX.md`

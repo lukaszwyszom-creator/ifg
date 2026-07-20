@@ -29,15 +29,24 @@ from ifg_guardian.core.report_metadata import (
 )
 
 GWO_PATTERN = re.compile(r"(GWO[-_][A-Z]+[-_]\d+[A-Z]?)", re.IGNORECASE)
-GWO_TASK_REPORT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}_GWO[-_]", re.IGNORECASE)
+# Legacy handoff candidates: dated IFG task reports only (not Guardian ops dumps).
+GWO_TASK_REPORT_NAME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}_GWO[-_]IFG([-_].+)?\.md$",
+    re.IGNORECASE,
+)
 DECISION_SECTION = '## Decyzje dla ChatGPT'
 HANDOFF_STATE_FILE = Path(".state") / "handoff.json"
+
+
+class HandoffSelectionError(Exception):
+    """Ambiguous or invalid handoff report selection."""
 
 
 @dataclass(frozen=True)
 class HandoffSelection:
     reports: list[Path]
     preferred_today: bool
+    conflict: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,7 +83,8 @@ def _is_handoff_candidate(path: Path, *, content: str | None = None) -> tuple[bo
     return _is_legacy_gwo_task_report(path), None
 
 
-def _discover_report_candidates(root: Path) -> list[Path]:
+def _discover_report_candidates(root: Path) -> list[tuple[Path, float]]:
+    """Return handoff-eligible reports sorted newest-first by created_at/mtime."""
     docs_reports = root / "docs" / "reports"
     if not docs_reports.exists():
         return []
@@ -86,8 +96,26 @@ def _discover_report_candidates(root: Path) -> list[Path]:
         if not eligible:
             continue
         candidates.append((path, report_sort_epoch(path, metadata=metadata)))
-    candidates.sort(key=lambda item: item[1], reverse=True)
-    return [path for path, _ in candidates]
+    candidates.sort(key=lambda item: (item[1], item[0].name), reverse=True)
+    return candidates
+
+
+def _filename_date_prefix(path: Path) -> str | None:
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})_", path.name)
+    return match.group(1) if match else None
+
+
+def _resolve_explicit_report(root: Path, report: str | Path) -> Path:
+    raw = Path(report)
+    path = raw if raw.is_absolute() else (root / raw)
+    if not path.is_file():
+        raise HandoffSelectionError(f"Explicit report not found: {report}")
+    eligible, _metadata = _is_handoff_candidate(path)
+    if not eligible:
+        raise HandoffSelectionError(
+            f"Explicit report is not a handoff candidate: {report}"
+        )
+    return path.resolve()
 
 
 def _state_path(root: Path) -> Path:
@@ -190,38 +218,99 @@ def select_latest_reports(
     today: date | None = None,
     limit: int = 1,
     include_all: bool = False,
+    explicit_report: str | Path | None = None,
 ) -> HandoffSelection:
-    """Return the newest unsent handoff-eligible report(s).
+    """Return the newest handoff-eligible report(s) deterministically.
 
-    Primary selection uses YAML front matter (``handoff: true``).
-    Reports without metadata fall back to legacy ``YYYY-MM-DD_GWO-*`` filenames.
+    Selection order:
+    1. Explicit ``--report`` / workflow artifact (if provided)
+    2. Newest eligible report in ``docs/reports`` (created_at, else mtime)
+    3. Never fall back to an older unsent report when a newer one was already sent
+
+    Primary eligibility uses YAML front matter (``handoff: true``).
+    Legacy fallback: ``YYYY-MM-DD_GWO-IFG*.md`` only (Guardian ops dumps excluded).
     """
-    candidates = _discover_report_candidates(root)
-    if not candidates:
+    root = root.resolve()
+    if explicit_report is not None:
+        path = _resolve_explicit_report(root, explicit_report)
+        try:
+            rel = str(path.relative_to(root))
+        except ValueError:
+            rel = str(path)
+        if not include_all:
+            sent = set(_load_handoff_state(root).get("sent_reports", []))
+            if rel in sent:
+                return HandoffSelection(reports=[], preferred_today=False)
+        stamp = _today_stamp(today)
+        today_date = today or date.today()
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HandoffSelectionError(f"Cannot read explicit report: {exc}") from exc
+        metadata = parse_report_metadata(content)
+        preferred_today = (
+            metadata_created_on(metadata.created_at, today=today_date)
+            if metadata is not None
+            else path.name.startswith(stamp)
+        )
+        return HandoffSelection(reports=[path], preferred_today=preferred_today)
+
+    ranked = _discover_report_candidates(root)
+    if not ranked:
         return HandoffSelection(reports=[], preferred_today=False)
 
-    if not include_all:
-        state = _load_handoff_state(root)
-        sent = set(state.get("sent_reports", []))
-        candidates = [p for p in candidates if str(p.relative_to(root)) not in sent]
-        if not candidates:
-            return HandoffSelection(reports=[], preferred_today=False)
+    newest_path, newest_epoch = ranked[0]
+    if len(ranked) > 1 and ranked[1][1] == newest_epoch:
+        twin = ranked[1][0]
+        return HandoffSelection(
+            reports=[],
+            preferred_today=False,
+            conflict=(
+                "Ambiguous newest report epoch: "
+                f"{newest_path.name} and {twin.name} share sort key {newest_epoch}"
+            ),
+        )
 
-    selected = candidates[: max(1, limit)]
+    if not include_all:
+        sent = set(_load_handoff_state(root).get("sent_reports", []))
+        newest_rel = str(newest_path.relative_to(root))
+        if newest_rel in sent:
+            # Do not fall back to older unsent reports — that caused historical
+            # handoffs to pick 2026-07-11 after 2026-07-20 reports were marked sent.
+            return HandoffSelection(reports=[], preferred_today=False)
+        pool = [(p, epoch) for p, epoch in ranked if str(p.relative_to(root)) not in sent]
+    else:
+        pool = ranked
+
+    if not pool:
+        return HandoffSelection(reports=[], preferred_today=False)
+
+    limit_n = max(1, limit)
+    selected_pairs = pool[:limit_n]
+    if limit_n >= 2 and len(pool) >= 2 and pool[0][1] == pool[1][1]:
+        return HandoffSelection(
+            reports=[],
+            preferred_today=False,
+            conflict=(
+                "Ambiguous report selection: "
+                f"{pool[0][0].name} and {pool[1][0].name} share sort key {pool[0][1]}"
+            ),
+        )
+
+    selected = [path for path, _epoch in selected_pairs]
     stamp = _today_stamp(today)
     today_date = today or date.today()
     preferred_today = False
-    if selected:
-        first = selected[0]
-        try:
-            content = first.read_text(encoding="utf-8")
-        except OSError:
-            content = ""
-        metadata = parse_report_metadata(content)
-        if metadata is not None:
-            preferred_today = metadata_created_on(metadata.created_at, today=today_date)
-        else:
-            preferred_today = first.name.startswith(stamp)
+    first = selected[0]
+    try:
+        content = first.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+    metadata = parse_report_metadata(content)
+    if metadata is not None:
+        preferred_today = metadata_created_on(metadata.created_at, today=today_date)
+    else:
+        preferred_today = first.name.startswith(stamp) or _filename_date_prefix(first) == stamp
     return HandoffSelection(reports=selected, preferred_today=preferred_today)
 
 
@@ -358,7 +447,11 @@ def _build_handoff_metadata(
 ) -> HandoffMetadata:
     chosen = selection.reports
     rel_paths = [str(p.relative_to(root)) for p in chosen]
-    gwo_tokens: set[str] = set()
+    # GDD-0017: workflow identity = front matter → filename → body (last resort).
+    # Never let body mentions of older GWO IDs override an explicit front-matter workflow.
+    front_matter_workflows: set[str] = set()
+    filename_tokens: set[str] = set()
+    body_tokens: set[str] = set()
     project_id = "IFG"
     for path in chosen:
         try:
@@ -368,13 +461,24 @@ def _build_handoff_metadata(
         metadata = parse_report_metadata(content)
         if metadata is not None:
             if metadata.workflow:
-                gwo_tokens.add(metadata.workflow.upper().replace("_", "-"))
+                front_matter_workflows.add(metadata.workflow.upper().replace("_", "-"))
             if metadata.project:
                 project_id = metadata.project
-        gwo_tokens.update(_extract_gwo_tokens(content))
-        gwo_tokens.update(_extract_gwo_tokens(path.name))
+        filename_tokens.update(_extract_gwo_tokens(path.name))
+        body_tokens.update(_extract_gwo_tokens(content))
 
-    workflow = sorted(gwo_tokens)[0] if gwo_tokens else "IFG-HANDOFF"
+    if len(front_matter_workflows) == 1:
+        workflow = next(iter(front_matter_workflows))
+    elif len(front_matter_workflows) > 1:
+        workflow = sorted(front_matter_workflows)[0]
+    elif len(filename_tokens) == 1:
+        workflow = next(iter(filename_tokens))
+    elif filename_tokens:
+        workflow = sorted(filename_tokens)[0]
+    elif body_tokens:
+        workflow = sorted(body_tokens)[0]
+    else:
+        workflow = "IFG-HANDOFF"
     return HandoffMetadata(
         handoff_id=0,
         previous_handoff=None,
@@ -442,16 +546,31 @@ def run_ifg_handoff_latest(
     root: Path = ROOT,
     today: date | None = None,
     parent_handoff: str | None = None,
+    explicit_report: str | Path | None = None,
 ) -> int:
     if reset_state:
         _clear_handoff_state(root)
 
-    selection = select_latest_reports(
-        root=root,
-        today=today,
-        limit=limit,
-        include_all=include_all,
-    )
+    try:
+        selection = select_latest_reports(
+            root=root,
+            today=today,
+            limit=limit,
+            include_all=include_all,
+            explicit_report=explicit_report,
+        )
+    except HandoffSelectionError as exc:
+        print(f"STATUS: FAILURE")
+        print(f"VERDICT: HANDOFF_SELECTION_FAILED")
+        print(f"Reason: {exc}")
+        return 1
+
+    if selection.conflict:
+        print("STATUS: FAILURE")
+        print("VERDICT: HANDOFF_REPORT_CONFLICT")
+        print(f"Conflict: {selection.conflict}")
+        print("Handoff journal bez zmian — nie wybrano przypadkowego raportu.")
+        return 1
 
     if not selection.reports:
         print("Brak nowych raportów do przekazania — handoff journal bez zmian.")
