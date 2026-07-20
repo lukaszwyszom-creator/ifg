@@ -43,6 +43,24 @@ from ifg_guardian.plugins.ifg.deploy_run.report import (  # noqa: E402
     render_markdown,
     render_terminal,
 )
+from ifg_guardian.plugins.ifg.deploy_decision.image_rebuild_gate import (  # noqa: E402
+    ImageRebuildDecision,
+    ImageRebuildGateResult,
+)
+
+
+def _allow_skip_gate() -> ImageRebuildGateResult:
+    return ImageRebuildGateResult(
+        decision=ImageRebuildDecision.ALLOW_SKIP,
+        reason="test: allow skip",
+        expected_revision="abc123",
+        deployed_revision="abc123",
+    )
+
+
+_GATE_PATCH_TARGET = (
+    "ifg_guardian.plugins.ifg.deploy_decision.image_gate_resolve.resolve_image_rebuild_gate"
+)
 
 
 def _sample_release_plan(*, critical: bool = False) -> ReleasePlanState:
@@ -105,6 +123,7 @@ class TestPipelineBuilder:
             "alembic upgrade",
             "compose up",
             "health check",
+            "image verify",
             "log verification",
         ]
         required = [s.action for s in pipeline if s.required and not s.skipped]
@@ -202,7 +221,7 @@ class TestReportRendering:
         state, tx = self._sample_deploy()
         md = render_markdown(state, transaction=tx)
         assert "Deploy Run" in md
-        assert "ifg.release.plan" in md
+        assert "Release plan" in md
 
     def test_json_report(self):
         state, tx = self._sample_deploy()
@@ -283,6 +302,7 @@ class TestDeployWorkflowIntegration:
 
         with (
             patch.object(ExecutionEngine, "_run_dependencies", fake_deps),
+            patch(_GATE_PATCH_TARGET, return_value=_allow_skip_gate()),
             patch("ifg_guardian.core.workflow.executors.local_executor.subprocess.run", block_mutations),
             patch("ifg_guardian.core.workflow.executors.ssh_executor.subprocess.run", block_mutations),
         ):
@@ -295,7 +315,7 @@ class TestDeployWorkflowIntegration:
 
         deploy = deploy_from_context(ctx)
         assert deploy.dry_run is True
-        assert len(deploy.steps) == 10
+        assert len(deploy.steps) == 11
         simulated = [s for s in deploy.steps if s.status == DeployStepStatus.SIMULATED]
         assert len(simulated) >= 6
 
@@ -396,6 +416,7 @@ class TestLiveDeploy:
 
         with (
             patch.object(ExecutionEngine, "_run_dependencies", self._mock_deps(plan)),
+            patch(_GATE_PATCH_TARGET, return_value=_allow_skip_gate()),
             patch("ifg_guardian.plugins.ifg.deploy_run.stages.git", side_effect=git_side_effect),
             patch.object(SSHExecutor, "capture_rollback_snapshot", return_value={"images_before": "img:1", "alembic_before": "rev1"}),
             patch.object(IntentExecutor, "execute", return_value=fake_result),

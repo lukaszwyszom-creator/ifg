@@ -40,6 +40,7 @@ class TestDeployCommandRouter:
             ("python3 scripts/ifg_guardian_frontend_artifact_gate.py remote", DeployCommandKind.ARTIFACT_GATE_REMOTE),
             ("rsync -av dist/ host:/path/", DeployCommandKind.RSYNC),
             ("docker compose -f docker/docker-compose.prod.yml build api worker", DeployCommandKind.DOCKER_BUILD),
+            ("ifg_guardian_image_verify", DeployCommandKind.IMAGE_VERIFY),
             ("docker compose -f docker/docker-compose.prod.yml up -d", DeployCommandKind.COMPOSE_UP),
             ("alembic upgrade head", DeployCommandKind.ALEMBIC),
             ("curl -sS http://127.0.0.1:8000/health", DeployCommandKind.HTTP_CHECK),
@@ -94,7 +95,10 @@ class TestDockerExecutor:
             result = docker.execute_build(intent, intent.command[2])
         assert result.ok
         remote.assert_called_once()
-        assert "build api worker" in remote.call_args[0][0]
+        script = remote.call_args[0][0]
+        assert "build --build-arg IFG_GIT_COMMIT=" in script
+        assert "api worker" in script
+        assert "IFG_GIT_COMMIT=$(git rev-parse HEAD" in script
 
 
 class TestComposeExecutor:
