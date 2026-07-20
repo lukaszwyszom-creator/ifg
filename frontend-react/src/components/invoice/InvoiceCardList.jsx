@@ -6,7 +6,7 @@ import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceActions from './InvoiceActions';
 import { getInvoiceOpenMode } from './invoiceOpenMode';
 import { getPurchaseDisplayNumber } from '../../utils/purchaseInvoiceDisplay';
-import { extractBuyerContactLines } from './buyerContact';
+import { extractBuyerContactLines, formatContractorPopupTitle } from './buyerContact';
 import styles from './InvoiceCardList.module.css';
 
 const DIRECT_REMAINING_FIELDS = [
@@ -148,8 +148,21 @@ const getContractorNip = (invoice, direction) => {
   return invoice.buyer_snapshot?.nip ?? '—';
 };
 
-function BuyerNameWithPopup({ name, snapshot }) {
+/** Snapshot kontrahenta — ten sam rekord, z którego bierze się nazwę. */
+const getContractorSnapshot = (invoice, direction) => {
+  if (direction === 'purchase') {
+    return (
+      invoice.seller_snapshot
+      ?? invoice.contractor_snapshot
+      ?? invoice.buyer_snapshot
+    );
+  }
+  return invoice.buyer_snapshot;
+};
+
+function ContractorNameWithPopup({ name, snapshot }) {
   const contactLines = extractBuyerContactLines(snapshot);
+  const popupTitle = formatContractorPopupTitle(name, snapshot);
   const wrapRef = useRef(null);
   const hideTimerRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -212,11 +225,12 @@ function BuyerNameWithPopup({ name, snapshot }) {
         className={`${styles.buyerPopup} ${styles.buyerPopupFixed}`}
         role="tooltip"
         data-buyer-popup="true"
+        data-contractor-popup="true"
         style={{ top: coords.top, left: coords.left, maxWidth: coords.maxWidth }}
         onMouseEnter={showPopup}
         onMouseLeave={scheduleHide}
       >
-        <span className={styles.buyerPopupName}>{name}</span>
+        <span className={styles.buyerPopupName}>{popupTitle}</span>
         {contactLines.length > 0 ? (
           <span className={styles.buyerPopupContacts}>
             {contactLines.map((line) => (
@@ -235,6 +249,7 @@ function BuyerNameWithPopup({ name, snapshot }) {
         ref={wrapRef}
         className={styles.buyerHoverWrap}
         data-buyer-hover-trigger="true"
+        data-contractor-hover-trigger="true"
         onMouseEnter={showPopup}
         onMouseLeave={scheduleHide}
         onFocus={showPopup}
@@ -666,23 +681,10 @@ export default function InvoiceCardList({
 
                 <div className={`${styles.cell} ${styles.invoiceCellBuyer}`}>
                   <span className={styles.label}>{contractorHeader}</span>
-                  {direction === 'sale' ? (
-                    <BuyerNameWithPopup
-                      name={contractorName}
-                      snapshot={invoice.buyer_snapshot}
-                    />
-                  ) : (
-                    <span
-                      className={`${styles.value} ${styles.buyerValue} ${styles.purchaseSellerValue}`}
-                      title={
-                        contractorName !== '—'
-                          ? contractorName
-                          : undefined
-                      }
-                    >
-                      {contractorName}
-                    </span>
-                  )}
+                  <ContractorNameWithPopup
+                    name={contractorName}
+                    snapshot={getContractorSnapshot(invoice, direction)}
+                  />
                 </div>
 
                 <div className={`${styles.cell} ${styles.invoiceCellNip}`}>

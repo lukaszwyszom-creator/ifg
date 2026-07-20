@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { buildPlnSummary, buildYtdBarHeights } from './dashboardAggregation.js';
 import { currentYearToDateRange } from './dashboardQuery.js';
-import { extractBuyerContactLines } from '../invoice/buyerContact.js';
+import { extractBuyerContactLines, formatContractorPopupTitle } from '../invoice/buyerContact.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -269,18 +269,17 @@ test('InvoiceCardList: dla zakupów obcina długi numer w kolumnie (ellipsis + t
   assert.ok(cssSrc.includes('148px'), 'brak szerszej kolumny PDF');
 });
 
-test('InvoiceCardList: dla zakupów pokazuje pełną nazwę sprzedawcy w title', () => {
+test('InvoiceCardList: dla zakupów popup Sprzedawcy zamiast natywnego title', () => {
   const jsxSrc = readFileSync(
     join(__dir, '../invoice/InvoiceCardList.jsx'),
     'utf-8',
   );
-  assert.ok(jsxSrc.includes('styles.purchaseSellerValue'), 'brak klasy purchaseSellerValue');
-  assert.ok(jsxSrc.includes('contractorName'), 'brak zmiennej contractorName');
-  assert.ok(
-    jsxSrc.includes("contractorName !== '—'")
-      && jsxSrc.includes('purchaseSellerValue')
-      && jsxSrc.includes('title={'),
-    'brak title dla pełnej nazwy sprzedawcy',
+  assert.ok(jsxSrc.includes('ContractorNameWithPopup'), 'brak popupu kontrahenta');
+  assert.ok(jsxSrc.includes('getContractorSnapshot'), 'brak snapshotu sprzedawcy');
+  assert.equal(
+    jsxSrc.includes('styles.purchaseSellerValue'),
+    false,
+    'stary title/ellipsis sprzedawcy powinien być zastąpiony popupem',
   );
 });
 
@@ -457,9 +456,17 @@ test('extractBuyerContactLines: brak kontaktu → pusta lista', () => {
   );
 });
 
-test('InvoiceCardList: popup nabywcy w sprzedaży', () => {
+test('InvoiceCardList: popup kontrahenta (nabywca i sprzedawca)', () => {
   const src = readFileSync(join(__dir, '../invoice/InvoiceCardList.jsx'), 'utf-8');
-  assert.ok(src.includes('BuyerNameWithPopup'), 'brak komponentu popup nabywcy');
+  assert.ok(src.includes('ContractorNameWithPopup'), 'brak komponentu popup kontrahenta');
+  assert.ok(src.includes('formatContractorPopupTitle'), 'brak tytułu z miejscowością');
+  assert.ok(src.includes('getContractorSnapshot'), 'brak wspólnego snapshotu nazwa+city');
   assert.ok(src.includes('extractBuyerContactLines'), 'brak ekstrakcji kontaktu');
-  assert.ok(src.includes("direction === 'sale'"), 'popup tylko dla sprzedaży');
+});
+
+test('formatContractorPopupTitle: Nazwa, Miejscowość', () => {
+  assert.equal(
+    formatContractorPopupTitle('ABC Sp. z o.o.', { city: 'Warszawa', street: 'ul. X 1' }),
+    'ABC Sp. z o.o., Warszawa',
+  );
 });

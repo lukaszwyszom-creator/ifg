@@ -1,11 +1,24 @@
 /**
- * Kontakt nabywcy z snapshotu faktury — wyłącznie pola kontaktowe.
+ * Kontakt nabywcy/sprzedawcy z snapshotu faktury — wyłącznie pola kontaktowe.
  * Bez NIP, adresu i pozostałych danych firmowych.
  */
 
 const CONTACT_KEY_RE = /^(phone|telefon|tel|mobile|komorka|komórka|email|e[_-]?mail|mail|fax|kontakt)$/i;
 
 const CONTACT_EXCLUDE_RE = /nip|regon|krs|name|street|postal|city|country|address|adres|payment|legal|voivod|county|commune|building|apartment/i;
+
+/**
+ * Tytuł popupu kontrahenta: „Nazwa, Miejscowość”.
+ * Miejscowość pochodzi z tego samego snapshotu co nazwa (pole `city`).
+ * IFG zakłada, że city zawsze jest obecne — bez fallbacków UI.
+ *
+ * @param {string} name
+ * @param {Record<string, unknown>|null|undefined} snapshot
+ * @returns {string}
+ */
+export function formatContractorPopupTitle(name, snapshot) {
+  return `${name}, ${snapshot.city}`;
+}
 
 /**
  * @param {Record<string, unknown>|null|undefined} snapshot

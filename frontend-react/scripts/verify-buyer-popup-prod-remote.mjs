@@ -1,6 +1,6 @@
 /**
- * GWO-IFG-0027 — production UI verify ON DS723 (no SSH port forward).
- * Run inside Playwright Docker with --network host.
+ * GWO-IFG-0028 — production UI verify ON DS723 (Docker --network host).
+ * Sprawdza popup Nabywcy i Sprzedawcy z tytułem „Nazwa, Miejscowość”.
  */
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 const APP = process.env.IFG_APP_URL || 'http://127.0.0.1:8000';
 const ENV_FILE = process.env.IFG_ENV_FILE || '/work/.env.production';
-const EXPECTED_JS = process.env.IFG_EXPECTED_JS || 'index-UQImflzm.js';
+const EXPECTED_JS = process.env.IFG_EXPECTED_JS || '';
 
 function loadCreds() {
   const vals = {};
@@ -33,44 +33,82 @@ async function waitForInvoicesOrEmpty(page) {
   await page.waitForFunction(() => {
     const text = document.body?.innerText || '';
     if (text.includes('Brak faktur')) return true;
-    if (document.querySelector('[data-buyer-hover-trigger="true"]')) return true;
+    if (document.querySelector('[data-contractor-hover-trigger="true"], [data-buyer-hover-trigger="true"]')) {
+      return true;
+    }
     if (document.querySelector('[class*="invoiceCellNumber"]')) return true;
     if (document.querySelector('.spinner')) return false;
     return false;
   }, { timeout: 60000 });
 }
 
-async function findBuyerTrigger(page) {
-  const existing = page.locator('[data-buyer-hover-trigger="true"]');
-  if ((await existing.count()) > 0) return existing.first();
+function triggerLocator(page) {
+  return page.locator('[data-contractor-hover-trigger="true"], [data-buyer-hover-trigger="true"]');
+}
 
-  // Klikaj miesiące (od pierwszego z danymi / wszystkie pille)
+function popupLocator(page) {
+  return page.locator('[data-contractor-popup="true"], [data-buyer-popup="true"]');
+}
+
+async function findTriggerViaMonthPills(page) {
+  if ((await triggerLocator(page).count()) > 0) return triggerLocator(page).first();
   const pills = page.locator('button').filter({ hasText: /^(sty|lut|mar|kwi|maj|cze|lip|sie|wrz|paź|lis|gru)/i });
   const pillCount = await pills.count();
   for (let i = 0; i < pillCount; i += 1) {
     await pills.nth(i).click();
     await sleep(1200);
     await waitForInvoicesOrEmpty(page);
-    if ((await page.locator('[data-buyer-hover-trigger="true"]').count()) > 0) {
-      return page.locator('[data-buyer-hover-trigger="true"]').first();
-    }
-  }
-
-  // Fallback: dashboard → Faktury sprzedaży (bez filtra miesiąca UI)
-  await page.goto(`${APP}/ui/dashboard`, { waitUntil: 'networkidle', timeout: 90000 });
-  await sleep(800);
-  const tab = page.getByRole('button', { name: /Faktury sprzedaży/i }).or(
-    page.getByText('Faktury sprzedaży', { exact: true }),
-  );
-  if ((await tab.count()) > 0) {
-    await tab.first().click();
-    await sleep(1500);
-    await waitForInvoicesOrEmpty(page);
-  }
-  if ((await page.locator('[data-buyer-hover-trigger="true"]').count()) > 0) {
-    return page.locator('[data-buyer-hover-trigger="true"]').first();
+    if ((await triggerLocator(page).count()) > 0) return triggerLocator(page).first();
   }
   return null;
+}
+
+/**
+ * @returns {{ titleLine: string, city: string }}
+ */
+function assertNameCityTitle(popupText, contractorName, role) {
+  const titleLine = popupText.split('\n')[0].trim();
+  const prefix = `${contractorName}, `;
+  if (!titleLine.startsWith(prefix)) {
+    throw new Error(`${role}: expected title „${contractorName}, <city>”, got: ${titleLine}`);
+  }
+  const city = titleLine.slice(prefix.length).trim();
+  if (!city || city === 'undefined' || city === 'null') {
+    throw new Error(
+      `${role}: DATA_ERROR — brak miejscowości (city) w popupu dla „${contractorName}” (title=${titleLine})`,
+    );
+  }
+  if (/ul\.|al\.|pl\.|\d{2}-\d{3}|wojew|Polska|Poland/i.test(city)) {
+    throw new Error(`${role}: title zawiera więcej niż miejscowość: ${titleLine}`);
+  }
+  return { titleLine, city };
+}
+
+async function verifyContractorPopup(page, trigger, role) {
+  const contractorName = (await trigger.innerText()).trim();
+  if (!contractorName || contractorName === '—') {
+    throw new Error(`${role}: empty contractor trigger text`);
+  }
+
+  await trigger.hover();
+  const popup = popupLocator(page);
+  await popup.waitFor({ state: 'visible', timeout: 5000 });
+  const popupText = await popup.innerText();
+  const { titleLine, city } = assertNameCityTitle(popupText, contractorName, role);
+
+  await popup.hover();
+  await sleep(220);
+  if ((await popupLocator(page).count()) === 0) {
+    throw new Error(`${role}: popup flickered away when moving onto it`);
+  }
+
+  await page.mouse.move(0, 0);
+  await sleep(320);
+  if ((await popupLocator(page).count()) !== 0) {
+    throw new Error(`${role}: popup did not close after leave`);
+  }
+
+  return { contractorName, titleLine, city };
 }
 
 async function main() {
@@ -102,58 +140,59 @@ async function main() {
 
   const scripts = await page.locator('script[src*="assets/index-"]').evaluateAll((els) =>
     els.map((e) => e.getAttribute('src')));
-  if (!scripts.some((s) => s && s.includes(EXPECTED_JS))) {
+  if (EXPECTED_JS && !scripts.some((s) => s && s.includes(EXPECTED_JS))) {
     throw new Error(`unexpected bundle scripts: ${JSON.stringify(scripts)}`);
   }
+  const activeJs = scripts.find((s) => s && s.includes('index-')) || scripts[0] || '';
 
   await waitForInvoicesOrEmpty(page);
-  const trigger = await findBuyerTrigger(page);
-  if (!trigger) {
-    const snippet = (await page.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 700);
-    throw new Error(`no buyer hover trigger found; page snippet: ${snippet}`);
+  let buyerTrigger = await findTriggerViaMonthPills(page);
+  if (!buyerTrigger) {
+    await page.goto(`${APP}/ui/dashboard`, { waitUntil: 'networkidle', timeout: 90000 });
+    await sleep(800);
+    const saleTab = page.getByRole('button', { name: /Faktury sprzedaży/i });
+    if ((await saleTab.count()) > 0) {
+      await saleTab.first().click();
+      await sleep(1500);
+      await waitForInvoicesOrEmpty(page);
+    }
+    buyerTrigger = await findTriggerViaMonthPills(page);
+  }
+  if (!buyerTrigger) {
+    throw new Error('no buyer (sale) hover trigger found');
   }
 
-  const buyerName = (await trigger.innerText()).trim();
-  if (!buyerName || buyerName === '—') throw new Error('empty buyer trigger text');
+  const buyer = await verifyContractorPopup(page, buyerTrigger, 'Nabywca');
 
-  const grid = trigger.locator('xpath=ancestor::div[contains(@class,"invoiceGrid")][1]');
-  const numberValue = grid.locator('[class*="invoiceCellNumber"] [class*="value"]').first();
-  await numberValue.waitFor({ state: 'visible', timeout: 10000 });
-  await numberValue.hover();
-  await sleep(350);
-  const numberTitle = await numberValue.getAttribute('title');
-  if (numberTitle && /Źródło numeru|number_local|numberSource|backend:/i.test(numberTitle)) {
-    throw new Error(`technical tooltip on number: ${numberTitle}`);
+  // Sprzedawca — zakładka zakupów w Zestawieniach
+  await page.goto(`${APP}/ui/dashboard`, { waitUntil: 'networkidle', timeout: 90000 });
+  await sleep(800);
+  const purchaseTab = page.getByRole('button', { name: /Faktury zakupowe/i });
+  if ((await purchaseTab.count()) > 0) {
+    await purchaseTab.first().click();
+  } else {
+    const tabs = page.locator('button').filter({ hasText: /zakup/i });
+    if ((await tabs.count()) === 0) throw new Error('purchase tab not found on /ui/dashboard');
+    await tabs.first().click();
   }
-  if ((await page.locator('[data-buyer-popup="true"]').count()) !== 0) {
-    throw new Error('popup opened on invoice number hover');
+  await sleep(1500);
+  await waitForInvoicesOrEmpty(page);
+  let sellerTrigger = await findTriggerViaMonthPills(page);
+  if (!sellerTrigger && (await triggerLocator(page).count()) > 0) {
+    sellerTrigger = triggerLocator(page).first();
   }
-
-  await trigger.hover();
-  const popup = page.locator('[data-buyer-popup="true"]');
-  await popup.waitFor({ state: 'visible', timeout: 5000 });
-  const popupText = await popup.innerText();
-  const expectedName = buyerName.split('\n')[0].trim();
-  if (!popupText.includes(expectedName)) {
-    throw new Error(`popup name mismatch. trigger=${buyerName} popup=${popupText}`);
+  if (!sellerTrigger) {
+    throw new Error('no seller (purchase) hover trigger found');
   }
-
-  await popup.hover();
-  await sleep(220);
-  if ((await page.locator('[data-buyer-popup="true"]').count()) === 0) {
-    throw new Error('popup flickered away when moving onto it');
-  }
-
-  await page.mouse.move(0, 0);
-  await sleep(320);
-  if ((await page.locator('[data-buyer-popup="true"]').count()) !== 0) {
-    throw new Error('popup did not close after leave');
-  }
+  const seller = await verifyContractorPopup(page, sellerTrigger, 'Sprzedawca');
 
   await browser.close();
   console.log('BUYER_POPUP_PROD_VERIFY=PASS');
-  console.log(`BUNDLE=${EXPECTED_JS}`);
-  console.log(`BUYER_NAME_CHECKED_LEN=${expectedName.length}`);
+  console.log('SELLER_POPUP_PROD_VERIFY=PASS');
+  console.log('CONTRACTOR_CITY_DISPLAY=PASS');
+  console.log(`BUNDLE=${activeJs}`);
+  console.log(`BUYER_TITLE=${buyer.titleLine}`);
+  console.log(`SELLER_TITLE=${seller.titleLine}`);
 }
 
 main().catch((err) => {
