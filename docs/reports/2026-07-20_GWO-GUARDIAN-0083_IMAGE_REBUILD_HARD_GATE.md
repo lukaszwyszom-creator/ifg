@@ -4,13 +4,14 @@ project: GUARDIAN
 workflow: GWO-GUARDIAN-0083
 handoff: true
 created_at: 2026-07-20T20:30:00Z
+updated_at: 2026-07-20T19:00:00Z
 ---
 
 # GWO-GUARDIAN-0083 — Image rebuild hard gate (deploy)
 
 **Data:** 2026-07-20  
-**Implementation Status:** SUCCESS (lokalnie; bez deployu produkcyjnego)  
-**STATUS:** SUCCESS  
+**Implementation Status:** SUCCESS  
+**STATUS:** PRODUCTION_VERIFIED  
 
 ---
 
@@ -58,11 +59,51 @@ Twardy gate: deploy **nie może** być sukcesem, jeśli kontekst obrazu zmienił
 - `tests/unit/test_guardian_deploy_executors.py`
 - `tests/unit/test_guardian_ifg_deploy_run_workflow.py`
 
-## C. Deploy
+**Commity:** `969bea3`, `c6a5dcf`, `378b5f7`, `9b4d187` (+ ten raport po weryfikacji)
 
-**Nie wdrażano na produkcję** (wymóg: najpierw testy).
+## C. Deploy (produkcja DS723+)
 
-Pierwszy produkcyjny deploy po merge **musi** przebudować API/worker (stare obrazy bez labelu → `REQUIRE_REBUILD` / post-deploy verify bez labelu → FAIL do czasu rebuildu z nowym Dockerfile).
+| Pole | Wartość |
+|------|---------|
+| Workflow | `2026-07-20T184908Z_ifg_deploy_run` |
+| Mode | LIVE |
+| Outcome | **SUCCESS** |
+| Duration | ~8m30s |
+| Push | `origin/production` `a25526e..9b4d187` |
+| Remote HEAD | `9b4d187ef83cd54f9a433d238c9d43c35198699c` |
+| Komenda | `guardian ifg deploy run --yes --allow-dirty-build` |
+
+### Hard gate — pierwszy deploy bez labeli
+
+| Krok | Status | Dowód |
+|------|--------|-------|
+| Gate reason | REQUIRE_REBUILD | „Wdrożony obraz ifg-api nie ma labelu ifg.git.commit — wymuszam rebuild (expected HEAD=9b4d187ef83c)” |
+| docker build api/worker | **EXECUTED** (nie SKIP) | ~7m10s build |
+| image verify | **EXECUTED** | `ifg.git.commit=9b4d187ef83c` `image_id=sha256:eab0e1d3c376…` |
+
+### Niezależna weryfikacja SSH (po deployu)
+
+```
+Id=sha256:eab0e1d3c3761b9d49c8c2fd70d2ac8421c0b8ea3471ab65314950edbe2d7a0f
+ifg.git.commit=9b4d187ef83cd54f9a433d238c9d43c35198699c
+oci.revision=9b4d187ef83cd54f9a433d238c9d43c35198699c
+git rev-parse HEAD=9b4d187ef83cd54f9a433d238c9d43c35198699c
+api image == worker image == ifg-api:latest Id (zgodne)
+```
+
+### Health usług
+
+| Usługa | Status |
+|--------|--------|
+| ifg-api-1 | running, **healthy** |
+| ifg-worker-1 | running (worker startuje OK) |
+| ifg-db-1 | running, **healthy** |
+| `GET /health` | `status=ok`, `environment=production`, `app_name=IFG Faktury` |
+| `GET /openapi.json` | 200 |
+| `GET /` (frontend) | 302 |
+
+Raport Guardian: `docs/guardian/IFG_DEPLOY_RUN_2026_07_20.md`  
+Transaction: `.guardian/workflows/2026-07-20T184908Z_ifg_deploy_run/transaction.json`
 
 ## D. Testy
 
@@ -74,41 +115,56 @@ Pierwszy produkcyjny deploy po merge **musi** przebudować API/worker (stare obr
 | `tests/unit/test_guardian_ifg_deploy_run_workflow.py` | **PASS** |
 | `tests/guardian_platform/test_deploy_run.py` | **PASS** (25) |
 
-**Łącznie powyższe:** 62 + 25 = **87 passed**.
+**Łącznie:** 87 passed (przed deployem).
 
 ### Macierz regresji (gate)
 
 | Scenariusz | Oczekiwane | Dowód |
 |------------|------------|--------|
-| Czyste repo, label = HEAD | `ALLOW_SKIP` | `test_clean_repo_matching_label_allows_skip` |
-| Zmiana w `app/` (committed) | `REQUIRE_REBUILD` | `test_app_change_requires_rebuild` |
-| Zmiana w `app/` + dirty | `REQUIRE_REBUILD` lub `FAIL`, nigdy `SKIP` | `test_app_change_with_dirty_tree_never_skip_*` |
-| Obraz z innym hashem | `REQUIRE_REBUILD` / post-deploy FAIL | `test_label_mismatch_*`, `test_mismatch_makes_deploy_unsuccessful` |
+| Czyste repo, label = HEAD | `ALLOW_SKIP` | unit test |
+| Zmiana w `app/` | `REQUIRE_REBUILD` | unit test |
+| Zmiana w `app/` + dirty | rebuild lub FAIL, nigdy SKIP | unit test |
+| Obraz bez / z innym hashem | REQUIRE_REBUILD / FAIL | **prod:** brak labelu → EXECUTED rebuild + verify |
 
-## E. Następny krok
+## E. Review commitów (przed push)
 
-1. Review + merge commitów GWO-GUARDIAN-0083.
-2. Pierwszy `guardian ifg deploy run` na DS723+ z oczekiwanym **docker build** (labely).
-3. Po deployu sprawdzić: `docker image inspect ifg-api:latest` → `ifg.git.commit` == remote `git rev-parse HEAD`.
+| Commit | Werdykt |
+|--------|---------|
+| `969bea3` feat gate + Dockerfile | OK — scope zgodny z celem |
+| `c6a5dcf` testy | OK — macierz scenariuszy |
+| `378b5f7` raport | OK |
+| `9b4d187` handoff | OK (dociąga też historyczne HANDOFF-0002..0013) |
+
+Gałąź: lokalne `production` == `origin/production` po push (`9b4d187`).  
+Dirty tree lokalny (docs/WIP) **nie** obejmował image-context → gate nie FAIL; `--allow-dirty-build` tylko dla policy dirty tree.
+
+## F. Następny krok
+
+Zamknięte. Kolejne deploye przy zgodnym labelu mogą SKIP docker build; zmiana image-context / mismatch labelu wymusi rebuild.
 
 ---
 
 🩷 STATUS KOŃCOWY
 
 ✅ Co działa
-- Hard gate: dirty image-context → FAIL lub REQUIRE_REBUILD, nigdy SKIP
-- Porównanie z labelami wdrożonego obrazu (nie tylko vs origin)
-- Dockerfile labely + build-arg; krok `image verify` w pipeline
-- Testy regresyjne macierzy scenariuszy — PASS
+- Hard gate wymusił rebuild przy braku labelu (nie SKIP)
+- Label `ifg.git.commit` = remote HEAD = `9b4d187…`
+- Image Id api/worker zgodne; health API/DB healthy; worker running
+- Smoke: `/health`, `/openapi.json`, `/` OK
 
 ⚠️ Znane problemy
-- Obrazy produkcyjne sprzed tego GWO nie mają labelu — pierwszy deploy wymusi rebuild
-- Lokalny doctor używa `defer_remote_verify` (SSH dopiero w deploy run)
+- Lokalny dirty tree (docs archive / WIP) nadal wymaga `--allow-dirty-build` do policy — nie omija hard gate
+- Adapter raportu „Build Actions” nadal pokazuje `docker build api/worker: NO` mimo EXECUTED w pipeline (kosmetyka raportu)
 
 ❌ Co nie działa
-- Brak (w zakresie GWO); produkcja nie była wdrażana w tym zadaniu
+- Brak w zakresie GWO
 
 ---
+
+## Technical Debt
+
+- **LOW** — docstring w `image_rebuild_gate.py` nadal wspomina GWO-GUARDIAN-0080 zamiast 0083  
+- **MEDIUM** — Decision Matrix „Build Actions” w deploy report nie mapuje kroku `docker build` pipeline → mylący `NO` przy faktycznym EXECUTED  
 
 ## Decyzje dla ChatGPT
 
@@ -117,3 +173,5 @@ Brak.
 ## Wygenerowane raporty
 
 - `docs/reports/2026-07-20_GWO-GUARDIAN-0083_IMAGE_REBUILD_HARD_GATE.md`
+- `docs/guardian/IFG_DEPLOY_RUN_2026_07_20.md`
+- `docs/handoff/HANDOFF-0017.md` (initial) / kolejny handoff po verify
