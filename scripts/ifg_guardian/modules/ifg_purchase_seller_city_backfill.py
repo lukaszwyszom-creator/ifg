@@ -11,11 +11,11 @@ import subprocess
 import sys
 
 from ifg_guardian.config import ROOT
-from ifg_guardian.core.deploy_config import load_ds723_config
+from ifg_guardian.core.deploy_config import DS723Config
 
 
 def run_purchase_seller_city_backfill(*, apply: bool = False, limit: int | None = None) -> int:
-    cfg = load_ds723_config()
+    cfg = DS723Config.from_context()
     mode = "APPLY" if apply else "DRY-RUN"
     print(f"IFG Guardian — purchase seller city backfill ({mode}) on {cfg.host}")
     print("=" * 50)
@@ -27,7 +27,7 @@ def run_purchase_seller_city_backfill(*, apply: bool = False, limit: int | None 
         py_args.extend(["--limit", str(limit)])
 
     remote_cmd = (
-        f"cd {shlex.quote(cfg.remote_path)} && "
+        f"cd {shlex.quote(cfg.repo)} && "
         f"export PATH=\"{cfg.docker_path}:$PATH\" && "
         f"docker compose -f {shlex.quote(cfg.compose_file)} exec -T api "
         + " ".join(shlex.quote(a) for a in py_args)
@@ -37,7 +37,7 @@ def run_purchase_seller_city_backfill(*, apply: bool = False, limit: int | None 
         "ssh",
         "-p",
         str(cfg.port),
-        f"{cfg.user}@{cfg.host}",
+        cfg.ssh_target,
         remote_cmd,
     ]
     print(f"Ran: {' '.join(ssh_cmd)}")
