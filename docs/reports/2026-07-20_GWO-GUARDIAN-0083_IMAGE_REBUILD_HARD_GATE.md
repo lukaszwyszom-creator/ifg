@@ -165,6 +165,7 @@ Zamknięte. Kolejne deploye przy zgodnym labelu mogą SKIP docker build; zmiana 
 
 - **LOW** — docstring w `image_rebuild_gate.py` nadal wspomina GWO-GUARDIAN-0080 zamiast 0083  
 - **MEDIUM** — Decision Matrix „Build Actions” w deploy report nie mapuje kroku `docker build` pipeline → mylący `NO` przy faktycznym EXECUTED  
+- **MEDIUM** — Label `ifg.git.commit` = pełny HEAD; commit tylko docs po deployu powoduje REQUIRE_REBUILD przy kolejnym deployu (świadomie konserwatywne; lepszy content-hash image-context poza zakresem)
 
 ## Decyzje dla ChatGPT
 
@@ -174,4 +175,5 @@ Brak.
 
 - `docs/reports/2026-07-20_GWO-GUARDIAN-0083_IMAGE_REBUILD_HARD_GATE.md`
 - `docs/guardian/IFG_DEPLOY_RUN_2026_07_20.md`
-- `docs/handoff/HANDOFF-0017.md` (initial) / kolejny handoff po verify
+- `docs/handoff/HANDOFF-0017.md` (initial)
+- `docs/handoff/HANDOFF-0018.md` (PRODUCTION_VERIFIED)
