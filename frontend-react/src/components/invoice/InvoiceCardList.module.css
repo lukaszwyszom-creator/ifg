@@ -355,37 +355,24 @@
 }
 
 .buyerPopup {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 6px);
-  z-index: 30;
   box-sizing: border-box;
   min-width: 200px;
-  max-width: min(360px, 78vw);
   padding: 10px 12px;
   background: var(--color-surface-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   white-space: normal;
-  pointer-events: none;
   display: flex;
   flex-direction: column;
   gap: 0;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(4px);
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease,
-    visibility 0.16s ease;
+  pointer-events: auto;
+  z-index: 4000;
 }
 
-.buyerHoverWrap:hover .buyerPopup,
-.buyerHoverWrap:focus-within .buyerPopup {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
+/* Portal do body — nie jest obcinany przez overflow komórek / scrollArea */
+.buyerPopupFixed {
+  position: fixed;
 }
 
 .buyerPopupName {

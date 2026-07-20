@@ -421,13 +421,21 @@ test('DashboardSummary CSS: YTD panel zintegrowany (szerokość i wspólna wysok
   assert.ok(src.includes('font-variant-numeric: tabular-nums'), 'kwoty YTD tabular-nums');
 });
 
-test('InvoiceCardList CSS: popup nabywcy z animacją i sekcją kontaktu', () => {
+test('InvoiceCardList CSS: popup nabywcy z portalem fixed (bez clip overflow)', () => {
   const css = readFileSync(join(__dir, '../invoice/InvoiceCardList.module.css'), 'utf-8');
   const jsx = readFileSync(join(__dir, '../invoice/InvoiceCardList.jsx'), 'utf-8');
-  assert.ok(css.includes('opacity: 0') && css.includes('transform: translateY(4px)'), 'brak animacji wejścia popupu');
-  assert.ok(css.includes('.buyerPopupContacts'), 'brak sekcji kontaktów');
-  assert.ok(css.includes('overflow-wrap: anywhere'), 'długie nazwy powinny się łamać');
-  assert.ok(jsx.includes('buyerPopupContacts'), 'JSX powinien owijać kontakty w buyerPopupContacts');
+  assert.ok(css.includes('.buyerPopupFixed') && css.includes('position: fixed'), 'brak fixed portal CSS');
+  assert.ok(jsx.includes('createPortal'), 'popup musi iść przez createPortal');
+  assert.ok(jsx.includes('data-buyer-hover-trigger'), 'brak triggera w komórce nabywcy');
+  assert.ok(jsx.includes('data-buyer-popup'), 'brak atrybutu data-buyer-popup');
+  assert.ok(
+    !jsx.includes('Źródło numeru:'),
+    'numer faktury nie może mieć technicznego tooltipu Źródło numeru',
+  );
+  assert.ok(
+    !jsx.includes('`Źródło numeru: ${item.numberSource}`'),
+    'title nie może ujawniać numberSource',
+  );
 });
 
 test('extractBuyerContactLines: tylko kontakt, bez NIP/adresu', () => {

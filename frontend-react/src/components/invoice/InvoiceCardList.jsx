@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import JSZip from 'jszip';
 import { invoicesApi } from '../../api/invoices';
 import { formatAmountByCurrency } from '../../utils/amountFormatting';
@@ -149,14 +150,72 @@ const getContractorNip = (invoice, direction) => {
 
 function BuyerNameWithPopup({ name, snapshot }) {
   const contactLines = extractBuyerContactLines(snapshot);
+  const wrapRef = useRef(null);
+  const hideTimerRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, maxWidth: 360 });
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current != null) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const updatePosition = () => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const maxWidth = Math.min(360, Math.max(200, window.innerWidth - 24));
+    let left = rect.left;
+    if (left + maxWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - maxWidth - 12);
+    }
+    setCoords({
+      top: rect.bottom + 6,
+      left,
+      maxWidth,
+    });
+  };
+
+  const showPopup = () => {
+    clearHideTimer();
+    updatePosition();
+    setOpen(true);
+  };
+
+  const scheduleHide = () => {
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => setOpen(false), 140);
+  };
+
+  useEffect(() => () => clearHideTimer(), []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onScrollOrResize = () => updatePosition();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [open]);
+
   if (!name || name === '—') {
     return <span className={`${styles.value} ${styles.buyerValue}`}>{name || '—'}</span>;
   }
 
-  return (
-    <span className={styles.buyerHoverWrap}>
-      <span className={`${styles.value} ${styles.buyerValue}`}>{name}</span>
-      <span className={styles.buyerPopup} role="tooltip">
+  const popup = open
+    ? createPortal(
+      <span
+        className={`${styles.buyerPopup} ${styles.buyerPopupFixed}`}
+        role="tooltip"
+        data-buyer-popup="true"
+        style={{ top: coords.top, left: coords.left, maxWidth: coords.maxWidth }}
+        onMouseEnter={showPopup}
+        onMouseLeave={scheduleHide}
+      >
         <span className={styles.buyerPopupName}>{name}</span>
         {contactLines.length > 0 ? (
           <span className={styles.buyerPopupContacts}>
@@ -165,8 +224,26 @@ function BuyerNameWithPopup({ name, snapshot }) {
             ))}
           </span>
         ) : null}
+      </span>,
+      document.body,
+    )
+    : null;
+
+  return (
+    <>
+      <span
+        ref={wrapRef}
+        className={styles.buyerHoverWrap}
+        data-buyer-hover-trigger="true"
+        onMouseEnter={showPopup}
+        onMouseLeave={scheduleHide}
+        onFocus={showPopup}
+        onBlur={scheduleHide}
+      >
+        <span className={`${styles.value} ${styles.buyerValue}`}>{name}</span>
       </span>
-    </span>
+      {popup}
+    </>
   );
 }
 
@@ -573,9 +650,9 @@ export default function InvoiceCardList({
                   <span
                     className={`${styles.value}${direction === 'purchase' ? ` ${styles.purchaseNumberValue}` : ''}`}
                     title={
-                      direction === 'purchase'
-                        ? (item.displayNumber !== 'brak numeru' ? item.displayNumber : undefined)
-                        : `Źródło numeru: ${item.numberSource}`
+                      direction === 'purchase' && item.displayNumber !== 'brak numeru'
+                        ? item.displayNumber
+                        : undefined
                     }
                   >
                     {item.displayNumber}
