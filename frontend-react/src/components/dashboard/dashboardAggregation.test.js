@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { buildPlnSummary } from './dashboardAggregation.js';
+import { buildPlnSummary, buildYtdBarHeights } from './dashboardAggregation.js';
+import { currentYearToDateRange } from './dashboardQuery.js';
+import { extractBuyerContactLines } from '../invoice/buyerContact.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -99,14 +101,18 @@ test('Sidebar: nie zawiera etykiety "Dashboard"', () => {
   );
 });
 
-test('Sidebar: zawiera etykietę "Sprzedaż / Zakup"', () => {
+test('Sidebar: zawiera etykietę "Zestawienia"', () => {
   const src = readFileSync(
     join(__dir, '../layout/Sidebar.jsx'),
     'utf-8',
   );
   assert.ok(
-    src.includes('Sprzeda\u017c / Zakup'),
-    'Sidebar powinien mieć etykietę "Sprzedaż / Zakup"',
+    src.includes("label: 'Zestawienia'"),
+    'Sidebar powinien mieć etykietę "Zestawienia"',
+  );
+  assert.ok(
+    !src.includes('Sprzeda\u017c / Zakup'),
+    'Sidebar nie powinien mieć starej etykiety "Sprzedaż / Zakup"',
   );
 });
 
@@ -145,14 +151,18 @@ test('Topbar: nie zawiera stringa "Dashboard" jako stringa tytułu', () => {
   );
 });
 
-test('Topbar: zawiera tytuł "Zestawienia: sprzedaż / zakup"', () => {
+test('Topbar: zawiera tytuł "Zestawienia"', () => {
   const src = readFileSync(
     join(__dir, '../layout/Topbar.jsx'),
     'utf-8',
   );
   assert.ok(
-    src.includes('Zestawienia: sprzeda\u017c / zakup'),
-    'Topbar powinien zawierać "Zestawienia: sprzedaż / zakup"',
+    src.includes('>Zestawienia</span>'),
+    'Topbar powinien zawierać tytuł "Zestawienia"',
+  );
+  assert.ok(
+    !src.includes('Zestawienia: sprzeda\u017c / zakup'),
+    'Topbar nie powinien zawierać starego tytułu z "sprzedaż / zakup"',
   );
 });
 
@@ -236,8 +246,8 @@ test('InvoiceCardList: dla zakupów pokazuje numer z KSeF/XML bez sekwencji IFG'
     'utf-8',
   );
   assert.ok(src.includes("direction === 'purchase'"), 'brak gałęzi purchase');
-  assert.ok(src.includes("numberSource: rawNumber ? 'ksef:P_2' : 'missing'"), 'brak źródła numeru KSeF');
-  assert.ok(src.includes("displayNumber: rawNumber || 'brak numeru'"), 'brak fallbacku brak numeru');
+  assert.ok(src.includes('getPurchaseDisplayNumber'), 'brak źródła numeru KSeF (getPurchaseDisplayNumber)');
+  assert.ok(src.includes('displayNumber'), 'brak displayNumber dla zakupów');
   assert.ok(src.includes('return b.dateTs - a.dateTs'), 'brak sortowania zakupów po dacie malejąco');
 });
 
@@ -267,7 +277,9 @@ test('InvoiceCardList: dla zakupów pokazuje pełną nazwę sprzedawcy w title',
   assert.ok(jsxSrc.includes('styles.purchaseSellerValue'), 'brak klasy purchaseSellerValue');
   assert.ok(jsxSrc.includes('contractorName'), 'brak zmiennej contractorName');
   assert.ok(
-    jsxSrc.includes("direction === 'purchase' && contractorName !== '—'"),
+    jsxSrc.includes("contractorName !== '—'")
+      && jsxSrc.includes('purchaseSellerValue')
+      && jsxSrc.includes('title={'),
     'brak title dla pełnej nazwy sprzedawcy',
   );
 });
@@ -291,25 +303,27 @@ test('SimpleView: selectedMonth steruje filtrem month i nagłówkiem sprzedaży'
   assert.ok(src.includes('Brak faktur sprzedaży w ${selectedMonthLocative}'), 'brak pustego stanu zależnego od selectedMonth');
 });
 
-test('InvoiceList: ignoruje stare odpowiedzi requestów (race condition miesiąca)', () => {
+test('InvoiceList: race condition miesiąca chroniona przez invoice pool key', () => {
   const src = readFileSync(
     join(__dir, '../invoice/InvoiceList.jsx'),
     'utf-8',
   );
-  assert.ok(src.includes('requestSeqRef'), 'brak sekwencji requestów chroniącej przed stale response');
-  assert.ok(src.includes('const requestSeq = ++requestSeqRef.current;'), 'brak inkrementacji sekwencji per request');
-  assert.ok(src.includes('if (requestSeq !== requestSeqRef.current) return;'), 'brak guardu ignorującego stary response');
-  assert.ok(src.includes('requestSeqRef.current += 1;'), 'brak unieważniania requestów przy unmount');
+  // Po migracji na invoicePool nie ma requestSeqRef — stale response
+  // jest odcinany przez osobny poolKey per zestaw filtrów + loadInvoicePool cache.
+  assert.ok(src.includes('buildInvoicePoolKey'), 'brak buildInvoicePoolKey');
+  assert.ok(src.includes('buildInvoicePoolQuery'), 'brak buildInvoicePoolQuery');
+  assert.ok(src.includes('loadInvoicePool'), 'brak loadInvoicePool');
+  assert.ok(src.includes('poolKey'), 'brak poolKey wiążącego filtry z pulą');
 });
 
-test('InvoiceList: przy filters.month odfiltrowuje odpowiedź po issue_date na ten miesiąc', () => {
+test('InvoiceList: przy filters.month odfiltrowuje pulę po issue_date', () => {
   const src = readFileSync(
     join(__dir, '../invoice/InvoiceList.jsx'),
     'utf-8',
   );
-  assert.ok(src.includes('const rawItems = Array.isArray(res?.items) ? res.items : [];'), 'brak normalizacji listy odpowiedzi');
-  assert.ok(src.includes("rawItems.filter((inv) => String(inv?.issue_date || '').slice(0, 7) === monthFilter)"), 'brak guardu filtrującego po issue_date i monthFilter');
-  assert.ok(src.includes('onItemsChange(items);'), 'onItemsChange powinno dostawać już odfiltrowane elementy');
+  assert.ok(src.includes('filterInvoicesFromPool'), 'brak filterInvoicesFromPool');
+  assert.ok(src.includes('onItemsChange(filteredItems)'), 'onItemsChange powinno dostawać już odfiltrowane elementy');
+  assert.ok(src.includes('filteredItems'), 'brak filteredItems');
 });
 
 test('VATSummary: nie mapuje nieparsowalnej stawki VAT do 0%', () => {
@@ -358,4 +372,86 @@ test('VATSummary: parsuje wariant stawki VAT_0', () => {
     src.includes('normalized.match(/-?\\d+(?:\\.\\d+)?/)'),
     'toNumericRate powinno wyciągać token liczbowy także z formatu VAT_0',
   );
+});
+
+// ── GWO-IFG-0023: YTD + rename + buyer popup ─────────────────────────────────
+
+test('currentYearToDateRange: zakres od 1 stycznia do dziś bez hardcodu roku', () => {
+  const now = new Date(2099, 6, 20); // 20 lipca 2099
+  const range = currentYearToDateRange(now);
+  assert.equal(range.from, '2099-01-01');
+  assert.equal(range.to, '2099-07-20');
+
+  const now2 = new Date(2100, 0, 5);
+  const range2 = currentYearToDateRange(now2);
+  assert.equal(range2.from, '2100-01-01');
+  assert.equal(range2.to, '2100-01-05');
+});
+
+test('buildYtdBarHeights: wspólna skala proporcjonalna', () => {
+  const h = buildYtdBarHeights(200, 100);
+  assert.equal(h.salePct, 100);
+  assert.equal(h.purchasePct, 50);
+  assert.equal(h.max, 200);
+
+  const zero = buildYtdBarHeights(0, 0);
+  assert.equal(zero.salePct, 0);
+  assert.equal(zero.purchasePct, 0);
+});
+
+test('DashboardSummary: panel YTD z paskami sale/purchase', () => {
+  const src = readFileSync(join(__dir, './DashboardSummary.jsx'), 'utf-8');
+  assert.ok(src.includes('ytdPanel'), 'brak panelu ytdPanel');
+  assert.ok(src.includes('currentYearToDateRange'), 'YTD musi używać currentYearToDateRange');
+  assert.ok(src.includes('ytdBarSale') && src.includes('ytdBarPurchase'), 'brak klas pasków');
+  assert.ok(!/\b2026\b/.test(src), 'DashboardSummary nie powinien hardcodować roku 2026');
+});
+
+test('DashboardSummary CSS: kolory pasków żółty/niebieski', () => {
+  const src = readFileSync(join(__dir, './DashboardSummary.module.css'), 'utf-8');
+  assert.ok(src.includes('.ytdBarSale') && src.includes('#d4a017'), 'pasek sprzedaży żółty');
+  assert.ok(src.includes('.ytdBarPurchase') && src.includes('#3b82f6'), 'pasek zakupu niebieski');
+  assert.ok(src.includes('.chartsRow'), 'brak layoutu chartsRow');
+});
+
+test('DashboardSummary CSS: YTD panel zintegrowany (szerokość i wspólna wysokość)', () => {
+  const src = readFileSync(join(__dir, './DashboardSummary.module.css'), 'utf-8');
+  assert.ok(src.includes('flex: 0 0 200px') || src.includes('width: 200px'), 'panel YTD powinien mieć ~200px');
+  assert.ok(src.includes('min-height: 180px'), 'wspólna wysokość obszaru pasków z wykresem');
+  assert.ok(src.includes('font-variant-numeric: tabular-nums'), 'kwoty YTD tabular-nums');
+});
+
+test('InvoiceCardList CSS: popup nabywcy z animacją i sekcją kontaktu', () => {
+  const css = readFileSync(join(__dir, '../invoice/InvoiceCardList.module.css'), 'utf-8');
+  const jsx = readFileSync(join(__dir, '../invoice/InvoiceCardList.jsx'), 'utf-8');
+  assert.ok(css.includes('opacity: 0') && css.includes('transform: translateY(4px)'), 'brak animacji wejścia popupu');
+  assert.ok(css.includes('.buyerPopupContacts'), 'brak sekcji kontaktów');
+  assert.ok(css.includes('overflow-wrap: anywhere'), 'długie nazwy powinny się łamać');
+  assert.ok(jsx.includes('buyerPopupContacts'), 'JSX powinien owijać kontakty w buyerPopupContacts');
+});
+
+test('extractBuyerContactLines: tylko kontakt, bez NIP/adresu', () => {
+  const lines = extractBuyerContactLines({
+    name: 'ACME Sp. z o.o.',
+    nip: '5250000000',
+    street: 'ul. Testowa 1',
+    city: 'Warszawa',
+    phone: '+48 123 456 789',
+    email: 'biuro@acme.example',
+  });
+  assert.deepEqual(lines, ['+48 123 456 789', 'biuro@acme.example']);
+});
+
+test('extractBuyerContactLines: brak kontaktu → pusta lista', () => {
+  assert.deepEqual(
+    extractBuyerContactLines({ name: 'ACME', nip: '5250000000', city: 'Kraków' }),
+    [],
+  );
+});
+
+test('InvoiceCardList: popup nabywcy w sprzedaży', () => {
+  const src = readFileSync(join(__dir, '../invoice/InvoiceCardList.jsx'), 'utf-8');
+  assert.ok(src.includes('BuyerNameWithPopup'), 'brak komponentu popup nabywcy');
+  assert.ok(src.includes('extractBuyerContactLines'), 'brak ekstrakcji kontaktu');
+  assert.ok(src.includes("direction === 'sale'"), 'popup tylko dla sprzedaży');
 });

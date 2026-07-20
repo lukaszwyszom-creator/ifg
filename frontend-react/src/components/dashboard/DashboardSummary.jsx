@@ -5,8 +5,13 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { useAppStore } from '../../store/useAppStore';
-import { buildPlnSummary } from './dashboardAggregation';
-import { buildInvoicePoolKey, buildInvoicePoolQuery, resolveEffectiveFilters } from './dashboardQuery';
+import { buildPlnSummary, buildYtdBarHeights } from './dashboardAggregation';
+import {
+  buildInvoicePoolKey,
+  buildInvoicePoolQuery,
+  currentYearToDateRange,
+  resolveEffectiveFilters,
+} from './dashboardQuery';
 import { formatCurrencyPLN, formatSignedCurrencyPLN } from '../../utils/amountFormatting';
 import styles from './DashboardSummary.module.css';
 
@@ -144,6 +149,7 @@ export default function DashboardSummary({ filters }) {
   // Jeden atomowy stan wykresu — eliminuje race-condition między
   // setAllSale/setAllPurchase (.then) a setChartLoading (.finally)
   const [chartLoading, setChartLoading] = useState(true);
+  const [ytdLoading, setYtdLoading] = useState(true);
 
   // Wyznacz prefix miesiąca z filtrów lub bieżący miesiąc
   // Zakres/filtrowanie zawsze liczone wspólną logiką (spójnie z VATSummary)
@@ -154,10 +160,31 @@ export default function DashboardSummary({ filters }) {
   const salePoolKey = buildInvoicePoolKey(saleQuery);
   const purchasePoolKey = buildInvoicePoolKey(purchaseQuery);
 
+  const ytdRange = useMemo(() => currentYearToDateRange(), []);
+  const ytdFilters = useMemo(
+    () => ({
+      issue_date_from: ytdRange.from,
+      issue_date_to: ytdRange.to,
+      month: '',
+      status: '',
+      contractor: '',
+    }),
+    [ytdRange.from, ytdRange.to],
+  );
+  const ytdSaleQuery = buildInvoicePoolQuery(ytdFilters, 'sale', { defaultToCurrentMonth: false });
+  const ytdPurchaseQuery = buildInvoicePoolQuery(ytdFilters, 'purchase', { defaultToCurrentMonth: false });
+  const ytdSalePoolKey = buildInvoicePoolKey(ytdSaleQuery);
+  const ytdPurchasePoolKey = buildInvoicePoolKey(ytdPurchaseQuery);
+
   const saleEntry = useAppStore((s) => s.invoicePool?.sale?.[salePoolKey]);
   const purchaseEntry = useAppStore((s) => s.invoicePool?.purchase?.[purchasePoolKey]);
   const saleLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`sale:${salePoolKey}`]));
   const purchaseLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`purchase:${purchasePoolKey}`]));
+
+  const ytdSaleEntry = useAppStore((s) => s.invoicePool?.sale?.[ytdSalePoolKey]);
+  const ytdPurchaseEntry = useAppStore((s) => s.invoicePool?.purchase?.[ytdPurchasePoolKey]);
+  const ytdSaleLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`sale:${ytdSalePoolKey}`]));
+  const ytdPurchaseLoading = useAppStore((s) => Boolean(s.invoicePoolLoading?.[`purchase:${ytdPurchasePoolKey}`]));
 
   const saleInvoices = useMemo(
     () => (Array.isArray(saleEntry?.items) ? saleEntry.items : []),
@@ -166,6 +193,14 @@ export default function DashboardSummary({ filters }) {
   const purchaseInvoices = useMemo(
     () => (Array.isArray(purchaseEntry?.items) ? purchaseEntry.items : []),
     [purchaseEntry]
+  );
+  const ytdSaleInvoices = useMemo(
+    () => (Array.isArray(ytdSaleEntry?.items) ? ytdSaleEntry.items : []),
+    [ytdSaleEntry]
+  );
+  const ytdPurchaseInvoices = useMemo(
+    () => (Array.isArray(ytdPurchaseEntry?.items) ? ytdPurchaseEntry.items : []),
+    [ytdPurchaseEntry]
   );
 
   // Etykieta okresu do prawego górnego rogu
@@ -193,7 +228,32 @@ export default function DashboardSummary({ filters }) {
     return () => { cancelled = true; };
   }, [loadInvoicePool, effectFrom, effectTo, status, contractorFilter, filters, salePoolKey, purchasePoolKey]);
 
+  // Dane YTD — niezależne od filtrów okresu (bieżący rok systemowy → dziś)
+  useEffect(() => {
+    let cancelled = false;
+    setYtdLoading(true);
+
+    Promise.all([
+      loadInvoicePool({
+        direction: 'sale',
+        filters: ytdFilters,
+        options: { defaultToCurrentMonth: false },
+      }),
+      loadInvoicePool({
+        direction: 'purchase',
+        filters: ytdFilters,
+        options: { defaultToCurrentMonth: false },
+      }),
+    ])
+      .catch(() => null)
+      .finally(() => {
+        if (!cancelled) setYtdLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [loadInvoicePool, ytdFilters, ytdSalePoolKey, ytdPurchasePoolKey]);
+
   const chartBusy = chartLoading || saleLoading || purchaseLoading;
+  const ytdBusy = ytdLoading || ytdSaleLoading || ytdPurchaseLoading;
 
   const combinedData = useMemo(() => {
     const saleMap     = buildDailyMap(saleInvoices);
@@ -210,123 +270,166 @@ export default function DashboardSummary({ filters }) {
   const saleSummary     = useMemo(() => buildPlnSummary(saleInvoices),     [saleInvoices]);
   const purchaseSummary = useMemo(() => buildPlnSummary(purchaseInvoices), [purchaseInvoices]);
 
+  const ytdSaleSummary = useMemo(() => buildPlnSummary(ytdSaleInvoices), [ytdSaleInvoices]);
+  const ytdPurchaseSummary = useMemo(() => buildPlnSummary(ytdPurchaseInvoices), [ytdPurchaseInvoices]);
+  const ytdHeights = useMemo(
+    () => buildYtdBarHeights(ytdSaleSummary.netto, ytdPurchaseSummary.netto),
+    [ytdSaleSummary.netto, ytdPurchaseSummary.netto],
+  );
+
   return (
     <div className={styles.root}>
-      {/* ---- Wykres narastający sprzedaż vs zakupy ---- */}
-      <div className={styles.chartWrap}>
-        <div className={styles.chartHeader}>
-          <h3 className={styles.chartTitle}>
-            Sprzedaż i zakupy narastająco (Netto)
-          </h3>
-          <div className={styles.chartCorner}>
-            <span className={styles.chartTopLine}>
-              <span className={styles.periodPrefix}>wybrany okres: </span>
-              <span className={styles.periodAccent}>{periodLabel}</span>
-            </span>
-            {optsLabel && (
-              <span className={styles.wybranoLabel}>wybrane opcje: {optsLabel}</span>
-            )}
-          </div>
-        </div>
-        {chartBusy ? (
-          <div className={styles.chartEmpty}><span className="spinner" /></div>
-        ) : combinedData.length === 0 ? (
-          <div className={styles.chartEmpty}>Brak faktur w wybranym okresie</div>
-        ) : (
-          <div className={styles.chartInner}>
-            <ResponsiveContainer width="100%" height={175}>
-              <AreaChart data={combinedData} margin={{ top: 8, right: 24, bottom: 0, left: 8 }}>
-                <defs>
-                  <linearGradient id="gradSale" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#d4a017" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#d4a017" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradPurchase" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.20} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#2e2e2e" strokeDasharray="4 4" vertical={false} />
-                <XAxis
-                  dataKey="fullDate"
-                  ticks={xAxisTicks}
-                  tickFormatter={(value) => formatXAxisTick(value, firstFullDate, lastFullDate, spansMultipleMonths)}
-                  tick={{ fill: '#a0a0a0', fontSize: 12 }}
-                  axisLine={{ stroke: '#2e2e2e' }}
-                  tickLine={false}
-                  interval={0}
-                />
-                <YAxis
-                  tick={{ fill: '#a0a0a0', fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => v.toLocaleString('pl-PL')}
-                  width={72}
-                />
-                <Tooltip
-                  content={<CombinedTooltip />}
-                  cursor={{ stroke: '#555', strokeWidth: 1, strokeDasharray: '4 4' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="cumSale"
-                  name="Sprzedaż"
-                  stroke="#d4a017"
-                  strokeWidth={2}
-                  fill="url(#gradSale)"
-                  dot={{ r: 5, fill: '#be9015', strokeWidth: 0 }}
-                  activeDot={{ r: 7, fill: '#be9015', strokeWidth: 0 }}
-                  isAnimationActive={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="cumPurchase"
-                  name="Zakupy"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  fill="url(#gradPurchase)"
-                  dot={{ r: 5, fill: '#3575dd', strokeWidth: 0 }}
-                  activeDot={{ r: 7, fill: '#3575dd', strokeWidth: 0 }}
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-        {!chartBusy && (
-          <div className={styles.summaryWrap}>
-            <div className={styles.summaryHeading}>W wybranym okresie:</div>
-            <div className={styles.summaryBar}>
-              <span className={styles.summarySale}>SPRZEDAŻ</span>
-              {' — '}
-              <span className={styles.summaryNetLabel}>Netto:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValueSale}`}>{formatCurrencyPLN(saleSummary.netto)}</span>
-              {' | '}
-              <span className={styles.summarySecondaryLabel}>VAT:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.vat)}</span>
-              {' | '}
-              <span className={styles.summarySecondaryLabel}>Brutto:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.brutto)}</span>
-              {' / '}
-              <span className={styles.summaryPurchase}>ZAKUP</span>
-              {' — '}
-              <span className={styles.summaryNetLabel}>Netto:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValuePurchase}`}>{formatCurrencyPLN(purchaseSummary.netto)}</span>
-              {' | '}
-              <span className={styles.summarySecondaryLabel}>VAT:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.vat)}</span>
-              {' | '}
-              <span className={styles.summarySecondaryLabel}>Brutto:</span>
-              {' '}
-              <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.brutto)}</span>
+      <div className={styles.chartsRow}>
+        {/* ---- Wykres narastający sprzedaż vs zakupy ---- */}
+        <div className={styles.chartWrap}>
+          <div className={styles.chartHeader}>
+            <h3 className={styles.chartTitle}>
+              Sprzedaż i zakupy narastająco (Netto)
+            </h3>
+            <div className={styles.chartCorner}>
+              <span className={styles.chartTopLine}>
+                <span className={styles.periodPrefix}>wybrany okres: </span>
+                <span className={styles.periodAccent}>{periodLabel}</span>
+              </span>
+              {optsLabel && (
+                <span className={styles.wybranoLabel}>wybrane opcje: {optsLabel}</span>
+              )}
             </div>
           </div>
-        )}
+          {chartBusy ? (
+            <div className={styles.chartEmpty}><span className="spinner" /></div>
+          ) : combinedData.length === 0 ? (
+            <div className={styles.chartEmpty}>Brak faktur w wybranym okresie</div>
+          ) : (
+            <div className={styles.chartInner}>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={combinedData} margin={{ top: 8, right: 20, bottom: 0, left: 4 }}>
+                  <defs>
+                    <linearGradient id="gradSale" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#d4a017" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#d4a017" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradPurchase" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.20} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#2e2e2e" strokeDasharray="4 4" vertical={false} />
+                  <XAxis
+                    dataKey="fullDate"
+                    ticks={xAxisTicks}
+                    tickFormatter={(value) => formatXAxisTick(value, firstFullDate, lastFullDate, spansMultipleMonths)}
+                    tick={{ fill: '#a0a0a0', fontSize: 12 }}
+                    axisLine={{ stroke: '#2e2e2e' }}
+                    tickLine={false}
+                    interval={0}
+                  />
+                  <YAxis
+                    tick={{ fill: '#a0a0a0', fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => v.toLocaleString('pl-PL')}
+                    width={72}
+                  />
+                  <Tooltip
+                    content={<CombinedTooltip />}
+                    cursor={{ stroke: '#555', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="cumSale"
+                    name="Sprzedaż"
+                    stroke="#d4a017"
+                    strokeWidth={2}
+                    fill="url(#gradSale)"
+                    dot={{ r: 5, fill: '#be9015', strokeWidth: 0 }}
+                    activeDot={{ r: 7, fill: '#be9015', strokeWidth: 0 }}
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="cumPurchase"
+                    name="Zakupy"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    fill="url(#gradPurchase)"
+                    dot={{ r: 5, fill: '#3575dd', strokeWidth: 0 }}
+                    activeDot={{ r: 7, fill: '#3575dd', strokeWidth: 0 }}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {!chartBusy && (
+            <div className={styles.summaryWrap}>
+              <div className={styles.summaryHeading}>W wybranym okresie:</div>
+              <div className={styles.summaryBar}>
+                <span className={styles.summarySale}>SPRZEDAŻ</span>
+                {' — '}
+                <span className={styles.summaryNetLabel}>Netto:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValueSale}`}>{formatCurrencyPLN(saleSummary.netto)}</span>
+                {' | '}
+                <span className={styles.summarySecondaryLabel}>VAT:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.vat)}</span>
+                {' | '}
+                <span className={styles.summarySecondaryLabel}>Brutto:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(saleSummary.brutto)}</span>
+                {' / '}
+                <span className={styles.summaryPurchase}>ZAKUP</span>
+                {' — '}
+                <span className={styles.summaryNetLabel}>Netto:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summaryValueBold} ${styles.summaryNetValuePurchase}`}>{formatCurrencyPLN(purchaseSummary.netto)}</span>
+                {' | '}
+                <span className={styles.summarySecondaryLabel}>VAT:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.vat)}</span>
+                {' | '}
+                <span className={styles.summarySecondaryLabel}>Brutto:</span>
+                {' '}
+                <span className={`${styles.summaryValue} ${styles.summarySecondaryValue}`}>{formatCurrencyPLN(purchaseSummary.brutto)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ---- Panel YTD: syntetyczne paski Sprzedaż / Zakup ---- */}
+        <aside className={styles.ytdPanel} aria-label="Zestawienie netto bieżącego roku">
+          <h3 className={styles.ytdTitle}>Rok bieżący (Netto)</h3>
+          <div className={styles.ytdPeriod}>
+            {toSlashDate(ytdRange.from)} – {toSlashDate(ytdRange.to)}
+          </div>
+          {ytdBusy ? (
+            <div className={styles.ytdEmpty}><span className="spinner" /></div>
+          ) : (
+            <div className={styles.ytdBars}>
+              <div className={styles.ytdCol}>
+                <div className={styles.ytdBarTrack}>
+                  <div
+                    className={`${styles.ytdBar} ${styles.ytdBarSale}`}
+                    style={{ height: `${ytdHeights.salePct}%` }}
+                  />
+                </div>
+                <div className={styles.ytdLabelSale}>Sprzedaż</div>
+                <div className={styles.ytdAmountSale}>{formatCurrencyPLN(ytdSaleSummary.netto)}</div>
+              </div>
+              <div className={styles.ytdCol}>
+                <div className={styles.ytdBarTrack}>
+                  <div
+                    className={`${styles.ytdBar} ${styles.ytdBarPurchase}`}
+                    style={{ height: `${ytdHeights.purchasePct}%` }}
+                  />
+                </div>
+                <div className={styles.ytdLabelPurchase}>Zakup</div>
+                <div className={styles.ytdAmountPurchase}>{formatCurrencyPLN(ytdPurchaseSummary.netto)}</div>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

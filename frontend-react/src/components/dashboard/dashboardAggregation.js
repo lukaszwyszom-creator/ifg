@@ -30,3 +30,21 @@ export function buildPlnSummary(invoices) {
     brutto: +brutto.toFixed(2),
   };
 }
+
+/**
+ * Wspólna skala wysokości pasków YTD (0–100).
+ * Oba paski używają tego samego maksimum (max sale/purchase).
+ */
+export function buildYtdBarHeights(saleNetto, purchaseNetto) {
+  const sale = Math.max(0, Number(saleNetto) || 0);
+  const purchase = Math.max(0, Number(purchaseNetto) || 0);
+  const max = Math.max(sale, purchase);
+  if (max <= 0) {
+    return { salePct: 0, purchasePct: 0, max };
+  }
+  return {
+    salePct: (sale / max) * 100,
+    purchasePct: (purchase / max) * 100,
+    max,
+  };
+}

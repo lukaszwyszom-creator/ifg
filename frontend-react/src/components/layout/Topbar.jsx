@@ -18,7 +18,7 @@ export default function Topbar({ onMenuToggle }) {
   );
   const pageTitles = {
     '/invoices': invoicesTitle,
-    '/dashboard': <span className={styles.pageTitleGold}>Zestawienia: sprzedaż / zakup</span>,
+    '/dashboard': <span className={styles.pageTitleGold}>Zestawienia</span>,
     '/payments': 'Płatności',
     '/stock': 'Magazyn',
   };

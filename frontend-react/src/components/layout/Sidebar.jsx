@@ -7,7 +7,7 @@ import logo from '../../assets/logo-ifg.png';
 
 const NAV_ITEMS = [
   { to: '/invoices', label: 'Faktury sprzedaży', icon: '📄' },
-  { to: '/dashboard', label: 'Sprzedaż / Zakup', icon: '📊' },
+  { to: '/dashboard', label: 'Zestawienia', icon: '📊' },
   { to: '/payments', label: 'Płatności', icon: '💳' },
   { to: '/warehouse', label: 'Magazyn', icon: '📦' },
   { to: '/settings', label: 'Ustawienia firmy', icon: '⚙️' },

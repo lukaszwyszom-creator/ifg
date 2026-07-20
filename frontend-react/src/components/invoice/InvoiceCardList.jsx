@@ -5,6 +5,7 @@ import { formatAmountByCurrency } from '../../utils/amountFormatting';
 import InvoiceActions from './InvoiceActions';
 import { getInvoiceOpenMode } from './invoiceOpenMode';
 import { getPurchaseDisplayNumber } from '../../utils/purchaseInvoiceDisplay';
+import { extractBuyerContactLines } from './buyerContact';
 import styles from './InvoiceCardList.module.css';
 
 const DIRECT_REMAINING_FIELDS = [
@@ -145,6 +146,29 @@ const getContractorNip = (invoice, direction) => {
   }
   return invoice.buyer_snapshot?.nip ?? '—';
 };
+
+function BuyerNameWithPopup({ name, snapshot }) {
+  const contactLines = extractBuyerContactLines(snapshot);
+  if (!name || name === '—') {
+    return <span className={`${styles.value} ${styles.buyerValue}`}>{name || '—'}</span>;
+  }
+
+  return (
+    <span className={styles.buyerHoverWrap}>
+      <span className={`${styles.value} ${styles.buyerValue}`}>{name}</span>
+      <span className={styles.buyerPopup} role="tooltip">
+        <span className={styles.buyerPopupName}>{name}</span>
+        {contactLines.length > 0 ? (
+          <span className={styles.buyerPopupContacts}>
+            {contactLines.map((line) => (
+              <span key={line} className={styles.buyerPopupContact}>{line}</span>
+            ))}
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
+}
 
 /**
  * Render listy faktur jako kafelków zamiast tabeli.
@@ -565,16 +589,23 @@ export default function InvoiceCardList({
 
                 <div className={`${styles.cell} ${styles.invoiceCellBuyer}`}>
                   <span className={styles.label}>{contractorHeader}</span>
-                  <span
-                    className={`${styles.value} ${styles.buyerValue}${direction === 'purchase' ? ` ${styles.purchaseSellerValue}` : ''}`}
-                    title={
-                      direction === 'purchase' && contractorName !== '—'
-                        ? contractorName
-                        : undefined
-                    }
-                  >
-                    {contractorName}
-                  </span>
+                  {direction === 'sale' ? (
+                    <BuyerNameWithPopup
+                      name={contractorName}
+                      snapshot={invoice.buyer_snapshot}
+                    />
+                  ) : (
+                    <span
+                      className={`${styles.value} ${styles.buyerValue} ${styles.purchaseSellerValue}`}
+                      title={
+                        contractorName !== '—'
+                          ? contractorName
+                          : undefined
+                      }
+                    >
+                      {contractorName}
+                    </span>
+                  )}
                 </div>
 
                 <div className={`${styles.cell} ${styles.invoiceCellNip}`}>

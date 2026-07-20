@@ -341,6 +341,80 @@
   white-space: nowrap;
 }
 
+.buyerHoverWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.buyerHoverWrap .buyerValue {
+  display: block;
+  max-width: 100%;
+  cursor: default;
+}
+
+.buyerPopup {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: min(360px, 78vw);
+  padding: 10px 12px;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  white-space: normal;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s ease;
+}
+
+.buyerHoverWrap:hover .buyerPopup,
+.buyerHoverWrap:focus-within .buyerPopup {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.buyerPopupName {
+  color: var(--color-text);
+  font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.buyerPopupContacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.buyerPopupContact {
+  color: var(--color-text-2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
 .purchaseSellerValue {
   display: block;
   max-width: 100%;

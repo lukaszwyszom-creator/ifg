@@ -5,6 +5,21 @@ export function currentMonthPrefix() {
   return `${y}-${m}`;
 }
 
+/**
+ * Zakres YTD bieżącego roku kalendarzowego systemu:
+ * od 1 stycznia aktualnego roku do dnia bieżącego (włącznie).
+ * Rok NIE jest hardcodowany — zależy od `now`.
+ */
+export function currentYearToDateRange(now = new Date()) {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return {
+    from: `${y}-01-01`,
+    to: `${y}-${m}-${d}`,
+  };
+}
+
 function monthRange(prefix) {
   const [y, m] = String(prefix || currentMonthPrefix()).split('-').map(Number);
   const lastDay = new Date(y, m, 0).getDate();
