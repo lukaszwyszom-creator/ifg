@@ -122,7 +122,12 @@ class BackendStage(_DoctorStage):
 
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         state = get_doctor_state(ctx)
-        checks = run_backend_checks(ctx.data.get("repo_audit"))
+        checks = run_backend_checks(
+            ctx.data.get("repo_audit"),
+            remote_host=state.remote_host or None,
+            remote_path=state.remote_path or None,
+            defer_remote_image_verify=True,
+        )
         add_checks(state, checks)
         return StageResult(
             status=stage_status_from_checks(checks),
@@ -168,8 +173,13 @@ class AlembicStage(_DoctorStage):
 
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         state = get_doctor_state(ctx)
-        checks = run_alembic_checks()
+        checks = run_alembic_checks(
+            remote_host=state.remote_host,
+            remote_path=state.remote_path,
+            dry_run=state.dry_run,
+        )
         add_checks(state, checks)
+        ctx.data["alembic_snapshot"] = checks
         return StageResult(
             status=stage_status_from_checks(checks),
             message=f"{len(checks)} alembic check(s)",

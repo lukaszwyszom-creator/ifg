@@ -187,6 +187,19 @@ class IntentExecutor:
         if kind == DeployCommandKind.DOCKER_BUILD:
             return self._docker.execute_build(intent, shell_cmd)
 
+        if kind == DeployCommandKind.IMAGE_VERIFY:
+            expected = None
+            rebuild_required = False
+            meta = getattr(intent, "meta", None) or {}
+            if isinstance(meta, dict):
+                expected = meta.get("expected_revision")
+                rebuild_required = bool(meta.get("rebuild_was_required"))
+            return self._docker.execute_image_verify(
+                intent,
+                expected_revision=expected,
+                rebuild_was_required=rebuild_required,
+            )
+
         if kind == DeployCommandKind.COMPOSE_UP:
             return self._compose.execute_up(intent, shell_cmd)
 

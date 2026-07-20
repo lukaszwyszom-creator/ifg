@@ -150,6 +150,19 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
         rules.append("backend_change_requires_api_worker_rebuild")
         required_actions.append("Wymagany rebuild obrazów api/worker przed produkcją.")
 
+    image_gate = check_by_id.get("backend.image_rebuild_gate")
+    if image_gate is not None and image_gate.status.value in {"FAIL", "CRITICAL"}:
+        decision = ReleaseDecisionStatus.PRODUCTION_BLOCKED
+        state.production_blocked = True
+        rules.append("image_rebuild_gate_blocks_deploy")
+        blockers.append(image_gate.message)
+        required_actions.append(
+            "Napraw image rebuild gate (zacommituj zmiany image-context lub przebuduj obraz)."
+        )
+    elif image_gate is not None and "REQUIRE_REBUILD" in (image_gate.message or "").upper():
+        rules.append("image_rebuild_gate_requires_rebuild")
+        required_actions.append("Wymagany rebuild obrazów api/worker (image rebuild gate).")
+
     block_patterns = [s.lower() for s in policy.get("non_report_untracked_block_patterns", [])]
     suspicious_untracked: list[str] = []
     normal_untracked: list[str] = []

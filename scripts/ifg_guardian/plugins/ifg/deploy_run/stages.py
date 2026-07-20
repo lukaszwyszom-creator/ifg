@@ -207,6 +207,21 @@ class BlockerStage(_DeployStage):
         else:
             state.blockers = []
 
+        # Hard gate: image-context vs deployed image (never SKIP on ambiguity).
+        from ifg_guardian.plugins.ifg.deploy_decision.image_gate_resolve import resolve_image_rebuild_gate
+        from ifg_guardian.plugins.ifg.deploy_decision.image_rebuild_gate import ImageRebuildDecision
+
+        gate = resolve_image_rebuild_gate(
+            remote_host=str(ctx.data.get("remote_host") or None),
+            remote_path=str(ctx.data.get("remote_path") or None),
+            defer_remote_verify=False,
+        )
+        ctx.data["image_rebuild_gate"] = gate
+        if gate.decision == ImageRebuildDecision.FAIL:
+            state.blockers.append(f"Image rebuild gate FAIL: {gate.reason}")
+        elif gate.decision == ImageRebuildDecision.REQUIRE_REBUILD:
+            state.warnings.append(f"Image rebuild gate: {gate.reason}")
+
         if evaluate.required_actions:
             state.warnings.extend(
                 [f"ACTION_REQUIRED: {item}" for item in evaluate.required_actions]
@@ -236,7 +251,25 @@ class BuildPipelineStage(_DeployStage):
 
         plan = ctx.data["release_plan_state"]
         remote_path = str(ctx.data.get("remote_path", DEFAULT_REMOTE_PATH))
-        state.steps = build_deploy_pipeline(plan, remote_path=remote_path)
+        gate = ctx.data.get("image_rebuild_gate")
+        force_rebuild = False
+        rebuild_reason = None
+        if gate is not None:
+            from ifg_guardian.plugins.ifg.deploy_decision.image_rebuild_gate import ImageRebuildDecision
+
+            if gate.decision == ImageRebuildDecision.REQUIRE_REBUILD:
+                force_rebuild = True
+                rebuild_reason = gate.reason
+            elif gate.decision == ImageRebuildDecision.FAIL:
+                # Should already be in blockers; keep pipeline empty of SKIP ambiguity
+                force_rebuild = True
+                rebuild_reason = gate.reason
+        state.steps = build_deploy_pipeline(
+            plan,
+            remote_path=remote_path,
+            force_docker_rebuild=force_rebuild,
+            docker_rebuild_reason=rebuild_reason,
+        )
         required = sum(1 for s in state.steps if s.required and not s.skipped)
         return StageResult(
             status=StageStatus.PASS,
@@ -259,10 +292,18 @@ class SimulateExecutionStage(Stage):
             if step.skipped or not step.required:
                 continue
             if step.command:
+                meta = None
+                if step.action == "image verify":
+                    docker_step = next((s for s in state.steps if s.action == "docker build"), None)
+                    rebuild_required = bool(
+                        docker_step and docker_step.required and not docker_step.skipped
+                    )
+                    meta = {"rebuild_was_required": rebuild_required}
                 intents.append(
                     LocalExecIntent(
                         command=["/bin/sh", "-c", step.command],
                         mutating=True,
+                        meta=meta,
                     )
                 )
         on_fail = "halt" if ctx.mode == ExecutionMode.LIVE else "continue"

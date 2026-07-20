@@ -1,5 +1,9 @@
 FROM python:3.13-slim
 
+ARG IFG_GIT_COMMIT=unknown
+LABEL ifg.git.commit="${IFG_GIT_COMMIT}" \
+      org.opencontainers.image.revision="${IFG_GIT_COMMIT}"
+
 ENV TZ=UTC \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

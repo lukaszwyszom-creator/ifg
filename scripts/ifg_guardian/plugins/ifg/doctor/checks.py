@@ -345,24 +345,110 @@ def run_frontend_checks() -> list[CheckResult]:
     return checks
 
 
-def run_backend_checks(audit: RepoAuditState | None) -> list[CheckResult]:
+def run_backend_checks(
+    audit: RepoAuditState | None,
+    *,
+    remote_host: str | None = None,
+    remote_path: str | None = None,
+    defer_remote_image_verify: bool = True,
+) -> list[CheckResult]:
+    from ifg_guardian.plugins.ifg.deploy_decision.git_scope import list_deploy_changed_files, split_deploy_changes
+    from ifg_guardian.plugins.ifg.deploy_decision.image_gate_resolve import resolve_image_rebuild_gate
+    from ifg_guardian.plugins.ifg.deploy_decision.image_rebuild_gate import ImageRebuildDecision
+    from ifg_guardian.plugins.ifg.deploy_decision.paths import dockerfile_paths
+
     group = "backend"
     checks: list[CheckResult] = []
-    if audit is None:
-        return [
+
+    dockerfile_ok = any((ROOT / path).is_file() for path in dockerfile_paths())
+    if not dockerfile_ok:
+        checks.append(
+            CheckResult(
+                "backend.dockerfile",
+                group,
+                "Dockerfile",
+                CheckStatus.FAIL,
+                "missing Dockerfile (docker/Dockerfile or Dockerfile)",
+                scope="local",
+            )
+        )
+
+    deploy_files = list_deploy_changed_files()
+    backend_files, _ = split_deploy_changes(deploy_files)
+
+    gate = resolve_image_rebuild_gate(
+        remote_host=remote_host,
+        remote_path=remote_path,
+        defer_remote_verify=defer_remote_image_verify,
+    )
+    checks.append(
+        CheckResult(
+            "backend.image_rebuild_gate",
+            group,
+            "image rebuild gate",
+            CheckStatus.FAIL if gate.is_failure else CheckStatus.PASS,
+            f"{gate.decision.value}: {gate.reason}",
+            details=list(gate.trigger_files[:12]),
+            scope="local",
+        )
+    )
+
+    if gate.is_failure:
+        checks.append(
+            CheckResult(
+                "backend.changes",
+                group,
+                "backend changes",
+                CheckStatus.FAIL,
+                gate.reason,
+                details=list(gate.trigger_files[:10]),
+                scope="local",
+            )
+        )
+        checks.append(
+            CheckResult(
+                "backend.build_required",
+                group,
+                "build required",
+                CheckStatus.FAIL,
+                "image rebuild gate blocked deploy — docker build SKIP forbidden",
+                details=list(gate.trigger_files[:10]),
+                scope="local",
+            )
+        )
+        return checks
+
+    if gate.decision == ImageRebuildDecision.REQUIRE_REBUILD:
+        trigger = gate.trigger_files or backend_files
+        checks.append(
             CheckResult(
                 "backend.changes",
                 group,
                 "backend changes",
                 CheckStatus.WARN,
-                "skipped — no audit data",
+                gate.reason,
+                details=list(trigger[:10]),
+                scope="local",
             )
-        ]
+        )
+        checks.append(
+            CheckResult(
+                "backend.build_required",
+                group,
+                "build required",
+                CheckStatus.FAIL,
+                (
+                    "rebuild api/worker required before deploy (image rebuild gate)"
+                    if dockerfile_ok
+                    else "image rebuild required but Dockerfile missing — deploy blocked"
+                ),
+                details=list(trigger[:10]),
+                scope="local",
+            )
+        )
+        return checks
 
-    backend_files = [
-        f for f in audit.files
-        if f.path.startswith("app/") or f.path.startswith("alembic/")
-    ]
+    # ALLOW_SKIP
     if not backend_files:
         checks.append(
             CheckResult(
@@ -370,30 +456,31 @@ def run_backend_checks(audit: RepoAuditState | None) -> list[CheckResult]:
                 group,
                 "backend changes",
                 CheckStatus.PASS,
-                "no pending backend/alembic changes",
+                "no backend changes vs origin/production",
+                scope="local",
             )
         )
-        return checks
-
-    high = [f.path for f in backend_files if f.risk.value in ("HIGH", "CRITICAL")]
-    status = CheckStatus.FAIL if high else CheckStatus.WARN
-    checks.append(
-        CheckResult(
-            "backend.changes",
-            group,
-            "backend changes",
-            status,
-            f"{len(backend_files)} backend/alembic change(s)",
-            details=[f.path for f in backend_files[:5]],
+    else:
+        # Backend paths poza image-context (np. worker/ bez COPY) — informacyjnie
+        checks.append(
+            CheckResult(
+                "backend.changes",
+                group,
+                "backend changes",
+                CheckStatus.WARN,
+                f"{len(backend_files)} backend change(s); image gate ALLOW_SKIP",
+                details=list(backend_files[:10]),
+                scope="local",
+            )
         )
-    )
     checks.append(
         CheckResult(
             "backend.build_required",
             group,
             "build required",
-            CheckStatus.FAIL if high else CheckStatus.WARN,
-            "rebuild api/worker required before deploy" if high else "review backend changes",
+            CheckStatus.PASS,
+            gate.reason,
+            scope="local",
         )
     )
     return checks
@@ -470,8 +557,9 @@ def run_docker_checks(*, remote_host: str, remote_path: str, dry_run: bool) -> l
                 "docker.remote",
                 group,
                 "remote docker",
-                CheckStatus.WARN,
-                f"SSH/compose check unavailable: {exc}",
+                CheckStatus.FAIL,
+                f"DS723+ unreachable: {exc}",
+                scope="remote",
             )
         )
     return checks
@@ -542,57 +630,140 @@ def run_database_checks(*, dry_run: bool) -> list[CheckResult]:
     return checks
 
 
-def run_alembic_checks() -> list[CheckResult]:
+def run_alembic_checks(
+    *,
+    remote_host: str = "",
+    remote_path: str = "",
+    dry_run: bool = False,
+) -> list[CheckResult]:
+    from ifg_guardian.plugins.ifg.deploy_decision.alembic_scope import build_alembic_deploy_snapshot
+
     group = "alembic"
     checks: list[CheckResult] = []
+    snapshot = build_alembic_deploy_snapshot(
+        remote_host=remote_host or None,
+        remote_path=remote_path or DEFAULT_REMOTE_PATH,
+        dry_run=dry_run,
+    )
 
-    current_code, current_out = _run(["alembic", "current"])
-    heads_code, heads_out = _run(["alembic", "heads"])
-
-    if current_code != 0:
-        checks.append(
-            CheckResult(
-                "alembic.current",
-                group,
-                "current",
-                CheckStatus.WARN,
-                current_out or "alembic current failed",
-            )
-        )
-    else:
-        current_rev = _extract_revision(current_out)
-        checks.append(
-            CheckResult(
-                "alembic.current",
-                group,
-                "current",
-                CheckStatus.PASS,
-                current_rev or current_out or "current revision read",
-            )
-        )
-
-    if heads_code != 0:
+    if snapshot.local_head:
         checks.append(
             CheckResult(
                 "alembic.head",
                 group,
-                "head",
+                "local head",
+                CheckStatus.PASS,
+                snapshot.local_head,
+                scope="local",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                "alembic.head",
+                group,
+                "local head",
                 CheckStatus.WARN,
-                heads_out or "alembic heads failed",
+                "alembic heads unavailable locally",
+                scope="local",
+            )
+        )
+
+    if snapshot.local_current_available:
+        checks.append(
+            CheckResult(
+                "alembic.current",
+                group,
+                "local current",
+                CheckStatus.PASS,
+                snapshot.local_current or "current revision read",
+                scope="local",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                "alembic.current",
+                group,
+                "local current",
+                CheckStatus.WARN,
+                snapshot.local_current or "local DATABASE_URL unavailable — using remote revision",
+                scope="local",
+            )
+        )
+
+    if dry_run:
+        checks.append(
+            CheckResult(
+                "alembic.remote_revision",
+                group,
+                "remote revision",
+                CheckStatus.WARN,
+                "skipped in dry-run",
+                scope="remote",
+            )
+        )
+        checks.append(
+            CheckResult(
+                "alembic.pending",
+                group,
+                "pending migration",
+                CheckStatus.WARN,
+                "remote comparison skipped in dry-run",
+                scope="remote",
             )
         )
         return checks
 
-    head_rev = _extract_revision(heads_out)
-    current_rev = _extract_revision(current_out) if current_code == 0 else ""
-    if current_rev and head_rev and current_rev != head_rev:
+    if not snapshot.remote_available:
+        checks.append(
+            CheckResult(
+                "alembic.remote_revision",
+                group,
+                "remote revision",
+                CheckStatus.FAIL,
+                snapshot.remote_error or "cannot read production revision on DS723+",
+                scope="remote",
+            )
+        )
         checks.append(
             CheckResult(
                 "alembic.pending",
                 group,
                 "pending migration",
                 CheckStatus.FAIL,
-                f"current={current_rev}, head={head_rev}",
+                "cannot verify migration state without remote revision",
+                scope="remote",
+            )
+        )
+        return checks
+
+    checks.append(
+        CheckResult(
+            "alembic.remote_revision",
+            group,
+            "remote revision",
+            CheckStatus.PASS,
+            snapshot.remote_revision or "empty",
+            scope="remote",
+        )
+    )
+
+    if snapshot.migration_required:
+        pending = snapshot.pending_revisions
+        message = (
+            f"remote={snapshot.remote_revision}, local_head={snapshot.local_head}, "
+            f"pending={', '.join(pending) if pending else 'yes'}"
+        )
+        checks.append(
+            CheckResult(
+                "alembic.pending",
+                group,
+                "pending migration",
+                CheckStatus.FAIL,
+                message,
+                details=pending,
+                scope="remote",
             )
         )
     else:
@@ -602,7 +773,8 @@ def run_alembic_checks() -> list[CheckResult]:
                 group,
                 "pending migration",
                 CheckStatus.PASS,
-                "schema at head" if head_rev else "no pending migration detected",
+                f"schema at head (remote={snapshot.remote_revision}, local={snapshot.local_head})",
+                scope="remote",
             )
         )
     return checks

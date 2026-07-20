@@ -12,6 +12,7 @@ class DeployCommandKind(str, Enum):
     ARTIFACT_GATE_LOCAL = "artifact_gate_local"
     ARTIFACT_GATE_REMOTE = "artifact_gate_remote"
     DOCKER_BUILD = "docker_build"
+    IMAGE_VERIFY = "image_verify"
     COMPOSE_UP = "compose_up"
     COMPOSE_LOGS = "compose_logs"
     ALEMBIC = "alembic"
@@ -44,6 +45,12 @@ def classify_deploy_command(shell_cmd: str) -> DeployCommandKind:
         return DeployCommandKind.ARTIFACT_GATE_REMOTE
     if re.search(r"docker compose .* build", normalized):
         return DeployCommandKind.DOCKER_BUILD
+    if (
+        "ifg_guardian_image_verify" in normalized
+        or normalized.startswith("image verify")
+        or "docker image inspect ifg-api" in normalized
+    ):
+        return DeployCommandKind.IMAGE_VERIFY
     if re.search(r"docker compose .* up", normalized):
         return DeployCommandKind.COMPOSE_UP
     if re.search(r"docker compose .* logs", normalized):

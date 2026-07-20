@@ -29,7 +29,14 @@ def _decision_required(plan: ReleasePlanState, name: str) -> bool:
     return False
 
 
-def build_deploy_pipeline(plan: ReleasePlanState, *, remote_path: str = DEFAULT_REMOTE_PATH) -> list[DeployStep]:
+def build_deploy_pipeline(
+    plan: ReleasePlanState,
+    *,
+    remote_path: str = DEFAULT_REMOTE_PATH,
+    force_docker_rebuild: bool = False,
+    docker_rebuild_reason: str | None = None,
+    image_verify_required: bool = True,
+) -> list[DeployStep]:
     """Build deployment pipeline from release plan execution plan."""
     steps_map = _plan_step_map(plan)
     pipeline: list[DeployStep] = []
@@ -105,16 +112,20 @@ def build_deploy_pipeline(plan: ReleasePlanState, *, remote_path: str = DEFAULT_
     api_step = steps_map.get("docker build api")
     worker_step = steps_map.get("docker build worker")
     docker_required = (
-        (api_step.required if api_step else False)
+        force_docker_rebuild
+        or (api_step.required if api_step else False)
         or (worker_step.required if worker_step else False)
         or _decision_required(plan, "Backend Build")
         or _decision_required(plan, "Worker Build")
     )
-    docker_reason = (
-        api_step.description if api_step and api_step.required
-        else worker_step.description if worker_step and worker_step.required
-        else "No image rebuild required"
-    )
+    if force_docker_rebuild and docker_rebuild_reason:
+        docker_reason = docker_rebuild_reason
+    else:
+        docker_reason = (
+            api_step.description if api_step and api_step.required
+            else worker_step.description if worker_step and worker_step.required
+            else "No image rebuild required"
+        )
     pipeline.append(
         DeployStep(
             order=order,
@@ -170,6 +181,19 @@ def build_deploy_pipeline(plan: ReleasePlanState, *, remote_path: str = DEFAULT_
             required=True,
             skipped=False,
             command="curl -sS http://127.0.0.1:8000/health",
+        )
+    )
+    order += 1
+
+    pipeline.append(
+        DeployStep(
+            order=order,
+            action="image verify",
+            description="Verify deployed ifg-api image Id + ifg.git.commit label",
+            reason="Hard gate: image label must match remote HEAD after deploy",
+            required=image_verify_required,
+            skipped=not image_verify_required,
+            command="ifg_guardian_image_verify",
         )
     )
     order += 1

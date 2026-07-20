@@ -59,6 +59,7 @@ _DEPLOY_ACTION_PHASE_MAP: dict[str, str] = {
     "alembic upgrade": "remote_build",
     "compose up": "restart_services",
     "health check": "health_check",
+    "image verify": "post_deploy_verification",
     "log verification": "post_deploy_verification",
 }
 
@@ -69,6 +70,7 @@ _COMMAND_KIND_PHASE_MAP: dict[str, str] = {
     "artifact_gate_local": "remote_build",
     "artifact_gate_remote": "remote_build",
     "docker_build": "remote_build",
+    "image_verify": "post_deploy_verification",
     "alembic": "remote_build",
     "compose_up": "restart_services",
     "compose_logs": "post_deploy_verification",

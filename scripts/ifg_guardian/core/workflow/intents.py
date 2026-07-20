@@ -37,6 +37,7 @@ class LocalExecIntent(ActionIntent):
     command: list[str] = field(default_factory=list)
     cwd: str | None = None
     mutating: bool = True
+    meta: dict | None = None
 
     @property
     def intent_type(self) -> str:
