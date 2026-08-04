@@ -17,7 +17,7 @@
 |------|---------|
 | BRANCH | `gwo/ifg-stock-0002c-invoice-warehouse-link` |
 | PREV_HEAD | `5d07d6b148bf9f88dce12fadd44250a6b37b4268` |
-| FINAL_HEAD | *(po commit — uzupełnić)* |
+| FINAL_HEAD | 3edcf9f1ebe35ee999ffcd83a7297fac8cc5147f |
 | Worktree | `/Users/lukasz/projekty/ifg_standalone_gwo_0002c` (izolowany od dirty `production`) |
 | Origin | `git@github.com:lukaszwyszom-creator/ifg.git` |
 | ALEMBIC BEFORE | `p6q7r8s9t0u1` |
