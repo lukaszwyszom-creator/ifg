@@ -6,6 +6,7 @@ Wydzielone z `invoice_service.py` aby oddzielić logikę finansową
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
+from uuid import UUID
 
 from app.domain.exceptions import InvalidInvoiceError
 from app.domain.models.invoice import InvoiceItem
@@ -114,6 +115,16 @@ class InvoiceTotalsCalculator:
                 )
             )
 
+            warehouse_item_id = raw.get("warehouse_item_id")
+            if warehouse_item_id is not None and warehouse_item_id != "":
+                warehouse_item_id = (
+                    warehouse_item_id
+                    if isinstance(warehouse_item_id, UUID)
+                    else UUID(str(warehouse_item_id))
+                )
+            else:
+                warehouse_item_id = None
+
             items.append(
                 InvoiceItem(
                     name=name,
@@ -126,6 +137,7 @@ class InvoiceTotalsCalculator:
                     gross_total=gross_total,
                     sort_order=idx + 1,
                     isbn=raw.get("isbn") or None,
+                    warehouse_item_id=warehouse_item_id,
                 )
             )
 

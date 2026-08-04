@@ -198,7 +198,6 @@ def build_services(session):
         contractor_repository=contractor_repo,
         contractor_override_repository=contractor_override_repo,
         audit_service=audit_service,
-        stock_service=None,
     )
     payment_service = PaymentService(
         session=session,

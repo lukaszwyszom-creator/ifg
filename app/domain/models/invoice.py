@@ -52,6 +52,8 @@ class InvoiceItem:
     # kwota VAT przeliczona na PLN (wymagana przez FA(3) gdy currency != PLN)
     vat_amount_pln: Decimal | None = None
     isbn: str | None = None
+    # Kanoniczne powiązanie z kartoteką magazynową (nullable — usługa / pozycja ręczna)
+    warehouse_item_id: UUID | None = None
 
 
 @dataclass(slots=True)

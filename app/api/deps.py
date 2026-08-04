@@ -100,10 +100,6 @@ def get_invoice_service(
         contractor_repository=ContractorRepository(session),
         contractor_override_repository=ContractorOverrideRepository(session),
         audit_service=audit_service,
-        stock_service=StockService(
-            session=session,
-            stock_repository=StockRepository(session),
-        ),
         payment_allocation_repository=PaymentAllocationRepository(session),
         settings_service=settings_service,
     )

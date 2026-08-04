@@ -26,6 +26,8 @@ def _make_item_orm():
     orm.gross_amount = Decimal("615.00")
     orm.sort_order = 1
     orm.vat_amount_pln = None
+    orm.isbn = None
+    orm.warehouse_item_id = None
     return orm
 
 

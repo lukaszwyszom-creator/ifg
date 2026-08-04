@@ -88,6 +88,7 @@ function formatPaidAmountInput(value) {
 const EMPTY_ITEM = {
   name: '',
   isbn: '',
+  warehouse_item_id: null,
   quantity: '1',
   unit: 'szt.',
   price_mode: 'net',
@@ -299,6 +300,7 @@ function normalizeInitialItems(initialItems) {
   return initialItems.map((i) => ({
     name: i.name,
     isbn: i.isbn ?? '',
+    warehouse_item_id: i.warehouse_item_id ?? null,
     quantity: String(Math.max(1, Math.round(Number(i.quantity)) || 1)),
     unit: i.unit,
     price_mode: i.price_mode ?? 'net',
@@ -460,7 +462,22 @@ function useInvoiceItems(initialItems, invoiceId) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...fields } : it)));
   };
   const applyCatalogItem = (idx, catalogItem) => {
-    updateItemFields(idx, catalogItemToLineFields(catalogItem));
+    updateItemFields(idx, {
+      ...catalogItemToLineFields(catalogItem),
+      warehouse_item_id: catalogItem.id ?? null,
+    });
+  };
+  const clearCatalogLink = (idx) => {
+    updateItem(idx, 'warehouse_item_id', null);
+  };
+  const updateItemName = (idx, val) => {
+    setItems((prev) =>
+      prev.map((it, i) =>
+        i === idx
+          ? { ...it, name: val, warehouse_item_id: null }
+          : it,
+      ),
+    );
   };
 
   const totals = useMemo(() => {
@@ -475,7 +492,9 @@ function useInvoiceItems(initialItems, invoiceId) {
     addItem,
     removeItem,
     updateItem,
+    updateItemName,
     applyCatalogItem,
+    clearCatalogLink,
     totals,
   };
 }
@@ -484,6 +503,7 @@ function mapItemsToPayload(items) {
   return items.map((it) => ({
     name: it.name,
     isbn: it.isbn || null,
+    warehouse_item_id: it.warehouse_item_id || null,
     quantity: parseQuantity(it.quantity),
     unit: it.unit || 'szt.',
     price_mode: it.price_mode === 'gross' ? 'gross' : 'net',
@@ -697,7 +717,9 @@ function ItemsSection({
   addItem,
   removeItem,
   updateItem,
+  updateItemName,
   applyCatalogItem,
+  clearCatalogLink,
   catalogItems,
   catalogLoading,
   catalogError,
@@ -732,16 +754,37 @@ function ItemsSection({
         const amounts = calcLineAmounts(it);
         const unitNetDisplay = calcUnitPriceNet(it);
         const unitGrossDisplay = calcUnitPriceGross(it);
+        const linkedCatalog = it.warehouse_item_id
+          ? catalogItems.find((c) => c.id === it.warehouse_item_id)
+          : null;
         return (
         <div key={idx} className={styles.itemRow}>
           <div className={styles.itemNameCell}>
             <ItemNameCombobox
               value={it.name}
-              onNameChange={(val) => updateItem(idx, 'name', val)}
+              onNameChange={(val) => updateItemName(idx, val)}
               onSelectCatalog={(catalogItem) => applyCatalogItem(idx, catalogItem)}
               catalogItems={catalogItems}
               catalogLoading={catalogLoading}
             />
+            {it.warehouse_item_id && (
+              <div className={styles.catalogLinkRow}>
+                <span className={styles.catalogLinkBadge}>
+                  Katalog
+                  {linkedCatalog
+                    ? `: ${ITEM_TYPE_LABELS[linkedCatalog.item_type] || linkedCatalog.item_type || 'pozycja'}`
+                    : ' (powiązano)'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => clearCatalogLink(idx)}
+                  title="Wyczyść powiązanie z katalogiem"
+                >
+                  Odłącz
+                </button>
+              </div>
+            )}
             <input
               className={`input ${styles.isbnSubInput}`}
               placeholder="ISBN (opcjonalnie)"
@@ -884,7 +927,7 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
   const [dueDatePreset, setDueDatePreset] = useState(initialDue.preset);
   const [dueDateCustom, setDueDateCustom] = useState(initialDue.custom);
   const { catalogItems, catalogLoading, catalogError } = useWarehouseCatalog();
-  const { items, addItem, removeItem, updateItem, applyCatalogItem, totals } = useInvoiceItems(initial?.items, initial?.id);
+  const { items, addItem, removeItem, updateItem, updateItemName, applyCatalogItem, clearCatalogLink, totals } = useInvoiceItems(initial?.items, initial?.id);
   const [error, setError] = useState('');
   const [paymentMethodError, setPaymentMethodError] = useState('');
   const [dueDateFieldError, setDueDateFieldError] = useState('');
@@ -1030,7 +1073,9 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
           addItem={addItem}
           removeItem={removeItem}
           updateItem={updateItem}
+          updateItemName={updateItemName}
           applyCatalogItem={applyCatalogItem}
+          clearCatalogLink={clearCatalogLink}
           catalogItems={catalogItems}
           catalogLoading={catalogLoading}
           catalogError={catalogError}

@@ -29,7 +29,7 @@ from app.services.audit_service import AuditService
 from app.services.settings_service import SettingsService
 from app.services.invoice_number_policy import InvoiceNumberPolicy
 from app.services.invoice_totals import InvoiceTotalsCalculator
-from app.services.stock_service import StockService
+from app.persistence.models.warehouse_item import WarehouseItemORM
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,6 @@ class InvoiceService:
         contractor_repository: ContractorRepository,
         contractor_override_repository: ContractorOverrideRepository,
         audit_service: AuditService,
-        stock_service: StockService | None = None,
         payment_allocation_repository: PaymentAllocationRepository | None = None,
         settings_service: SettingsService | None = None,
     ) -> None:
@@ -56,7 +55,6 @@ class InvoiceService:
         self.contractor_repository = contractor_repository
         self.contractor_override_repository = contractor_override_repository
         self.audit_service = audit_service
-        self.stock_service = stock_service
         self.payment_allocation_repository = payment_allocation_repository
         self.settings_service = settings_service
 
@@ -129,6 +127,7 @@ class InvoiceService:
             seller_snapshot = counterparty_snapshot
             buyer_snapshot = company_snapshot
         items = InvoiceTotalsCalculator.build_items(raw_items)
+        self._validate_warehouse_item_refs(items)
         total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
         currency = data.get("currency", "PLN")
@@ -196,17 +195,8 @@ class InvoiceService:
             },
         )
 
-        if self.stock_service is not None:
-            self.stock_service.handle_invoice_created(
-                invoice_id=saved.id,
-                direction=saved.direction,
-                items=[
-                    {"product_id": item.product_id, "quantity": item.quantity}
-                    for item in saved.items
-                    if hasattr(item, "product_id")
-                ],
-            )
-
+        # Etap 1 (GWO-IFG-STOCK-0002C): faktura NIE zmienia stanu magazynu
+        # i NIE tworzy PZ/WZ / stock_movements. Jawny przepływ → 0002D.
         return saved
 
     def get_invoice(self, invoice_id: UUID) -> Invoice:
@@ -280,6 +270,7 @@ class InvoiceService:
             raise InvalidInvoiceError("Pole 'direction' musi mieć wartość: sale albo purchase.")
 
         items = InvoiceTotalsCalculator.build_items(raw_items)
+        self._validate_warehouse_item_refs(items)
         total_net, total_vat, total_gross = InvoiceTotalsCalculator.calculate_totals(items)
 
         invoice.issue_date = issue_date
@@ -693,6 +684,33 @@ class InvoiceService:
                 f"Termin płatności nie może być późniejszy niż {_MAX_PAYMENT_DUE_DAYS} dni "
                 "od daty wystawienia."
             )
+
+    def _validate_warehouse_item_refs(self, items: list) -> None:
+        """Waliduje FK InvoiceItem → WarehouseItem (bez efektów magazynowych).
+
+        NULL jest dozwolone (usługa / pozycja ręczna).
+        Nie-null musi wskazywać istniejący, aktywny element katalogu.
+        Historyczne faktury z później dezaktywowanym elementem pozostają czytelne
+        przy GET — walidacja dotyczy wyłącznie zapisu create/update.
+        """
+        from app.domain.models.invoice import InvoiceItem as _InvoiceItem
+
+        for idx, item in enumerate(items, start=1):
+            if not isinstance(item, _InvoiceItem):
+                continue
+            wid = item.warehouse_item_id
+            if wid is None:
+                continue
+            orm = self.session.get(WarehouseItemORM, wid)
+            if orm is None:
+                raise InvalidInvoiceError(
+                    f"Pozycja {idx}: warehouse_item_id={wid} nie istnieje w katalogu magazynu."
+                )
+            if not orm.is_active:
+                raise InvalidInvoiceError(
+                    f"Pozycja {idx}: element katalogu {wid} jest nieaktywny "
+                    "i nie może zostać wybrany na nowej pozycji faktury."
+                )
 
     def _resolve_buyer_snapshot(self, buyer_id: UUID) -> dict:
         contractor = self.contractor_repository.get_by_id(buyer_id)

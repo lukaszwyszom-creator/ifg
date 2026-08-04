@@ -25,5 +25,11 @@ class InvoiceItemORM(Base):
     # Kwota VAT przeliczona na PLN — wymagana przez FA(3) gdy currency != PLN (P_14_xW)
     vat_amount_pln: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     isbn: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    warehouse_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("warehouse_items.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     invoice = relationship("InvoiceORM", back_populates="items")

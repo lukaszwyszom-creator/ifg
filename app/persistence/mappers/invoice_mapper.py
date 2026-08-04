@@ -248,6 +248,7 @@ class InvoiceMapper:
             sort_order=orm.sort_order,
             vat_amount_pln=orm.vat_amount_pln,
             isbn=orm.isbn,
+            warehouse_item_id=orm.warehouse_item_id,
         )
 
     @staticmethod
@@ -266,6 +267,7 @@ class InvoiceMapper:
             sort_order=item.sort_order,
             vat_amount_pln=item.vat_amount_pln,
             isbn=item.isbn,
+            warehouse_item_id=item.warehouse_item_id,
         )
 
     @staticmethod

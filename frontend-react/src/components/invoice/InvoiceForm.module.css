@@ -366,6 +366,18 @@
   color: var(--color-text-secondary) !important;
 }
 
+.catalogLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.catalogLinkBadge {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
 .totals {
   display: flex;
   gap: 24px;

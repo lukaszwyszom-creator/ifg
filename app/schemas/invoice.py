@@ -17,6 +17,7 @@ class InvoiceItemInput(BaseModel):
     price_mode: str = "net"
     unit_price_gross: Decimal | None = None
     isbn: str | None = None
+    warehouse_item_id: UUID | None = None
 
 
 class InvoiceCreateRequest(BaseModel):
@@ -62,6 +63,7 @@ class InvoiceItemResponse(BaseModel):
     gross_total: Decimal
     sort_order: int
     isbn: str | None = None
+    warehouse_item_id: UUID | None = None
 
     @classmethod
     def from_domain(cls, item: InvoiceItem) -> "InvoiceItemResponse":
@@ -77,6 +79,7 @@ class InvoiceItemResponse(BaseModel):
             gross_total=item.gross_total,
             sort_order=item.sort_order,
             isbn=item.isbn,
+            warehouse_item_id=item.warehouse_item_id,
         )
 
 
