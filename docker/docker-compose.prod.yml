@@ -62,7 +62,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    command: ["sh", "-c", "python -m app.worker"]
+    # PID1 = python (nie shell): śmierć workera = exit kontenera + restart: always
+    command: ["python", "-m", "app.worker"]
     env_file:
       - ../.env.production
     environment:
@@ -73,6 +74,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Wykrywa stan "Up bez procesu app.worker" (zombie / pusty cgroup) jako unhealthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib,sys; ok=False\ntry:\n  for p in pathlib.Path('/proc').iterdir():\n    if not p.name.isdigit():\n      continue\n    try:\n      c=(p/'cmdline').read_bytes().replace(bytes([0]), b' ')\n    except Exception:\n      continue\n    if b'app.worker' in c:\n      ok=True\n      break\nexcept Exception:\n  ok=False\nsys.exit(0 if ok else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     networks:
       - ifg_prod
 
