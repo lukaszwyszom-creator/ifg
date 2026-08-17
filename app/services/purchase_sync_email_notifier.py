@@ -8,12 +8,13 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.domain.enums import KSeFOperationType, KSeFSeverity
 from app.integrations.email.smtp_client import SmtpConfig, SmtpSendError, send_email
 from app.persistence.models.invoice import InvoiceORM
+from app.persistence.models.invoice_item import InvoiceItemORM
 from app.persistence.models.purchase_sync_notification import PurchaseSyncNotificationORM
 from app.persistence.repositories.purchase_sync_notification_repository import (
     PurchaseSyncNotificationRepository,
@@ -31,6 +32,9 @@ logger = logging.getLogger(__name__)
 _EMAIL_SUBJECT = "IFG — nowe faktury zakupowe z KSeF"
 
 
+_ITEM_TITLE_MAX_LEN = 80
+
+
 @dataclass(frozen=True)
 class InvoiceEmailLine:
     counterparty: str
@@ -38,6 +42,8 @@ class InvoiceEmailLine:
     issue_date: str
     gross_total: str
     gross_decimal: Decimal
+    item_title: str = ""
+    extra_item_count: int = 0
 
 
 class PurchaseSyncEmailNotifier:
@@ -227,7 +233,11 @@ class PurchaseSyncEmailNotifier:
             return []
 
         invoices = list(
-            self.session.execute(select(InvoiceORM).where(InvoiceORM.id.in_(ids))).scalars()
+            self.session.execute(
+                select(InvoiceORM)
+                .options(selectinload(InvoiceORM.items))
+                .where(InvoiceORM.id.in_(ids))
+            ).scalars()
         )
         by_id = {inv.id: inv for inv in invoices}
         lines: list[InvoiceEmailLine] = []
@@ -240,13 +250,16 @@ class PurchaseSyncEmailNotifier:
             seller = inv.seller_snapshot_json if isinstance(inv.seller_snapshot_json, dict) else {}
             totals = inv.totals_json if isinstance(inv.totals_json, dict) else {}
             gross = Decimal(str(totals.get("total_gross", 0)))
+            item_title, extra_count = self._summarize_item_titles(inv.items or [])
             lines.append(
                 InvoiceEmailLine(
                     counterparty=str(seller.get("name") or "—"),
                     number=str(inv.number_local or "—"),
-                    issue_date=inv.issue_date.isoformat() if inv.issue_date else "—",
+                    issue_date=self._format_issue_date(inv.issue_date),
                     gross_total=self._format_money(gross, inv.currency or "PLN"),
                     gross_decimal=gross,
+                    item_title=item_title,
+                    extra_item_count=extra_count,
                 )
             )
         return lines
@@ -260,27 +273,88 @@ class PurchaseSyncEmailNotifier:
         formatted = f"{amount:,.2f}".replace(",", " ").replace(".", ",")
         return f"{formatted} {currency}"
 
+    @staticmethod
+    def _format_issue_date(value: object) -> str:
+        if value is None:
+            return "—"
+        try:
+            return value.strftime("%d.%m.%Y")
+        except Exception:
+            return "—"
+
+    @staticmethod
+    def _summarize_item_titles(items: list[InvoiceItemORM]) -> tuple[str, int]:
+        ordered = sorted(items, key=lambda item: (item.sort_order or 0, str(item.id)))
+        if not ordered:
+            return "", 0
+        first = str(ordered[0].name or "").strip()
+        if len(first) > _ITEM_TITLE_MAX_LEN:
+            first = first[: _ITEM_TITLE_MAX_LEN - 1].rstrip() + "…"
+        extra = max(len(ordered) - 1, 0)
+        return first, extra
+
+    @staticmethod
+    def _format_invoice_bullet(line: InvoiceEmailLine) -> str:
+        base = f"* {line.counterparty} | {line.number} | {line.issue_date} | {line.gross_total}"
+        suffix = ""
+        if line.item_title:
+            suffix = f" – {line.item_title}"
+        if line.extra_item_count > 0:
+            suffix += f" (+ {line.extra_item_count} poz.)"
+        return base + suffix
+
+    @staticmethod
+    def _as_warsaw(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        try:
+            from zoneinfo import ZoneInfo
+
+            return aware.astimezone(ZoneInfo("Europe/Warsaw"))
+        except Exception:
+            return aware.astimezone()
+
+    @staticmethod
+    def _session_hour_label(finished_at: datetime | None) -> str:
+        local = PurchaseSyncEmailNotifier._as_warsaw(finished_at)
+        slot = infer_session_slot_label(local)
+        if slot:
+            return slot
+        if local is None:
+            return "—"
+        return local.strftime("%H:%M")
+
+    @staticmethod
+    def _zakupki_phrase(invoice_count: int) -> str:
+        if invoice_count == 1:
+            return "Masz nowe zakupki na fakturę!"
+        return f"Masz {invoice_count} nowe zakupki na fakturę!"
+
     def _render_body(
         self,
         row: PurchaseSyncNotificationORM,
         invoice_lines: list[InvoiceEmailLine],
     ) -> str:
-        started = row.started_at.astimezone().strftime("%d.%m.%Y %H:%M") if row.started_at else "—"
-        finished = row.finished_at.astimezone().strftime("%d.%m.%Y %H:%M") if row.finished_at else "—"
-        slot = infer_session_slot_label(row.finished_at)
-        slot_line = f"Sesja: {slot}\n" if slot else ""
-
-        lines_block = [
-            f"- {line.counterparty} | {line.number} | {line.issue_date} | {line.gross_total}"
-            for line in invoice_lines
-        ]
+        started_local = self._as_warsaw(row.started_at)
+        finished_local = self._as_warsaw(row.finished_at)
+        started = started_local.strftime("%d.%m.%Y %H:%M") if started_local else "—"
+        finished = finished_local.strftime("%d.%m.%Y %H:%M") if finished_local else "—"
+        hour_label = self._session_hour_label(row.finished_at)
+        bullets = [self._format_invoice_bullet(line) for line in invoice_lines]
+        invoice_list = "\n".join(bullets) if bullets else "(brak pozycji)"
         total_line = self._format_money(row.gross_sum, "PLN")
-        invoice_list = "\n".join(lines_block) if lines_block else "(brak pozycji)"
-
-        return (
-            "Synchronizacja zakupów z KSeF została zakończona pomyślnie.\n\n"
+        greeting = (
+            "Małgosiu!\n\n"
+            f"Synchronizacja zakupów z KSeF o godzinie {hour_label} została zakończona pomyślnie! "
+            f"{self._zakupki_phrase(row.invoice_count)}\n\n"
+            "Oto one!\n\n"
+            f"{invoice_list}\n"
+        )
+        technical = (
+            "---\n\n"
             "Typ sesji: automatyczna\n"
-            f"{slot_line}"
+            f"Sesja: {hour_label}\n"
             f"Rozpoczęcie: {started}\n"
             f"Zakończenie: {finished}\n"
             f"Status: {row.sync_status}\n"
@@ -288,9 +362,9 @@ class PurchaseSyncEmailNotifier:
             f"Pominięte duplikaty: {row.skipped_duplicates}\n"
             f"Błędy: {row.errors_count}\n"
             f"Suma brutto: {total_line}\n\n"
-            f"Lista:\n{invoice_list}\n\n"
             "Szczegóły znajdują się w Monitorze KSeF.\n"
         )
+        return f"{greeting}\n{technical}"
 
     def _log_failure(
         self,

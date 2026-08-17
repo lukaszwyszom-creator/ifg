@@ -16,6 +16,7 @@
   - `PURCHASE_INVOICE_FETCH`
   - `PURCHASE_IMPORT_SUMMARY`
   - `SESSION_CLOSE`
+- Nowy format maila po auto-sync zakupów: testy jednostkowe **36 passed** (treść + warunek 0 faktur = brak maila). Jeszcze bez deploy workera.
 
 ⚠️ ZNANE PROBLEMY
 - Scheduler auto-sync (uruchamianie o 08:00 i 14:00) nie ma potwierdzonego aktywnego mechanizmu wykonawczego w aktualnym workerze.
@@ -100,3 +101,66 @@ Powód: wszystkie elementy Monitora KSeF i ręcznej synchronizacji działają, a
 - [x] ręczny sync działa
 - [x] wpisy pojawiają się w Monitorze
 - [ ] wdrożenie produkcyjne zakończone (warunkowo: brak potwierdzonego scheduler-run)
+- [x] mail po auto-sync: nowy format (lokalne testy PASS; wymaga deploy worker)
+
+---
+
+## 10. FORMAT MAILA PO SYNC ZAKUPÓW (2026-08-17)
+
+Zmieniono treść maila po udanej automatycznej sesji synchronizacji zakupów KSeF.
+Mechanizm kolejki / SMTP / warunek „tylko gdy saved > 0” **bez zmian**.
+
+### Zasady (bez zmian)
+- mail tylko gdy sesja zapisała ≥ 1 nową fakturę
+- 0 nowych faktur → brak maila
+- jeden mail podsumowujący na sesję
+
+### Nowy układ
+1. Powitanie („Małgosiu!”) + godzina slotu (08:00 / 14:00) + liczba zakupów
+2. Lista faktur nad separatorem
+3. Blok techniczny pod `---`
+
+### Lista faktur
+Format: `* sprzedawca | numer | data wystawienia | kwota brutto – tytuł`
+
+Tytuł pozycji: `invoice_items.name` z importu XML FA(3) pole **P_7** (już w modelu, bez nowej architektury).
+Wiele pozycji: pierwsza nazwa + `(+ N poz.)`; pełne pozycje zostają w IFG.
+Brak pozycji w DB → wpis bez tytułu (bez myślnika).
+
+### Testy
+`python3 -m pytest tests/unit/test_purchase_sync_email_notification.py tests/unit/test_purchase_sync_notify_config.py -q`
+→ **36 passed**
+
+Pokrycie: 0 faktur (brak maila), 1 faktura, kilka faktur na liście, suma brutto, slot 08:00 / 14:00, dane techniczne pod separatorem, kompresja wielu pozycji.
+
+### Pliki
+- `app/services/purchase_sync_email_notifier.py`
+- `tests/unit/test_purchase_sync_email_notification.py`
+
+## RELEASE STATE
+
+- [x] LOCAL_REVIEW_REQUIRED
+- [ ] READY_FOR_DEPLOY
+- [ ] DEPLOYED_TO_DS723
+- [ ] PRODUCTION_VERIFIED
+
+## Decyzje dla ChatGPT
+
+Brak.
+
+## A. Root cause
+Dotychczasowy mail był formalnym blokiem technicznym bez powitania i bez tytułu pozycji.
+
+## B. Zmienione pliki
+- `app/services/purchase_sync_email_notifier.py`
+- `tests/unit/test_purchase_sync_email_notification.py`
+- `docs/reports/KSEF_STABILIZATION_SPRINT.md`
+
+## C. Deploy
+Wymagany rebuild **worker** (notifier działa w workerze). Guardian / IFG compose / SMTP poza zakresem tej zmiany.
+
+## D. Testy
+36 passed (`test_purchase_sync_email_notification.py` + `test_purchase_sync_notify_config.py`).
+
+## E. Następny krok
+Deploy workera na DS723+ i weryfikacja na kolejnej sesji auto-sync z ≥ 1 nową fakturą.

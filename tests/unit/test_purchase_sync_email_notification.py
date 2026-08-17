@@ -35,6 +35,7 @@ from app.persistence.models import (  # noqa: F401
     TransmissionORM,
     UserORM,
 )
+from app.persistence.models.invoice_item import InvoiceItemORM
 from app.persistence.models.purchase_sync_notification import PurchaseSyncNotificationORM as NotifyORM
 from app.persistence.repositories.purchase_sync_notification_repository import (
     PurchaseSyncNotificationRepository,
@@ -91,18 +92,26 @@ def _make_audit(*, saved_ids: list[uuid.UUID], saved_count: int | None = None) -
     return audit
 
 
-def _insert_purchase_invoice(session: Session, *, number: str, gross: str = "123.00") -> uuid.UUID:
+def _insert_purchase_invoice(
+    session: Session,
+    *,
+    number: str,
+    gross: str = "123.00",
+    seller_name: str = "Kontrahent SA",
+    issue_date: date = date(2026, 7, 5),
+    item_names: list[str] | None = None,
+) -> uuid.UUID:
     inv_id = uuid.uuid4()
     session.add(
         InvoiceORM(
             id=inv_id,
             status="accepted",
             payment_status="unpaid",
-            seller_snapshot_json={"name": "Kontrahent SA", "nip": "1112223344"},
+            seller_snapshot_json={"name": seller_name, "nip": "1112223344"},
             buyer_snapshot_json={"name": "Nabywca", "nip": "9670402857"},
             totals_json={"total_gross": gross, "total_net": "100.00", "total_vat": "23.00"},
-            issue_date=date(2026, 7, 5),
-            sale_date=date(2026, 7, 5),
+            issue_date=issue_date,
+            sale_date=issue_date,
             payment_method="transfer",
             currency="PLN",
             direction="purchase",
@@ -110,8 +119,29 @@ def _insert_purchase_invoice(session: Session, *, number: str, gross: str = "123
             ksef_reference_number=f"KSEF-{number}",
         )
     )
+    for idx, name in enumerate(item_names or []):
+        session.add(
+            InvoiceItemORM(
+                id=uuid.uuid4(),
+                invoice_id=inv_id,
+                name=name,
+                quantity=Decimal("1"),
+                unit="szt.",
+                unit_price_net=Decimal("100.00"),
+                vat_rate=Decimal("23"),
+                net_amount=Decimal("100.00"),
+                vat_amount=Decimal("23.00"),
+                gross_amount=Decimal(gross),
+                sort_order=idx,
+            )
+        )
     session.flush()
     return inv_id
+
+
+def _send_body(mock_send) -> str:
+    kwargs = mock_send.call_args.kwargs
+    return kwargs.get("body_text") or ""
 
 
 @patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
@@ -575,3 +605,161 @@ def test_notifier_invalid_smtp_from_no_send(mock_settings, mock_smtp_cls, db_ses
     mock_smtp_cls.assert_not_called()
     row = db_session.execute(select(NotifyORM).where(NotifyORM.correlation_id == corr_id)).scalar_one()
     assert row.status == "FAILED"
+
+
+def _enqueue_and_send(
+    db_session: Session,
+    *,
+    invoice_ids: list[uuid.UUID],
+    finished_at: datetime,
+    started_at: datetime | None = None,
+) -> uuid.UUID:
+    corr_id = uuid.uuid4()
+    notifier = PurchaseSyncEmailNotifier(db_session)
+    audit = _make_audit(saved_ids=invoice_ids)
+    notifier.maybe_enqueue_after_sync(
+        correlation_id=corr_id,
+        operation_type=KSeFOperationType.PURCHASE_SYNC_AUTO,
+        audit=audit,
+        started_at=started_at or finished_at,
+        finished_at=finished_at,
+    )
+    db_session.commit()
+    notifier.process_pending()
+    db_session.commit()
+    return corr_id
+
+
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
+@patch("app.services.purchase_sync_email_notifier.send_email")
+def test_zero_new_invoices_no_email_sent(mock_send, mock_settings, db_session: Session) -> None:
+    notifier = PurchaseSyncEmailNotifier(db_session)
+    audit = _make_audit(saved_ids=[], saved_count=0)
+    row = notifier.maybe_enqueue_after_sync(
+        correlation_id=uuid.uuid4(),
+        operation_type=KSeFOperationType.PURCHASE_SYNC_AUTO,
+        audit=audit,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+    notifier.process_pending()
+    assert row is None
+    mock_send.assert_not_called()
+
+
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
+@patch("app.services.purchase_sync_email_notifier.send_email")
+def test_one_new_invoice_renders_informal_mail(mock_send, mock_settings, db_session: Session) -> None:
+    inv_id = _insert_purchase_invoice(
+        db_session,
+        number="38485/8/AP/2026",
+        gross="17.49",
+        seller_name="Alsendo spółka z ograniczoną odpowiedzialnością",
+        issue_date=date(2026, 8, 17),
+        item_names=["Przesyłka kurierska"],
+    )
+    finished = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)  # 14:00 Europe/Warsaw (CEST)
+    _enqueue_and_send(db_session, invoice_ids=[inv_id], finished_at=finished)
+
+    mock_send.assert_called_once()
+    body = _send_body(mock_send)
+    assert body.startswith("Małgosiu!")
+    assert "o godzinie 14:00 została zakończona pomyślnie!" in body
+    assert "Masz nowe zakupki na fakturę!" in body
+    assert "Masz 1 nowe zakupki" not in body
+    assert "Oto one!" in body
+    assert (
+        "* Alsendo spółka z ograniczoną odpowiedzialnością | 38485/8/AP/2026 | "
+        "17.08.2026 | 17,49 PLN – Przesyłka kurierska"
+    ) in body
+    separator_at = body.index("---")
+    list_at = body.index("* Alsendo")
+    assert list_at < separator_at
+    assert "Typ sesji: automatyczna" in body[separator_at:]
+    assert "Sesja: 14:00" in body[separator_at:]
+    assert "Liczba nowych faktur: 1" in body[separator_at:]
+    assert "Suma brutto: 17,49 PLN" in body[separator_at:]
+    assert "Szczegóły znajdują się w Monitorze KSeF." in body[separator_at:]
+
+
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
+@patch("app.services.purchase_sync_email_notifier.send_email")
+def test_several_new_invoices_listed_with_sum(mock_send, mock_settings, db_session: Session) -> None:
+    first = _insert_purchase_invoice(
+        db_session,
+        number="FV/A/2026",
+        gross="10.00",
+        seller_name="Dostawca A",
+        issue_date=date(2026, 8, 17),
+        item_names=["Pozycja A"],
+    )
+    second = _insert_purchase_invoice(
+        db_session,
+        number="FV/B/2026",
+        gross="20.50",
+        seller_name="Dostawca B",
+        issue_date=date(2026, 8, 16),
+        item_names=["Pozycja B1", "Pozycja B2", "Pozycja B3"],
+    )
+    third = _insert_purchase_invoice(
+        db_session,
+        number="FV/C/2026",
+        gross="5.00",
+        seller_name="Dostawca C",
+        issue_date=date(2026, 8, 15),
+        item_names=["Pozycja C"],
+    )
+    finished = datetime(2026, 8, 17, 6, 5, tzinfo=UTC)  # 08:00 Europe/Warsaw (CEST)
+    _enqueue_and_send(db_session, invoice_ids=[first, second, third], finished_at=finished)
+
+    mock_send.assert_called_once()
+    body = _send_body(mock_send)
+    assert "Masz 3 nowe zakupki na fakturę!" in body
+    assert "o godzinie 08:00" in body
+    assert "* Dostawca A | FV/A/2026 | 17.08.2026 | 10,00 PLN – Pozycja A" in body
+    assert "* Dostawca B | FV/B/2026 | 16.08.2026 | 20,50 PLN – Pozycja B1 (+ 2 poz.)" in body
+    assert "* Dostawca C | FV/C/2026 | 15.08.2026 | 5,00 PLN – Pozycja C" in body
+    assert "Pozycja B2" not in body
+    separator_at = body.index("---")
+    assert body.index("* Dostawca A") < separator_at
+    assert body.index("* Dostawca B") < separator_at
+    assert body.index("* Dostawca C") < separator_at
+    technical = body[separator_at:]
+    assert "Sesja: 08:00" in technical
+    assert "Liczba nowych faktur: 3" in technical
+    assert "Suma brutto: 35,50 PLN" in technical
+    assert "Typ sesji: automatyczna" in technical
+    assert "Pominięte duplikaty:" in technical
+    assert "Błędy:" in technical
+    greeting = body[:separator_at]
+    assert "Typ sesji: automatyczna" not in greeting
+    assert "Suma brutto:" not in greeting
+
+
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
+@patch("app.services.purchase_sync_email_notifier.send_email")
+def test_session_hour_fourteen(mock_send, mock_settings, db_session: Session) -> None:
+    inv_id = _insert_purchase_invoice(db_session, number="FV/14/2026", item_names=["Usługa"])
+    finished = datetime(2026, 8, 17, 12, 10, tzinfo=UTC)
+    _enqueue_and_send(db_session, invoice_ids=[inv_id], finished_at=finished)
+    body = _send_body(mock_send)
+    assert "o godzinie 14:00" in body
+    assert "Sesja: 14:00" in body[body.index("---"):]
+
+
+@patch("app.services.purchase_sync_email_notifier.settings", new_callable=lambda: _settings_mock())
+@patch("app.services.purchase_sync_email_notifier.send_email")
+def test_invoice_without_item_title_omits_dash(mock_send, mock_settings, db_session: Session) -> None:
+    inv_id = _insert_purchase_invoice(
+        db_session,
+        number="FV/NOTITLE/2026",
+        gross="9.99",
+        seller_name="Bez pozycji",
+        issue_date=date(2026, 8, 17),
+        item_names=[],
+    )
+    finished = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
+    _enqueue_and_send(db_session, invoice_ids=[inv_id], finished_at=finished)
+    body = _send_body(mock_send)
+    assert "* Bez pozycji | FV/NOTITLE/2026 | 17.08.2026 | 9,99 PLN" in body
+    assert " – " not in body.split("---", 1)[0]
