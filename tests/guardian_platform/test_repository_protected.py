@@ -212,6 +212,12 @@ class TestRegressionIFGRepo:
             "guardian_platform.core.cli.app.load_project_config",
             lambda **kwargs: ProjectConfig(root=repo_root),
         )
+        graph_report = repo_root / "docs" / "reports" / "repository_graph.md"
+        before = graph_report.read_bytes() if graph_report.exists() else None
         code, out = run_main(["repo", "graph"])
         assert code == 0
-        assert "false_positives_prevented" in out or "tracked_nodes" in out
+        assert "False positives prevented" in out
+        if before is not None:
+            assert graph_report.read_bytes() == before
+        else:
+            assert not graph_report.exists()

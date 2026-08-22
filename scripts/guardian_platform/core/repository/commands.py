@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from guardian_platform.core.reporting.writers import render_report
 from guardian_platform.core.repository.analyzer import RepositoryAnalyzer
+from guardian_platform.core.repository.output import emit_repository_report
 from guardian_platform.core.repository.report import (
     analysis_to_payload,
+    render_dead_code_markdown,
     render_explain_terminal,
-    write_dead_code_report,
-    write_orphans_report,
-    write_repository_graph_report,
+    render_orphans_markdown,
+    render_repository_graph_markdown,
 )
 from guardian_platform.core.repository.scoring import impact_chain
 from guardian_platform.core.runtime.context import CommandContext
@@ -28,12 +27,11 @@ def _remainder_path(ctx: CommandContext) -> str | None:
 
 def run_repo_graph(ctx: CommandContext) -> int:
     analysis = _analyzer(ctx).analyze()
-    report_path = write_repository_graph_report(ctx.root, analysis)
+    markdown = render_repository_graph_markdown(analysis)
     fp = analysis.false_positives_prevented
     payload = {
         "title": "Repository Graph",
         "sections": {
-            "report": str(report_path.relative_to(ctx.root)),
             "tracked_nodes": len(analysis.files),
             "import_edges": sum(len(v) for v in analysis.import_graph.edges.values()),
             "import_cycles": len(analysis.import_graph.cycles),
@@ -51,8 +49,12 @@ def run_repo_graph(ctx: CommandContext) -> int:
             },
         },
     }
-    print(render_report(payload, ctx.output_format))
-    return 0
+    return emit_repository_report(
+        ctx,
+        markdown,
+        json_payload=payload,
+        report_label="Graph report",
+    )
 
 
 def run_repo_dependencies(ctx: CommandContext) -> int:
@@ -73,13 +75,12 @@ def run_repo_dependencies(ctx: CommandContext) -> int:
 
 def run_repo_orphan(ctx: CommandContext) -> int:
     analysis = _analyzer(ctx).analyze()
-    report_path = write_orphans_report(ctx.root, analysis)
+    markdown = render_orphans_markdown(analysis)
     orphans = sorted(p for p, f in analysis.files.items() if f.status.value == "ORPHAN")
     fp = analysis.false_positives_prevented
     payload = {
         "title": "Repository Orphans",
         "sections": {
-            "report": str(report_path.relative_to(ctx.root)),
             "count": len(orphans),
             "orphans": orphans[:100],
             "false_positives_prevented": fp.total,
@@ -87,13 +88,17 @@ def run_repo_orphan(ctx: CommandContext) -> int:
     }
     if len(orphans) > 100:
         payload["sections"]["note"] = f"Showing 100 of {len(orphans)} orphans; see report"
-    print(render_report(payload, ctx.output_format))
-    return 0
+    return emit_repository_report(
+        ctx,
+        markdown,
+        json_payload=payload,
+        report_label="Orphans report",
+    )
 
 
 def run_repo_dead_code(ctx: CommandContext) -> int:
     analysis = _analyzer(ctx).analyze()
-    report_path = write_dead_code_report(ctx.root, analysis)
+    markdown = render_dead_code_markdown(analysis)
     dead = sorted(
         p
         for p, f in analysis.files.items()
@@ -102,13 +107,16 @@ def run_repo_dead_code(ctx: CommandContext) -> int:
     payload = {
         "title": "Repository Dead Code",
         "sections": {
-            "report": str(report_path.relative_to(ctx.root)),
             "count": len(dead),
             "candidates": dead[:100],
         },
     }
-    print(render_report(payload, ctx.output_format))
-    return 0
+    return emit_repository_report(
+        ctx,
+        markdown,
+        json_payload=payload,
+        report_label="Dead-code report",
+    )
 
 
 def run_repo_impact(ctx: CommandContext) -> int:

@@ -12,8 +12,39 @@ from guardian_platform.core.repository.models import (
 from guardian_platform.core.repository.protected import ProtectedCategory, is_non_deletable
 
 
+class ReportExistsError(Exception):
+    """Raised when writing would overwrite an existing report without --force."""
+
+
 def _reports_dir(root: Path) -> Path:
     return root / "docs" / "reports"
+
+
+def _resolve_output_path(root: Path, output_path: Path) -> Path:
+    return output_path if output_path.is_absolute() else (root / output_path)
+
+
+def write_markdown_report(
+    root: Path,
+    content: str,
+    output_path: Path,
+    *,
+    force: bool = False,
+) -> Path:
+    out = _resolve_output_path(root, output_path)
+    if out.exists() and not force:
+        try:
+            rel = out.relative_to(root)
+        except ValueError:
+            rel = out
+        raise ReportExistsError(
+            f"Report already exists: {rel} (use --force to overwrite)"
+        )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(out)
+    return out
 
 
 def _render_file_block(item: FileAnalysis) -> list[str]:
@@ -50,11 +81,8 @@ def _render_file_block(item: FileAnalysis) -> list[str]:
     return lines
 
 
-def write_repository_graph_report(root: Path, analysis: RepositoryAnalysis) -> Path:
-    out = _reports_dir(root) / "repository_graph.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
+def render_repository_graph_markdown(analysis: RepositoryAnalysis) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
     fp = analysis.false_positives_prevented
 
     lines = [
@@ -105,13 +133,10 @@ def write_repository_graph_report(root: Path, analysis: RepositoryAnalysis) -> P
         lines.append(f"- `{workflow}` → `{', '.join(modules)}`")
     lines.append("")
 
-    out.write_text("\n".join(lines), encoding="utf-8")
-    return out
+    return "\n".join(lines)
 
 
-def write_orphans_report(root: Path, analysis: RepositoryAnalysis) -> Path:
-    out = _reports_dir(root) / "repository_orphans.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
+def render_orphans_markdown(analysis: RepositoryAnalysis) -> str:
     orphans = [f for f in analysis.files.values() if f.status == FileStatus.ORPHAN]
     orphans.sort(key=lambda x: x.path)
 
@@ -123,19 +148,21 @@ def write_orphans_report(root: Path, analysis: RepositoryAnalysis) -> Path:
     ]
     for item in orphans:
         lines.extend(_render_file_block(item))
-    out.write_text("\n".join(lines), encoding="utf-8")
-    return out
+    return "\n".join(lines)
 
 
-def write_dead_code_report(root: Path, analysis: RepositoryAnalysis) -> Path:
-    out = _reports_dir(root) / "repository_dead_code.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
+def render_dead_code_markdown(analysis: RepositoryAnalysis) -> str:
     dead = [
         f
         for f in analysis.files.values()
         if f.recommendation in {Recommendation.DELETE, Recommendation.ARCHIVE}
         and f.risk.value == "SAFE"
-        and not is_non_deletable(f.status, ProtectedCategory(f.protected_category) if f.protected_category in ProtectedCategory._value2member_map_ else ProtectedCategory.NONE)
+        and not is_non_deletable(
+            f.status,
+            ProtectedCategory(f.protected_category)
+            if f.protected_category in ProtectedCategory._value2member_map_
+            else ProtectedCategory.NONE,
+        )
     ]
     dead.sort(key=lambda x: x.path)
 
@@ -149,7 +176,27 @@ def write_dead_code_report(root: Path, analysis: RepositoryAnalysis) -> Path:
     ]
     for item in dead:
         lines.extend(_render_file_block(item))
-    out.write_text("\n".join(lines), encoding="utf-8")
+    return "\n".join(lines)
+
+
+def write_repository_graph_report(root: Path, analysis: RepositoryAnalysis) -> Path:
+    out = _reports_dir(root) / "repository_graph.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_repository_graph_markdown(analysis), encoding="utf-8")
+    return out
+
+
+def write_orphans_report(root: Path, analysis: RepositoryAnalysis) -> Path:
+    out = _reports_dir(root) / "repository_orphans.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_orphans_markdown(analysis), encoding="utf-8")
+    return out
+
+
+def write_dead_code_report(root: Path, analysis: RepositoryAnalysis) -> Path:
+    out = _reports_dir(root) / "repository_dead_code.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_dead_code_markdown(analysis), encoding="utf-8")
     return out
 
 

@@ -172,20 +172,16 @@ class TestReports:
 
 class TestRepositoryCLI:
     def test_repo_graph_command(self, mini_repo: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("GUARDIAN_PROJECT_ROOT", str(mini_repo))
-        from guardian_platform.core.config.loader import load_project_config
+        from guardian_platform.core.config.models import ProjectConfig
 
-        original = load_project_config
-
-        def _load(**kwargs):
-            cfg = original(**kwargs)
-            cfg.root = mini_repo
-            return cfg
-
-        monkeypatch.setattr("guardian_platform.core.config.loader.load_project_config", _load)
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=mini_repo),
+        )
         code, out = run_main(["repo", "graph"])
         assert code == 0
-        assert "Repository Graph" in out or "tracked_nodes" in out
+        assert "# Repository Dependency Graph" in out
+        assert not (mini_repo / "docs" / "reports" / "repository_graph.md").exists()
 
     def test_repo_orphan_command(self, mini_repo: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(
@@ -219,17 +215,20 @@ class TestRepositoryCLI:
         assert "Risk:" in out
         assert "Recommendation:" in out
 
-    def test_repo_dead_code_writes_report(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_repo_dead_code_explicit_output(self, mini_repo: Path, monkeypatch: pytest.MonkeyPatch):
         from guardian_platform.core.config.models import ProjectConfig
 
         monkeypatch.setattr(
             "guardian_platform.core.cli.app.load_project_config",
-            lambda **kwargs: ProjectConfig(root=repo_root),
+            lambda **kwargs: ProjectConfig(root=mini_repo),
         )
-        code, out = run_main(["repo", "dead-code"])
+        out_file = mini_repo / "tmp" / "dead_code.md"
+        code, out = run_main(["repo", "dead-code", "--output", str(out_file)])
         assert code == 0
-        report = repo_root / "docs" / "reports" / "repository_dead_code.md"
-        assert report.exists()
+        assert out_file.exists()
+        assert "# Repository Dead Code Candidates" in out_file.read_text(encoding="utf-8")
+        assert "Dead-code report: tmp/dead_code.md" in out
+        assert not (mini_repo / "docs" / "reports" / "repository_dead_code.md").exists()
 
     def test_repo_dependencies_json(self):
         code, out = run_main(["--format", "json", "repo", "dependencies"])
