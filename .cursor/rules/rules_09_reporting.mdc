@@ -21,6 +21,28 @@ C. Deploy
 D. Testy
 E. Następny krok
 
+## RELEASE STATE (obowiązkowe dla GWO zmieniających aplikację IFG)
+
+Kanoniczny kontrakt: `docs/guardian/core/GUARDIAN_IFG_RELEASE_STATE_CONTRACT.md`
+
+Każdy raport GWO **zmieniający frontend i/lub backend IFG** musi zawierać dokładnie jeden aktywny stan:
+
+```markdown
+## RELEASE STATE
+
+- [ ] LOCAL_REVIEW_REQUIRED
+- [ ] READY_FOR_DEPLOY
+- [ ] DEPLOYED_TO_DS723
+- [ ] PRODUCTION_VERIFIED
+```
+
+Zasady:
+
+- Implementacja + lokalny build PASS **bez** Release State = workflow **niekompletny**.
+- UX / UI (dashboard, popup, wykres, layout): domyślnie **`LOCAL_REVIEW_REQUIRED`** + URL lokalny + checklista + następny krok Deploy GWO.
+- Po deploy: `READY_FOR_DEPLOY` → `DEPLOYED_TO_DS723` → `PRODUCTION_VERIFIED` (po health PASS).
+- GWO tylko docs/GDD/standard: sekcja zalecana; zwykle `READY_FOR_DEPLOY` = standard przyjęty (bez DS723).
+
 Następnie dodaj obowiązkowo sekcję:
 
 `## Decyzje dla ChatGPT`
@@ -32,7 +54,23 @@ Jeśli nie ma decyzji, wpisz dokładnie:
 
 Sekcja `## Decyzje dla ChatGPT` ma być umieszczona bezpośrednio przed:
 
-`## Wygenerowane raporty`
+`GENERATED REPORTS`
+
+## Zapis raportów `.md` (obowiązkowy)
+
+Dla zadań obejmujących implementację, diagnostykę, audyt, deploy lub raportowanie Cursor **musi** rzeczywiście zapisać datowany raport `.md` (data w nazwie pliku lub treści).
+
+- **Utworzony** w bieżącym zadaniu: zapisz plik, potem wymień go w sekcji `GENERATED REPORTS`.
+- **Wcześniejszy** (kontekst): możesz cytować w treści odpowiedzi, ale **nie** w sekcji `GENERATED REPORTS`.
+- **Planowany, lecz niewygenerowany**: nie deklaruj go jako gotowy; nie podawaj ścieżki.
+
+## GENERATED REPORTS (obowiązkowa sekcja końcowa odpowiedzi)
+
+Sekcja `GENERATED REPORTS` musi być **ostatnią** sekcją odpowiedzi (po `## Decyzje dla ChatGPT`).
+
+W tej sekcji wymień **wyłącznie** raporty **utworzone podczas bieżącego zadania**. Podawaj **pełne, bezwzględne ścieżki** każdego faktycznie zapisanego pliku.
+
+**Zakaz:** nie wolno deklarować, wymieniać ani przedstawiać raportu jako wygenerowanego, jeżeli plik nie został faktycznie zapisany. Brak nowych raportów → wpisz `Brak.` (nie pomijaj sekcji).
 
 Po sekcji **E. Następny krok** (tylko gdy podczas pracy pojawiły się wartościowe obserwacje) dodaj opcjonalne sekcje Debt:
 
