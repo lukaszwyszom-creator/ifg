@@ -1,3 +1,11 @@
+---
+kind: gwo
+project: IFG
+workflow: GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION
+handoff: true
+created_at: 2026-07-20T12:00:00Z
+---
+
 # GWO-IFG — Multi-recipient email + 20:00 purchase sync session
 
 **Data:** 2026-07-20  
