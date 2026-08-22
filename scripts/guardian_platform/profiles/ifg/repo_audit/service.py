@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 from guardian_platform.profiles.ifg.checks.frontend import check_frontend_worktree_requires_build
 from guardian_platform.profiles.ifg.config.defaults import TARGET_BRANCH
-from guardian_platform.profiles.ifg.infra.git import git, parse_porcelain_line, porcelain_is_dirty
+from guardian_platform.profiles.ifg.infra.git import parse_porcelain_line, porcelain_is_dirty
 from guardian_platform.profiles.ifg.lib.risk import RiskLevel, max_risk
 from guardian_platform.profiles.ifg.repo_audit.extensions import RepoAuditExtension
 from guardian_platform.profiles.ifg.repo_audit.models import RepoAuditState
@@ -19,20 +22,35 @@ def get_extensions(ctx) -> list[RepoAuditExtension]:
     return list(ctx.data.get("repo_extensions", []))
 
 
-def collect_git_status(audit: RepoAuditState) -> None:
+def _git_at(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(detail or f"git {' '.join(args)} failed")
+    return result.stdout.strip()
+
+
+def collect_git_status(audit: RepoAuditState, *, root: Path) -> None:
+    repo = root.resolve()
     if audit.do_fetch:
         try:
-            git("fetch", "origin", TARGET_BRANCH, "--quiet")
+            _git_at(repo, "fetch", "origin", TARGET_BRANCH, "--quiet")
         except RuntimeError as exc:
             raise RuntimeError(f"git fetch failed: {exc}") from exc
 
-    audit.branch = git("branch", "--show-current")
-    audit.head = git("rev-parse", "HEAD")
-    audit.porcelain = git("status", "--porcelain")
+    audit.branch = _git_at(repo, "branch", "--show-current")
+    audit.head = _git_at(repo, "rev-parse", "HEAD")
+    audit.porcelain = _git_at(repo, "status", "--porcelain")
     audit.dirty = porcelain_is_dirty(audit.porcelain)
 
     try:
-        counts = git("rev-list", "--left-right", "--count", f"HEAD...origin/{TARGET_BRANCH}")
+        counts = _git_at(repo, "rev-list", "--left-right", "--count", f"HEAD...origin/{TARGET_BRANCH}")
         ahead_s, behind_s = counts.split("\t", 1)
         audit.ahead = int(ahead_s)
         audit.behind = int(behind_s)

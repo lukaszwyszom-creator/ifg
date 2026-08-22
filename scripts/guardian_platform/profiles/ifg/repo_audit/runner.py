@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from guardian_platform.core.repository.report import ReportExistsError, write_markdown_report
 from guardian_platform.core.runtime.mode import ExecutionMode
 from guardian_platform.core.workflow.engine import ExecutionEngine
 from guardian_platform.core.workflow.state import WorkflowState
@@ -21,24 +22,26 @@ def execute_repo_audit(
     do_fetch: bool = False,
     dry_run: bool = False,
     output_format: str = "terminal",
-    report_path: Path | None = None,
     root: Path | None = None,
 ):
+    if root is None:
+        root = REPO_ROOT
+    repo = root.resolve()
     mode = ExecutionMode.DRY_RUN if dry_run else ExecutionMode.LIVE
-    engine = ExecutionEngine(root=root or REPO_ROOT)
+    engine = ExecutionEngine(root=repo)
     return engine.run(
         IFG_REPO_AUDIT_WORKFLOW,
         mode=mode,
         initial_data={
             "do_fetch": do_fetch,
             "output_format": output_format,
-            "report_path": str(report_path) if report_path else None,
         },
     )
 
 
-def collect_audit(*, do_fetch: bool = False):
-    ctx = execute_repo_audit(do_fetch=do_fetch, output_format="none")
+def collect_audit(*, do_fetch: bool = False, root: Path | None = None):
+    repo = (root or REPO_ROOT).resolve()
+    ctx = execute_repo_audit(do_fetch=do_fetch, output_format="none", root=repo)
     if ctx.state_machine.state != WorkflowState.SUCCESS:
         failed = next((s for s in ctx.transaction.stages if s.status == "fail"), None)
         detail = failed.message if failed else ctx.transaction.outcome
@@ -56,17 +59,27 @@ def audit_from_context(ctx):
 
 def run_repo_audit(
     *,
+    root: Path,
     do_fetch: bool = False,
     dry_run: bool = False,
     output_format: str = "terminal",
-    report_path: Path | None = None,
+    output_path: Path | None = None,
+    force: bool = False,
 ) -> int:
+    repo = root.resolve()
+    if not repo.is_dir():
+        print(f"Invalid repository root: {repo}")
+        return 2
+    if not (repo / ".git").exists():
+        print(f"Not a git repository: {repo}")
+        return 2
+
     try:
         ctx = execute_repo_audit(
             do_fetch=do_fetch,
             dry_run=dry_run,
             output_format=output_format,
-            report_path=report_path,
+            root=repo,
         )
     except RuntimeError as exc:
         print(f"\n❌ Audit failed: {exc}")
@@ -80,23 +93,30 @@ def run_repo_audit(
         return 1
 
     audit = audit_from_context(ctx)
+    markdown = ctx.data.get("report_markdown") or render_markdown(audit, transaction=ctx.transaction)
+    json_text = ctx.data.get("report_json") or render_json(audit, transaction=ctx.transaction)
+
+    written_path: Path | None = None
+    if output_path is not None:
+        content = json_text if output_format == "json" else markdown
+        try:
+            written_path = write_markdown_report(repo, content, output_path, force=force)
+        except ReportExistsError as exc:
+            print(str(exc))
+            return 2
 
     if output_format == "json":
-        print(render_json(audit, transaction=ctx.transaction))
-        return exit_status_for_audit(audit)
-
-    if output_format == "markdown":
-        print(render_markdown(audit, transaction=ctx.transaction))
-        return exit_status_for_audit(audit)
-
-    if output_format != "none":
+        print(json_text)
+    elif output_format == "markdown":
+        print(markdown)
+    elif output_format != "none":
         print(render_terminal(audit, transaction=ctx.transaction))
-        report_file = ctx.data.get("report_file")
-        if report_file:
-            try:
-                rel = Path(report_file).relative_to(REPO_ROOT)
-            except ValueError:
-                rel = report_file
-            print(f"\nReport: {rel}")
+
+    if written_path is not None:
+        try:
+            rel = written_path.relative_to(repo)
+        except ValueError:
+            rel = written_path
+        print(f"Audit report: {rel}")
 
     return exit_status_for_audit(audit)

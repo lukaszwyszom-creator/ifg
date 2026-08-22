@@ -143,6 +143,7 @@ class TestIFGCLICommands:
         code, _ = run_main(["ifg", "repo", "audit"])
         assert code == 0
         mock_run.assert_called_once()
+        assert "root" in mock_run.call_args.kwargs
 
     def test_ifg_deploy_check_runs(self):
         code, out = run_main(["ifg", "deploy", "check"])
@@ -167,19 +168,20 @@ class TestIFGCLICommands:
 
 class TestIFGRepoAuditWorkflow:
     def test_repo_audit_in_git_repo(self, git_repo, monkeypatch):
-        monkeypatch.chdir(git_repo)
         from guardian_platform.profiles.ifg.repo_audit.runner import execute_repo_audit
         from guardian_platform.core.workflow.state import WorkflowState
 
-        ctx = execute_repo_audit(output_format="none")
+        subprocess.run(["git", "branch", "-M", "production"], cwd=git_repo, check=True, capture_output=True)
+        ctx = execute_repo_audit(output_format="none", root=git_repo)
         assert ctx.state_machine.state == WorkflowState.SUCCESS
+        assert ctx.root == git_repo.resolve()
 
     def test_collect_audit_returns_state(self, git_repo, monkeypatch):
-        monkeypatch.chdir(git_repo)
         from guardian_platform.profiles.ifg.repo_audit.runner import collect_audit
 
-        audit = collect_audit()
-        assert audit.branch
+        subprocess.run(["git", "branch", "-M", "production"], cwd=git_repo, check=True, capture_output=True)
+        audit = collect_audit(root=git_repo)
+        assert audit.branch == "production"
         assert audit.head
 
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from guardian_platform.core.workflow.context import WorkflowContext
 from guardian_platform.core.workflow.intents import (
     FsExistsIntent,
@@ -11,7 +9,7 @@ from guardian_platform.core.workflow.intents import (
 )
 from guardian_platform.core.workflow.results import StageExecutionResults
 from guardian_platform.core.workflow.stage import BuildReason, Stage, StagePlan, StageResult, StageStatus
-from guardian_platform.profiles.ifg.lib.reporting import default_report_path, write_report
+from guardian_platform.profiles.ifg.lib.risk import FileCategory
 from guardian_platform.profiles.ifg.repo_audit.actions import build_recommended_actions
 from guardian_platform.profiles.ifg.repo_audit.classifier import (
     classify_line_endings,
@@ -28,7 +26,6 @@ from guardian_platform.profiles.ifg.repo_audit.service import (
     get_extensions,
     parse_changed_paths,
 )
-from guardian_platform.profiles.ifg.lib.risk import FileCategory
 
 
 class InitStage(Stage):
@@ -62,7 +59,7 @@ class CollectGitStatusStage(Stage):
 
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         try:
-            collect_git_status(get_audit_state(ctx))
+            collect_git_status(get_audit_state(ctx), root=ctx.root)
         except RuntimeError as exc:
             return StageResult(status=StageStatus.FAIL, message=str(exc))
 
@@ -213,22 +210,12 @@ class ReportStage(Stage):
         ctx.transaction.profile_data["audit"] = audit.to_dict()
 
         output_format = ctx.data.get("output_format", "terminal")
-        report_path = ctx.data.get("report_path")
 
         markdown = render_markdown(audit, transaction=ctx.transaction)
         json_report = render_json(audit, transaction=ctx.transaction)
 
         ctx.data["report_markdown"] = markdown
         ctx.data["report_json"] = json_report
-
-        if output_format in ("markdown", "terminal") or report_path:
-            if output_format != "json" or report_path:
-                out = Path(report_path) if report_path else default_report_path("REPO_AUDIT")
-                write_report(out, markdown)
-                ctx.data["report_file"] = str(out)
-                ctx.transaction.profile_data.setdefault("artifacts", []).append(
-                    {"type": "repo_audit_report", "path": str(out)}
-                )
 
         return StageResult(status=StageStatus.PASS, message=f"report format: {output_format}")
 
