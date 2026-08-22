@@ -15,6 +15,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -117,12 +118,14 @@ def step4_init_auth(base_url: str, nip: str, challenge: str, encrypted_token: st
 
 
 def step5_redeem_tokens(base_url: str, authentication_token: str) -> dict:
-    log("KROK 5", "POST /auth/token/redeem (polling dla statusu 450)")
+    log("KROK 5", "POST /auth/token/redeem (polling dla statusu 100/450)")
     url = f"{base_url}/auth/token/redeem"
     max_wait = 30.0
     delay = 0.5
     elapsed = 0.0
     attempt = 0
+    transient_statuses = {100, 450}
+    status_re = re.compile(r"(?i)status\s+uwierzytelniania\s*\((\d+)\)")
 
     while True:
         attempt += 1
@@ -139,19 +142,24 @@ def step5_redeem_tokens(base_url: str, authentication_token: str) -> dict:
 
         if resp.status_code == 400 and elapsed < max_wait:
             detail_list = body.get("exception", {}).get("exceptionDetailList", []) if isinstance(body, dict) else []
-            still_processing = any(
-                d.get("exceptionCode") == 21301
-                and any("450" in str(x) for x in d.get("details", []))
-                for d in detail_list
-            )
-            if still_processing:
-                print(f"  → Auth w toku (status 450), czekam {delay:.1f}s...")
+            auth_status = None
+            for d in detail_list:
+                if d.get("exceptionCode") != 21301:
+                    continue
+                for item in d.get("details", []):
+                    m = status_re.search(str(item))
+                    if m and int(m.group(1)) in transient_statuses:
+                        auth_status = int(m.group(1))
+                        break
+                if auth_status is not None:
+                    break
+            if auth_status is not None:
+                print(f"  → Auth w toku (status {auth_status}), czekam {delay:.1f}s...")
                 time.sleep(delay)
                 elapsed += delay
                 delay = min(delay * 1.5, 5.0)
                 continue
-            else:
-                print(f"  → Inny błąd 400 (nie status 450), nie ponawiam.")
+            print("  → Inny błąd 400 (nie status 100/450), nie ponawiam.")
 
         if resp.status_code != 200:
             print(f"\n  BŁĄD: /token/redeem zwrócił {resp.status_code}")

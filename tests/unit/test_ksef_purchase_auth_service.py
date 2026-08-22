@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.core.exceptions import AppError, ExternalServiceError
+from app.domain.enums import KSeFOperationType, KSeFSeverity
 from app.integrations.ksef.auth import KSeFAuthError, KSeFSession
 from app.services.ksef_purchase_auth_service import PurchaseAuthService
 from app.services.ksef_token_store import (
@@ -208,3 +209,55 @@ class TestEnsurePurchaseAuthErrors:
 
         with pytest.raises(ExternalServiceError, match="uwierzytelnienia"):
             service.ensure_purchase_auth("9670402857")
+
+        op_types = [
+            c.kwargs.get("operation_type")
+            for c in service._journal_service.log_event.call_args_list
+            if "operation_type" in c.kwargs
+        ]
+        assert KSeFOperationType.ERROR in op_types
+
+
+class TestEnsurePurchaseAuthRedeemRetryJournal:
+    @patch("app.services.ksef_purchase_auth_service.settings")
+    def test_journals_retry_and_resume_on_transient_redeem(
+        self,
+        mock_settings,
+        service: PurchaseAuthService,
+        auth_provider: MagicMock,
+        mock_session: MagicMock,
+    ):
+        """Callbacki redeem → Monitor RETRY (WARNING) + RESUME po sukcesie."""
+        mock_settings.ksef_auth_token = "env-token"
+        _mock_no_record(mock_session)
+        corr = uuid.uuid4()
+
+        def _get_tokens_with_callbacks(nip, token, **kwargs):
+            on_retry = kwargs.get("on_transient_retry")
+            on_recovered = kwargs.get("on_transient_recovered")
+            if on_retry:
+                on_retry(100, 1, 0.5, 0.0)
+            if on_recovered:
+                on_recovered(100, 1)
+            return KSeFSession(
+                access_token="new-access",
+                refresh_token="new-refresh",
+                access_valid_until=datetime.now(UTC) + timedelta(hours=1),
+                refresh_valid_until=datetime.now(UTC) + timedelta(days=7),
+            )
+
+        auth_provider.get_tokens.side_effect = _get_tokens_with_callbacks
+
+        ctx = service.ensure_purchase_auth("9670402857", correlation_id=corr)
+        assert ctx.access_token == "new-access"
+
+        ops = [
+            (
+                c.kwargs.get("operation_type"),
+                c.kwargs.get("severity"),
+                c.kwargs.get("correlation_id"),
+            )
+            for c in service._journal_service.log_event.call_args_list
+        ]
+        assert (KSeFOperationType.RETRY, KSeFSeverity.WARNING, corr) in ops
+        assert (KSeFOperationType.RESUME, KSeFSeverity.SUCCESS, corr) in ops

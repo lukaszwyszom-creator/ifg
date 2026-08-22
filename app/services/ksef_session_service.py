@@ -812,7 +812,11 @@ class KSeFSessionService:
         if self.invoice_repository is None:
             raise AppError("InvoiceRepository nie jest skonfigurowane w KSeFSessionService.")
 
-        auth_ctx = self.purchase_auth.ensure_purchase_auth(nip, actor_user_id=actor_user_id)
+        auth_ctx = self.purchase_auth.ensure_purchase_auth(
+            nip,
+            actor_user_id=actor_user_id,
+            correlation_id=correlation_id,
+        )
         if audit is not None:
             audit.sync_path = "incremental"
         return self._sync_received_invoices_incremental(

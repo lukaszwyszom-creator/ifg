@@ -62,6 +62,7 @@ class PurchaseAuthService:
         nip: str,
         *,
         actor_user_id: UUID | None = None,
+        correlation_id: UUID | None = None,
     ) -> PurchaseAuthContext:
         """Zwraca ważny access token — refresh lub pełna autoryzacja bez sesji online."""
         normalized = normalize_session_nip(nip)
@@ -86,7 +87,7 @@ class PurchaseAuthService:
                     severity=KSeFSeverity.WARNING,
                     status="refresh_failed",
                     nip=normalized,
-                    correlation_id=record.id,
+                    correlation_id=correlation_id or record.id,
                     message=str(exc)[:240],
                 )
 
@@ -94,10 +95,21 @@ class PurchaseAuthService:
             normalized,
             actor_user_id=actor_user_id,
             existing=record,
+            correlation_id=correlation_id,
         )
 
-    def get_purchase_access_token(self, nip: str, *, actor_user_id: UUID | None = None) -> str:
-        return self.ensure_purchase_auth(nip, actor_user_id=actor_user_id).access_token
+    def get_purchase_access_token(
+        self,
+        nip: str,
+        *,
+        actor_user_id: UUID | None = None,
+        correlation_id: UUID | None = None,
+    ) -> str:
+        return self.ensure_purchase_auth(
+            nip,
+            actor_user_id=actor_user_id,
+            correlation_id=correlation_id,
+        ).access_token
 
     def _authenticate_fresh(
         self,
@@ -105,14 +117,74 @@ class PurchaseAuthService:
         *,
         actor_user_id: UUID | None,
         existing: KSeFSessionORM | None,
+        correlation_id: UUID | None = None,
     ) -> PurchaseAuthContext:
         auth_token = settings.ksef_auth_token
         if not auth_token:
             raise AppError("KSEF_AUTH_TOKEN nie jest skonfigurowany.")
 
+        journal_corr = correlation_id or (existing.id if existing is not None else uuid4())
+
+        def _on_transient_retry(
+            auth_status: int,
+            attempt: int,
+            delay: float,
+            elapsed: float,
+        ) -> None:
+            self._journal(
+                operation_type=KSeFOperationType.RETRY,
+                severity=KSeFSeverity.WARNING,
+                status=f"auth_pending_{auth_status}",
+                nip=nip,
+                correlation_id=journal_corr,
+                message=(
+                    f"KSeF auth status {auth_status} — ponowienie redeem "
+                    f"(attempt={attempt}, delay={delay:.1f}s)."
+                ),
+                metadata_extra={
+                    "auth_status": auth_status,
+                    "attempt": attempt,
+                    "delay_seconds": delay,
+                    "elapsed_seconds": elapsed,
+                    "phase": "token_redeem",
+                },
+            )
+
+        def _on_transient_recovered(auth_status: int, attempts: int) -> None:
+            self._journal(
+                operation_type=KSeFOperationType.RESUME,
+                severity=KSeFSeverity.SUCCESS,
+                status="auth_ready",
+                nip=nip,
+                correlation_id=journal_corr,
+                message=(
+                    f"KSeF auth status {auth_status} zakończony po {attempts} "
+                    "ponowieniach redeem — kontynuacja sync."
+                ),
+                metadata_extra={
+                    "auth_status": auth_status,
+                    "attempts": attempts,
+                    "phase": "token_redeem",
+                },
+            )
+
         try:
-            tokens = self.auth_provider.get_tokens(nip, auth_token)
+            tokens = self.auth_provider.get_tokens(
+                nip,
+                auth_token,
+                on_transient_retry=_on_transient_retry,
+                on_transient_recovered=_on_transient_recovered,
+            )
         except KSeFAuthError as exc:
+            self._journal(
+                operation_type=KSeFOperationType.ERROR,
+                severity=KSeFSeverity.ERROR,
+                status="auth_failed",
+                nip=nip,
+                correlation_id=journal_corr,
+                message=str(exc)[:240],
+                metadata_extra={"phase": "token_redeem", "source": "purchase_auth"},
+            )
             raise ExternalServiceError(f"Błąd uwierzytelnienia KSeF: {exc}") from exc
 
         now = datetime.now(UTC)
@@ -273,14 +345,18 @@ class PurchaseAuthService:
         nip: str,
         correlation_id: UUID,
         message: str,
+        metadata_extra: dict | None = None,
     ) -> None:
         if self._journal_service is None:
             return
+        metadata: dict = {"nip": nip, "source": "purchase_auth"}
+        if metadata_extra:
+            metadata.update(metadata_extra)
         self._journal_service.log_event(
             operation_type=operation_type,
             severity=severity,
             status=status,
             short_description=message,
             correlation_id=correlation_id,
-            metadata_json={"nip": nip, "source": "purchase_auth"},
+            metadata_json=metadata,
         )

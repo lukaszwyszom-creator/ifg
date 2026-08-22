@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 import httpx
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.x509 import load_der_x509_certificate
 
@@ -29,6 +31,17 @@ _KSEF_URLS = {
 }
 
 _USAGE_TOKEN_ENCRYPTION = "KsefTokenEncryption"
+
+# Statusy auth uznawane za przejściowe przy redeem (nie failujemy od razu).
+# 100 — uwierzytelnianie jeszcze niegotowe (incydent 21.08.2026)
+# 450 — SENT / w toku (dotychczasowa obsługa)
+_TRANSIENT_AUTH_STATUSES = frozenset({100, 450})
+_AUTH_STATUS_IN_DETAILS_RE = re.compile(
+    r"(?i)status\s+uwierzytelniania\s*\((\d+)\)"
+)
+
+TransientRetryCallback = Callable[[int, int, float, float], None]
+TransientRecoveredCallback = Callable[[int, int], None]
 
 
 class KSeFAuthError(Exception):
@@ -61,12 +74,23 @@ class KSeFAuthProvider:
     # PUBLIC API
     # -------------------------------------------------------------------------
 
-    def get_tokens(self, nip: str, ksef_auth_token: str) -> KSeFSession:
+    def get_tokens(
+        self,
+        nip: str,
+        ksef_auth_token: str,
+        *,
+        on_transient_retry: TransientRetryCallback | None = None,
+        on_transient_recovered: TransientRecoveredCallback | None = None,
+    ) -> KSeFSession:
         """Pełny przepływ uwierzytelnienia — zwraca parę access/refresh tokenów."""
         challenge_data = self._get_challenge()
         encrypted = self._encrypt_token(ksef_auth_token, challenge_data["timestampMs"])
         auth_init = self._init_token_auth(nip, challenge_data["challenge"], encrypted)
-        return self._redeem_tokens(auth_init["authenticationToken"]["token"])
+        return self._redeem_tokens(
+            auth_init["authenticationToken"]["token"],
+            on_transient_retry=on_transient_retry,
+            on_transient_recovered=on_transient_recovered,
+        )
 
     def refresh_access_token(self, refresh_token: str) -> KSeFSession:
         """Odświeżenie access tokena przy użyciu refresh tokena."""
@@ -175,17 +199,27 @@ class KSeFAuthProvider:
         except httpx.RequestError as exc:
             raise KSeFAuthError(f"KSeF connection error: {exc}") from exc
 
-    def _redeem_tokens(self, authentication_token: str) -> KSeFSession:
+    def _redeem_tokens(
+        self,
+        authentication_token: str,
+        *,
+        on_transient_retry: TransientRetryCallback | None = None,
+        on_transient_recovered: TransientRecoveredCallback | None = None,
+    ) -> KSeFSession:
         """POST /auth/token/redeem — wymienia authenticationToken na access/refresh.
 
-        KSeF 2.0 przetwarza uwierzytelnienie asynchronicznie. Jeśli serwer zwróci
-        400 ze statusem 450 (SENT — w toku), ponawiamy żądanie z wykładniczym
-        opóźnieniem przez max konfigurowalny czas (domyślnie 120 sekund).
+        KSeF 2.0 przetwarza uwierzytelnienie asynchronicznie. Przy HTTP 400 +
+        exceptionCode 21301 i statusie przejściowym (100 lub 450) ponawiamy
+        redeem z wykładniczym backoffiem aż do limitu czasu
+        (domyślnie ``auth_redeem_timeout_seconds`` = 120 s).
+        Inne 21301 / 400 kończą się natychmiastowym błędem.
         """
         url = f"{self._base_url}/auth/token/redeem"
         max_wait_seconds = float(self._auth_redeem_timeout)
         delay = 0.5
         elapsed = 0.0
+        attempt = 0
+        last_transient_status: int | None = None
 
         while True:
             try:
@@ -197,33 +231,28 @@ class KSeFAuthProvider:
             except httpx.RequestError as exc:
                 raise KSeFAuthError(f"KSeF connection error: {exc}") from exc
 
-            # KSeF przetwarza auth asynchronicznie — status 450 = SENT (w toku)
-            if resp.status_code == 400 and elapsed < max_wait_seconds:
-                try:
-                    detail_list = (
-                        resp.json()
-                        .get("exception", {})
-                        .get("exceptionDetailList", [])
-                    )
-                    still_processing = any(
-                        d.get("exceptionCode") == 21301
-                        and any("450" in str(x) for x in d.get("details", []))
-                        for d in detail_list
-                    )
-                except Exception:
-                    still_processing = False
-
-                if still_processing:
-                    logger.info(
-                        "KSeF auth w toku (status 450), ponowna próba za %.1fs "
-                        "(elapsed=%.1fs)",
-                        delay,
-                        elapsed,
-                    )
-                    time.sleep(delay)
-                    elapsed += delay
-                    delay = min(delay * 1.5, 5.0)
-                    continue
+            transient_status = _transient_auth_status_from_http_response(resp)
+            if (
+                transient_status is not None
+                and elapsed < max_wait_seconds
+            ):
+                attempt += 1
+                last_transient_status = transient_status
+                logger.info(
+                    "KSeF auth w toku (status %s), ponowna próba za %.1fs "
+                    "(attempt=%s elapsed=%.1fs max_wait=%.1fs)",
+                    transient_status,
+                    delay,
+                    attempt,
+                    elapsed,
+                    max_wait_seconds,
+                )
+                if on_transient_retry is not None:
+                    on_transient_retry(transient_status, attempt, delay, elapsed)
+                time.sleep(delay)
+                elapsed += delay
+                delay = min(delay * 1.5, 5.0)
+                continue
 
             try:
                 resp.raise_for_status()
@@ -234,12 +263,62 @@ class KSeFAuthProvider:
                 ) from exc
 
             data = resp.json()
+            if (
+                attempt > 0
+                and last_transient_status is not None
+                and on_transient_recovered is not None
+            ):
+                on_transient_recovered(last_transient_status, attempt)
             return KSeFSession(
                 access_token=data["accessToken"]["token"],
                 refresh_token=data["refreshToken"]["token"],
                 access_valid_until=_parse_dt(data["accessToken"].get("validUntil")),
                 refresh_valid_until=_parse_dt(data["refreshToken"].get("validUntil")),
             )
+
+
+def _auth_status_from_exception_details(details: list | tuple) -> int | None:
+    """Wyciąga numer statusu uwierzytelniania z pola details wyjątku KSeF."""
+    for item in details:
+        text = str(item)
+        match = _AUTH_STATUS_IN_DETAILS_RE.search(text)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _transient_auth_status_from_payload(payload: dict) -> int | None:
+    """Zwraca status przejściowy (100/450) z ciała błędu redeem, inaczej None.
+
+    Nie retry'ujemy każdego 21301 — tylko gdy da się odczytać status
+    uwierzytelniania należący do ``_TRANSIENT_AUTH_STATUSES``.
+    """
+    detail_list = (
+        payload.get("exception", {}).get("exceptionDetailList", [])
+        if isinstance(payload, dict)
+        else []
+    )
+    for detail in detail_list:
+        if not isinstance(detail, dict):
+            continue
+        if detail.get("exceptionCode") != 21301:
+            continue
+        status = _auth_status_from_exception_details(detail.get("details") or [])
+        if status in _TRANSIENT_AUTH_STATUSES:
+            return status
+    return None
+
+
+def _transient_auth_status_from_http_response(resp: httpx.Response) -> int | None:
+    if resp.status_code != 400:
+        return None
+    try:
+        payload = resp.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return _transient_auth_status_from_payload(payload)
 
 
 def _parse_dt(value: str | None) -> datetime | None:
