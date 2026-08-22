@@ -17,7 +17,11 @@ from guardian_platform.profiles.ifg.repo_cleanup.boundaries import discover_phas
 from guardian_platform.profiles.ifg.repo_cleanup.git_guard import UNCOMMITTED_CHANGES_MESSAGE
 from guardian_platform.profiles.ifg.repo_cleanup.planner import build_cleanup_plan
 from guardian_platform.profiles.ifg.repo_cleanup.policy import archive_destination, is_never_delete_path
-from guardian_platform.profiles.ifg.repo_cleanup.report import render_plan_markdown, write_plan_report
+from guardian_platform.profiles.ifg.repo_cleanup.report import (
+    ReportExistsError,
+    render_plan_markdown,
+    write_plan_report,
+)
 from guardian_platform.profiles.ifg.repo_cleanup.runner import run_repo_cleanup
 from tests.guardian_platform.conftest import REPO_ROOT, run_main
 
@@ -123,7 +127,9 @@ class TestDryRunAndRollback:
 
     def test_report_written(self, advisor_repo: Path):
         plan = build_cleanup_plan(advisor_repo, phase=None, dry_run=True)
-        path = write_plan_report(advisor_repo, plan)
+        out = advisor_repo / "plans" / "cleanup_plan.md"
+        path = write_plan_report(advisor_repo, plan, output_path=out)
+        assert path == out
         assert path.exists()
         text = path.read_text(encoding="utf-8")
         assert "IFG Repository Cleanup Plan" in text
@@ -157,7 +163,8 @@ class TestCleanupCLI:
         code, out = run_main(["--dry-run", "ifg", "repo", "cleanup"])
         assert code == 0
         assert "DRY-RUN" in out
-        assert (advisor_repo / "docs" / "reports" / "repository_cleanup_plan.md").exists()
+        assert "# IFG Repository Cleanup Plan" in out
+        assert not (advisor_repo / "docs" / "reports" / "repository_cleanup_plan.md").exists()
 
     def test_phase1_dry_run_shows_git_mv(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(
@@ -270,12 +277,115 @@ def _git_init_commit(repo: Path) -> None:
 
 def _git_status_porcelain(repo: Path) -> str:
     return subprocess.run(
-        ["git", "status", "--porcelain"],
+        ["git", "status", "--porcelain=v1", "-uall"],
         cwd=repo,
         capture_output=True,
         text=True,
         check=True,
     ).stdout
+
+
+class TestOutputContract:
+    def test_default_dry_run_stdout_markdown(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, out = run_main(["--dry-run", "ifg", "repo", "cleanup"])
+        assert code == 0
+        assert "# IFG Repository Cleanup Plan" in out
+        assert "**Mode:** DRY-RUN" in out
+
+    def test_default_dry_run_preserves_tracked_plan(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        plan_path = advisor_repo / "docs" / "reports" / "repository_cleanup_plan.md"
+        plan_path.parent.mkdir(parents=True)
+        canonical = "# canonical tracked plan\nunchanged\n"
+        plan_path.write_text(canonical, encoding="utf-8")
+
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, _ = run_main(["--dry-run", "ifg", "repo", "cleanup"])
+        assert code == 0
+        assert plan_path.read_text(encoding="utf-8") == canonical
+
+    def test_explicit_output_writes_file(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        out_file = advisor_repo / "tmp" / "custom_plan.md"
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, out = run_main(
+            ["--dry-run", "ifg", "repo", "cleanup", "--output", str(out_file)],
+        )
+        assert code == 0
+        assert out_file.exists()
+        assert "IFG Repository Cleanup Plan" in out_file.read_text(encoding="utf-8")
+        assert "Plan report: tmp/custom_plan.md" in out
+
+    def test_output_without_yes_does_not_execute(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        out_file = advisor_repo / "plan.md"
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        with patch("guardian_platform.profiles.ifg.repo_cleanup.runner.execute_plan") as mock_execute:
+            code, _ = run_main(["ifg", "repo", "cleanup", "--output", str(out_file)])
+        assert code == 2
+        mock_execute.assert_not_called()
+
+    def test_output_refuses_overwrite(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        out_file = advisor_repo / "plan.md"
+        out_file.write_text("# existing\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, out = run_main(["--dry-run", "ifg", "repo", "cleanup", "--output", str(out_file)])
+        assert code == 2
+        assert "already exists" in out
+        assert out_file.read_text(encoding="utf-8") == "# existing\n"
+
+    def test_output_force_overwrites(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        out_file = advisor_repo / "plan.md"
+        out_file.write_text("# existing\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, _ = run_main(
+            ["--dry-run", "ifg", "repo", "cleanup", "--output", str(out_file), "--force"],
+        )
+        assert code == 0
+        assert "IFG Repository Cleanup Plan" in out_file.read_text(encoding="utf-8")
+
+    def test_write_plan_report_exists_error(self, advisor_repo: Path):
+        plan = build_cleanup_plan(advisor_repo, phase=0, dry_run=True)
+        out = advisor_repo / "plan.md"
+        out.write_text("# old\n", encoding="utf-8")
+        with pytest.raises(ReportExistsError):
+            write_plan_report(advisor_repo, plan, output_path=out)
+
+    def test_dry_run_git_status_unchanged(self, advisor_repo: Path, monkeypatch: pytest.MonkeyPatch):
+        _git_init_commit(advisor_repo)
+        plan_path = advisor_repo / "docs" / "reports" / "repository_cleanup_plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# tracked plan\n", encoding="utf-8")
+        subprocess.run(["git", "add", "docs/reports/repository_cleanup_plan.md"], cwd=advisor_repo, check=True)
+        subprocess.run(["git", "commit", "-m", "track plan"], cwd=advisor_repo, check=True)
+
+        status_before = _git_status_porcelain(advisor_repo)
+        monkeypatch.setattr(
+            "guardian_platform.core.cli.app.load_project_config",
+            lambda **kwargs: ProjectConfig(root=advisor_repo),
+        )
+        code, out = run_main(["--dry-run", "ifg", "repo", "cleanup"])
+        status_after = _git_status_porcelain(advisor_repo)
+
+        assert code == 0
+        assert "# IFG Repository Cleanup Plan" in out
+        assert status_before == status_after
 
 
 class TestPhase0Safety:

@@ -7,6 +7,10 @@ from guardian_platform.core.reporting.debt import finish_markdown
 from guardian_platform.profiles.ifg.repo_cleanup.policy import CleanupPlan
 
 
+class ReportExistsError(Exception):
+    """Raised when writing would overwrite an existing report without --force."""
+
+
 def _reports_dir(root: Path) -> Path:
     return root / "docs" / "reports"
 
@@ -68,10 +72,31 @@ def render_plan_markdown(plan: CleanupPlan, *, root: Path, debt=None) -> str:
     return finish_markdown(lines, debt=debt, state=plan, transaction=None)
 
 
-def write_plan_report(root: Path, plan: CleanupPlan) -> Path:
-    out = _reports_dir(root) / "repository_cleanup_plan.md"
+def _resolve_output_path(root: Path, output_path: Path) -> Path:
+    return output_path if output_path.is_absolute() else (root / output_path)
+
+
+def write_plan_report(
+    root: Path,
+    plan: CleanupPlan,
+    *,
+    output_path: Path,
+    force: bool = False,
+) -> Path:
+    out = _resolve_output_path(root, output_path)
+    if out.exists() and not force:
+        try:
+            rel = out.relative_to(root)
+        except ValueError:
+            rel = out
+        raise ReportExistsError(
+            f"Report already exists: {rel} (use --force to overwrite)"
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_plan_markdown(plan, root=root), encoding="utf-8")
+    content = render_plan_markdown(plan, root=root)
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(out)
     return out
 
 

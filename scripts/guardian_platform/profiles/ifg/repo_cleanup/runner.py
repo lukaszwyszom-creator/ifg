@@ -11,8 +11,9 @@ from guardian_platform.profiles.ifg.repo_cleanup.git_guard import (
 )
 from guardian_platform.profiles.ifg.repo_cleanup.planner import build_cleanup_plan
 from guardian_platform.profiles.ifg.repo_cleanup.report import (
+    ReportExistsError,
+    render_plan_markdown,
     render_terminal_summary,
-    write_execution_report,
     write_plan_report,
 )
 
@@ -29,7 +30,9 @@ def run_repo_cleanup(
     dry_run: bool = True,
     assume_yes: bool = False,
     phase: int | None = None,
-    write_report: bool = True,
+    output_path: Path | None = None,
+    force: bool = False,
+    write_report: bool = False,
     output_format: str = "terminal",
 ) -> int:
     repo = (root or REPO_ROOT).resolve()
@@ -52,22 +55,41 @@ def run_repo_cleanup(
             print(line)
 
     plan = build_cleanup_plan(repo, phase=effective_phase, dry_run=dry_run)
-    plan_path = write_plan_report(repo, plan) if write_report else None
 
-    if output_format == "terminal":
+    plan_path: Path | None = None
+    if output_path is not None:
+        try:
+            plan_path = write_plan_report(
+                repo,
+                plan,
+                output_path=output_path,
+                force=force,
+            )
+        except ReportExistsError as exc:
+            print(str(exc))
+            return 2
+    elif write_report:
+        # Legacy internal callers must pass an explicit output_path.
+        pass
+
+    display_format = output_format
+    if output_path is None and display_format == "terminal":
+        display_format = "markdown"
+
+    if display_format == "terminal":
         print(render_terminal_summary(plan))
-        if plan_path:
-            print(f"Plan report: {plan_path.relative_to(repo)}")
-    elif output_format == "markdown":
-        from guardian_platform.profiles.ifg.repo_cleanup.report import render_plan_markdown
-
+    elif display_format == "markdown":
         print(render_plan_markdown(plan, root=repo))
+
+    if plan_path is not None:
+        try:
+            rel = plan_path.relative_to(repo)
+        except ValueError:
+            rel = plan_path
+        print(f"Plan report: {rel}")
 
     if dry_run:
         return 0
 
-    executed = execute_plan(repo, plan)
-    if write_report:
-        exec_path = write_execution_report(repo, plan, executed)
-        print(f"Execution report: {exec_path.relative_to(repo)}")
+    execute_plan(repo, plan)
     return 0

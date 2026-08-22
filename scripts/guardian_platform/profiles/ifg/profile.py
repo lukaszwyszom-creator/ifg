@@ -67,7 +67,7 @@ class IFGProfile(GuardianProfile):
                 "ifg",
                 ("repo", "cleanup"),
                 run_repo_cleanup_cmd,
-                help="IFG repository cleanup advisor (Repo Graph + policy)",
+                help="IFG cleanup advisor — stdout Markdown by default; use --output PATH to write plan",
                 mutating=True,
                 supports_dry_run=True,
             ),
