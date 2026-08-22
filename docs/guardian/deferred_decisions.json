@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "next_id": 16,
+  "next_id": 21,
   "items": [
     {
       "id": "GDD-0001",
@@ -135,13 +135,13 @@
       "type": "Architecture",
       "priority": "Medium",
       "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
       "defer_reason": "Temat dotyczy nowego obszaru diagnostyki macOS i nie jest częścią bieżącego zakresu IFG; rejestrowany jako świadomie odroczony do osobnej iteracji.",
       "description": "Stworzenie lekkiego pakietu diagnostycznego dla macOS do monitorowania dysków, sprzętu i wydajności. Zakres v1: automatyczne wykrywanie zewnętrznych dysków NVMe; czytelne podsumowanie SMART; temperatura, TBW, firmware, TRIM; wykrywanie USB4/Thunderbolt i prędkości linku; generowanie raportu .md. Możliwe rozszerzenia: benchmark jednym poleceniem; monitorowanie wielu dysków; integracja z NAS (SMART przez SSH); powiadomienia o pogorszeniu stanu dysków; przyszła integracja jako moduł guardian-storage.",
       "review_when": "Przy planowaniu dedykowanej iteracji dla narzędzi diagnostycznych macOS lub uruchomieniu prac nad modułem guardian-storage.",
       "source": "GWO: rejestracja nowego zadania LAMUS/GDD (2026-07-10)",
       "created_at": "2026-07-10",
-      "closed_at": null
+      "closed_at": null,
+      "lamus_status": "Odroczone (LAMUS)"
     },
     {
       "id": "GDD-0010",
@@ -150,13 +150,13 @@
       "type": "Architecture",
       "priority": "High",
       "status": "DONE",
-      "lamus_status": "DONE",
       "defer_reason": "Wdrożono rozdzielenie statusów runtime (PRODUCTION_RUNNING/STOPPED/DEGRADED) od release gate (READY_FOR_DEPLOY/PRODUCTION_BLOCKED) w prod health + testy jednostkowe.",
       "description": "Rozdzielić dwa niezależne stany Guardiana: (1) runtime produkcji — PRODUCTION_RUNNING / PRODUCTION_STOPPED / PRODUCTION_DEGRADED; (2) gotowość nowego release — PRODUCTION_READY / PRODUCTION_BLOCKED. Obecnie PRODUCTION_BLOCKED dla release może maskować fakt, że istniejąca produkcja jest całkowicie zatrzymana.",
       "review_when": "Przy rozszerzaniu alertów runtime — stosować model z GDD-0010.",
       "source": "GWO-IFG-0063 LAMUS + GWO-IFG-0062 Production Recovery + GWO-IFG-0071",
       "created_at": "2026-07-10",
-      "closed_at": "2026-07-11"
+      "closed_at": "2026-07-11",
+      "lamus_status": "DONE"
     },
     {
       "id": "GDD-0011",
@@ -165,13 +165,13 @@
       "type": "Architecture",
       "priority": "High",
       "status": "DONE",
-      "lamus_status": "DONE",
       "defer_reason": "Wdrożono standard YAML front matter i selekcję handoff po metadanych z fallbackiem legacy.",
       "description": "Przejście z heurystyk nazw plików (regex GWO) na jawne metadane raportów (kind, project, workflow, handoff, created_at) w mechanizmie guardian ifg handoff latest, z pełną kompatybilnością wsteczną.",
       "review_when": "Przy dodawaniu nowych typów raportów (ADR, FD, RFC) — stosować GUARDIAN_REPORT_METADATA_STANDARD.md.",
       "source": "GWO-GUARDIAN-0066 LAMUS + GWO-GUARDIAN-0065 handoff regression",
       "created_at": "2026-07-11",
-      "closed_at": "2026-07-11"
+      "closed_at": "2026-07-11",
+      "lamus_status": "DONE"
     },
     {
       "id": "GDD-0012",
@@ -180,13 +180,13 @@
       "type": "Architecture",
       "priority": "High",
       "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
       "defer_reason": "Nie blokuje bieżącej finalizacji release (GWO-0068); wymaga osobnej decyzji architektonicznej o miejscu zapisu raportów evaluate/doctor i ich wpływie na policy dirty tree.",
       "description": "Workflow release evaluate i doctor generują lub aktualizują pliki raportowe w repozytorium (docs/guardian/), a policy dirty_working_tree_blocks_production może traktować te pliki jako blocker — tworząc pętlę: clean tree → evaluate → raporty zaktualizowane → dirty tree → PRODUCTION_BLOCKED. Częściowy fix (report_paths w policy_engine, GWO-0064) wyklucza docs/guardian/ z dirty-tree, ale nie rozwiązuje w pełni semantyki artefaktów runtime vs wersjonowanych raportów ani plików poza report_paths (np. docs/reports/, reports/CHATGPT_HANDOFF).",
       "review_when": "Po GWO-IFG-0068 finalizacji release; przed kolejnym cyklem evaluate/deploy gdy pojawi się regresja dirty tree po samym uruchomieniu gate.",
       "source": "GWO-IFG-0068 LAMUS + obserwacja pętli evaluate/doctor w GWO-0064/0067",
       "created_at": "2026-07-11",
-      "closed_at": null
+      "closed_at": null,
+      "lamus_status": "Odroczone (LAMUS)"
     },
     {
       "id": "GDD-0013",
@@ -195,13 +195,13 @@
       "type": "Architecture",
       "priority": "High",
       "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
       "defer_reason": "GWO-IFG-0073 — architektura Core; implementacja po wydzieleniu interfejsu adapterów.",
       "description": "Notification Engine z adapterami: Email, Slack, Discord, Telegram, Webhook, Pushover, SMS, Desktop Notification, Log sink. Neutralny interfejs bez sekretów w repo; konfiguracja operatora poza Git.",
       "review_when": "Po GWO wydzielającym guardian_core/notifications/ z runtime_notify.py.",
       "source": "GWO-IFG-0073 LAMUS + GWO-IFG-0072 runtime monitor",
       "created_at": "2026-07-11",
-      "closed_at": null
+      "closed_at": null,
+      "lamus_status": "Odroczone (LAMUS)"
     },
     {
       "id": "GDD-0014",
@@ -210,13 +210,13 @@
       "type": "Architecture",
       "priority": "High",
       "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
       "defer_reason": "GWO-IFG-0073 — zaprojektowany event sourcing + reducer; obecny runtime_monitor.json wystarcza na IFG v1.",
       "description": "Runtime State Engine zamiast pojedynczego runtime_monitor.json: event sourcing → state reducer → runtime state → history → alerts → dashboard. Zastępuje bezpośredni zapis stanu monitora.",
       "review_when": "Przed Guardian GUI lub multi-project Conductor; po Event Bus Etap 1.",
       "source": "GWO-IFG-0073 LAMUS (żądane jako GDD-0012-State — ID GDD-0012 zajęte przez dirty-tree loop)",
       "created_at": "2026-07-11",
-      "closed_at": null
+      "closed_at": null,
+      "lamus_status": "Odroczone (LAMUS)"
     },
     {
       "id": "GDD-0015",
@@ -225,12 +225,82 @@
       "type": "Architecture",
       "priority": "Medium",
       "status": "OPEN",
-      "lamus_status": "Odroczone (LAMUS)",
       "defer_reason": "GWO-IFG-0073 — obecny runtime_audit.jsonl + rotacja 5MB wystarcza; struktura YYYY/MM/DD wymaga migracji ścieżek.",
       "description": "Rotacja runtime_audit do struktury katalogów YYYY/MM/DD z indeksami, wyszukiwaniem, filtrowaniem, eksportem i polityką retencji.",
       "review_when": "Gdy audit trail przekroczy praktyczny limit wyszukiwania liniowego lub przed multi-project Conductor.",
       "source": "GWO-IFG-0073 LAMUS (żądane jako GDD-0011-Audit — ID GDD-0011 zajęte przez Report Metadata DONE)",
       "created_at": "2026-07-11",
+      "closed_at": null,
+      "lamus_status": "Odroczone (LAMUS)"
+    },
+    {
+      "id": "GDD-0016",
+      "project": "Guardian Core",
+      "module": "Deploy Verification",
+      "type": "Architecture",
+      "priority": "High",
+      "status": "OPEN",
+      "defer_reason": "GWO-IFG SMTP production rebuild (2026-07-12) — wykryto rozjazd host git SHA vs kod w obrazie Docker; naprawiono jednorazowym rebuildem, brak automatycznej bramki parity.",
+      "description": "HOST–CONTAINER CODE PARITY GATE: po deployu backendu Guardian porównuje artefakt na hoście z kodem uruchomionym w kontenerze (preferowany mechanizm: image label / build metadata z commit SHA). Porównanie: host git SHA, image build SHA, running container image ID. Mismatch → BLOCKED. Obowiązkowe dla workerów współdzielących obraz z API (ifg-api:latest).",
+      "review_when": "Przed kolejnym deployem backendu bez jawnego docker build lub przy wprowadzeniu Guardian Deploy Decision Engine v2.",
+      "source": "docs/reports/2026-07-12_GWO-IFG_SMTP_ENVELOPE_SENDER_FIX.md + GWO-IFG SMTP production rebuild 2026-07-12",
+      "created_at": "2026-07-12",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0017",
+      "project": "IFG",
+      "module": "Handoff Journal / Workflow Identity",
+      "type": "Architecture",
+      "priority": "High",
+      "status": "OPEN",
+      "defer_reason": "GWO-GUARDIAN_HANDOFF_REPORT_DISCOVERY_FIX naprawił wybór raportu, ale pole workflow w YAML handoffu nadal zgaduje token GWO-* z treści (sorted first match) — poza zakresem tego GWO; wymaga osobnej zmiany z walidacją i testami multi-token.",
+      "description": "HANDOFF WORKFLOW IDENTITY SOURCE: generator handoffu nie może ustalać pola workflow przez skan dowolnej treści raportu (obecnie _extract_gwo_tokens(content) + sorted(gwo_tokens)[0] w _build_handoff_metadata). Docelowa reguła (kolejność): (1) workflow z YAML front matter raportu; (2) jawny workflow z wykonania workflow / CLI; (3) legacy fallback wyłącznie z nazwy pliku; (4) brak jednoznacznej wartości → FAILURE (nie IFG-HANDOFF / nie losowy token). Zakres przyszłej zmiany: usunąć zgadywanie z body; dodać walidację zgodności project_id / workflow / report; test raportu z kilkoma tokenami GWO; zachować kompatybilność ze starymi raportami bez front matter. Dowód: HANDOFF-0004/0005 przypisały GWO-GUARDIAN-0079/0077 mimo source_reports wskazujących inne workflow.",
+      "review_when": "Przy następnym GWO dotyczącym handoff journal / Artifact Engine lub gdy operator zgłosi kolejny handoff z niewłaściwym workflow.",
+      "source": "docs/reports/2026-07-20_GWO-GUARDIAN_HANDOFF_REPORT_DISCOVERY_FIX.md + HANDOFF-0004/0005 workflow mismatch",
+      "created_at": "2026-07-20",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0018",
+      "project": "IFG",
+      "module": "Dashboard / Data Layer",
+      "type": "Architecture",
+      "priority": "Medium",
+      "status": "OPEN",
+      "defer_reason": "GWO-IFG-0023 dodał niezależne ładowanie puli YTD obok wykresu okresu; dalsza rozbudowa widgetów bez wspólnego providera zwiększy liczbę requestów i ryzyko niespójności. Refaktoryzacja odłożona — wymaga osobnego GWO z benchmarkiem requestów.",
+      "description": "Dashboard Unified Data Provider: widgety dashboardu mogą dziś pobierać dane niezależnie (osobne loadInvoicePool per zakres). Docelowo wspólna warstwa DashboardDataProvider z: cache, zakres dat, agregacje, KPI, wykresy, panele YTD, przyszłe widgety, eksport. Korzyści: jedno pobranie danych, wspólny cache, spójność widgetów, łatwiejsza rozbudowa, mniejsze obciążenie backendu, prostsze testowanie, lepsza skalowalność. Typ decyzyjny: Architecture / Performance. Zakres przyszłego GWO: zaprojektowanie DashboardDataProvider, migracja istniejących widgetów, zachowanie zgodności API, brak zmian funkcjonalnych UX, benchmark liczby requestów przed/po. Nie rozpoczynać implementacji w tym wpisie.",
+      "review_when": "Przy kolejnej rozbudowie dashboardu o nowy widget/KPI albo gdy liczba niezależnych requestów pool/list stanie się problemem operatorskim/wydajnościowym.",
+      "source": "GWO-GUARDIAN GDD-0018 registration + obserwacja GWO-IFG-0023 YTD panel (osobne loadInvoicePool)",
+      "created_at": "2026-07-20",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0019",
+      "project": "IFG",
+      "module": "Dashboard / Architecture",
+      "type": "Architecture",
+      "priority": "Medium",
+      "status": "OPEN",
+      "defer_reason": "Przed implementacją DashboardDataProvider (GDD-0018) potrzebny jest jednoznaczny kontrakt ADR, aby uniknąć God Object i niespójnej współpracy widgetów. Rejestracja bez implementacji — kontrakt w przyszłym ADR/GWO.",
+      "description": "Dashboard Data Contract: przed implementacją DashboardDataProvider przygotować ADR opisujący odpowiedzialność providera, interfejs oraz zasady współpracy z widgetami. Cel: uniknąć God Object i zapewnić spójną architekturę rozbudowy. Zakres przyszłego ADR: odpowiedzialność DashboardDataProvider; źródła danych; polityka cache (TTL/invalidation); współdzielenie danych między widgetami; strategia odświeżania; kontrakt wejść/wyjść; zasady dodawania nowych widgetów; benchmark liczby requestów przed/po migracji; kryteria kiedy widget może pobierać dane samodzielnie vs obowiązkowo przez provider. Docelowa architektura: DashboardDataProvider → API Adapter, Cache, Date Range Resolver, Aggregations, KPI, Widget Contracts, Refresh Policy, Export Services. Powiązany z GDD-0018. Kolejność: 1) GDD-0018, 2) GDD-0019 (kontrakt), 3) przyszły GWO implementacyjny. Nie rozpoczynać implementacji w tym wpisie.",
+      "review_when": "Po otwarciu prac nad GDD-0018 / przed startem GWO implementacyjnego DashboardDataProvider — najpierw ADR kontraktu (ten wpis).",
+      "source": "GWO-GUARDIAN GDD-0019 registration; linked to GDD-0018 Dashboard Unified Data Provider",
+      "created_at": "2026-07-20",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0020",
+      "project": "IFG",
+      "module": "Guardian Core / Capability Registry",
+      "type": "Architecture",
+      "priority": "Medium",
+      "status": "OPEN",
+      "defer_reason": "Guardian zarządza GWO/raportami/handoffami/GDD, ale brak warstwy stanu całych Capabilities. Ocena cyklu życia Capability (nowy artefakt vs rozszerzenie registry) wymaga osobnej analizy — bez zmian w Capability Registry w tym wpisie.",
+      "description": "Capability Lifecycle Model: ocenić, czy Guardian powinien zarządzać pełnym cyklem życia Capabilities (np. IFG: Zestawienia, KSeF, Magazyn, Rozliczenia, OCR, Powiadomienia). Capability obejmuje wiele GWO, raportów, handoffów i GDD. Zakres analizy: relacje Capability↔GWO, ↔GDD, ↔Reports, ↔Handoffs; czy potrzebny nowy artefakt, czy wystarczy rozszerzenie istniejącego Capability Registry. Propozycja stanów (do analizy, nie standard): OPEN → IN_PROGRESS → STABILIZING → UX_CLOSED → FEATURE_CLOSED → ARCHIVED. Powiązania: GDD-0018 Dashboard Unified Data Provider; GDD-0019 Dashboard Data Contract; przykład Capability „Zestawienia” (GWO-IFG-0023, GWO-IFG-0024). Nie implementować; nie zmieniać Capability Registry; nie tworzyć nowych artefaktów/klas/modeli w tym wpisie.",
+      "review_when": "Przed dalszą rozbudową Capability Registry / po ustabilizowaniu kolejnych capability (np. Zestawienia UX_CLOSED) — najpierw analiza ADR, potem ewentualne GWO implementacyjne.",
+      "source": "GWO-GUARDIAN GDD-0020 registration; linked GDD-0018/0019; example Capability Zestawienia (GWO-IFG-0023/0024)",
+      "created_at": "2026-07-20",
       "closed_at": null
     }
   ]
