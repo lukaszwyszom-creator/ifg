@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-
-from ifg_guardian.core.progress.report import render_timeline_section
-from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
-from ifg_guardian.core.workflow.transaction import WorkflowTransaction
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.reporting.debt import finish_markdown
+from ifg_guardian.core.reporting.renderer import render_guardian_report
+from ifg_guardian.core.workflow.transaction import WorkflowTransaction
 from ifg_guardian.plugins.ifg.doctor.models import CheckStatus, DoctorState, OverallStatus
 
 
@@ -32,48 +30,30 @@ def render_markdown(
     transaction: WorkflowTransaction | None = None,
     debt=None,
 ) -> str:
-    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    lines = [
-        "# IFG Guardian — IFG Doctor",
-        "",
-        f"**Generated:** {ts}  ",
-        f"**Overall status:** `{state.overall_status.value}`  ",
-        f"**Question:** Czy środowisko IFG jest gotowe do bezpiecznej pracy i deployu?  ",
-    ]
-    if transaction is not None:
-        lines.append(f"**Workflow ID:** `{transaction.workflow_id}`  ")
-        lines.append(f"**Duration:** {transaction.duration_ms} ms  ")
-    lines.extend(["", "## Checks", ""])
-    groups: dict[str, list] = {}
-    for check in state.checks:
-        groups.setdefault(check.group, []).append(check)
-    for group, checks in groups.items():
-        lines.append(f"### {group.title()}")
-        lines.append("")
-        lines.append("| Status | Check | Message |")
-        lines.append("|--------|-------|---------|")
-        for check in checks:
-            lines.append(
-                f"| `{check.status.value}` | {check.name} | {check.message} |"
-            )
-        lines.append("")
-    lines.append("## Summary")
-    lines.append("")
-    for key, value in state.summary.items():
-        lines.append(f"- **{key}:** {value}")
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_doctor_report
 
+    report = build_doctor_report(state, transaction)
+    lines = render_guardian_report(report)
     if transaction is not None:
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
-
     return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: DoctorState, *, transaction: WorkflowTransaction) -> str:
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_doctor_report
+
+    report = build_doctor_report(state, transaction)
     payload: dict[str, Any] = {
         "schema": "ifg_doctor_report_v1",
+        "standard_schema": report.schema_version(),
         "workflow": transaction.to_dict(),
         "doctor": state.to_dict(),
+        "standard_report": {
+            "title": report.title,
+            "executive_summary": report.executive_summary.__dict__,
+            "decision_matrix": [row.__dict__ for row in report.decision_matrix],
+        },
     }
     return json.dumps(payload, indent=2)
 

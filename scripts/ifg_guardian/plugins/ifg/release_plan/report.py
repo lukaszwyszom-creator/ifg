@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-
-from ifg_guardian.core.progress.report import render_timeline_section
-from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
-from ifg_guardian.core.workflow.transaction import WorkflowTransaction
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.reporting.debt import finish_markdown
+from ifg_guardian.core.reporting.renderer import render_guardian_report
+from ifg_guardian.core.workflow.transaction import WorkflowTransaction
 from ifg_guardian.plugins.ifg.release_plan.models import DeploymentRisk, ReleasePlanState
 
 
@@ -23,70 +21,30 @@ def render_markdown(
     transaction: WorkflowTransaction | None = None,
     debt=None,
 ) -> str:
-    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    lines = [
-        "# IFG Guardian — Release Plan",
-        "",
-        f"**Generated:** {ts}  ",
-        f"**Question:** {state.question}  ",
-        f"**Deployment risk:** `{state.deployment_risk.value}`  ",
-        f"**Doctor status:** `{state.doctor_overall_status}`  ",
-    ]
-    if transaction is not None:
-        lines.append(f"**Workflow ID:** `{transaction.workflow_id}`  ")
-        lines.append(f"**Duration:** {transaction.duration_ms} ms  ")
-        if transaction.dependencies:
-            lines.append("")
-            lines.append("## Dependencies")
-            lines.append("")
-            for dep_id, meta in transaction.dependencies.items():
-                lines.append(f"- `{dep_id}` → {meta.get('outcome', '?')} ({meta.get('workflow_id', '')})")
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_release_plan_report
 
-    lines.extend([
-        "",
-        "## Repository",
-        "",
-        f"- Branch: `{state.repository.branch}`",
-        f"- HEAD: `{state.repository.head_short}` (`{state.repository.head_sha}`)",
-        f"- Dirty: {state.repository.dirty}",
-        f"- Ahead/behind: {state.repository.ahead}/{state.repository.behind}",
-        "",
-        "## Build decisions",
-        "",
-        "| Decision | Required | Confidence | Reason |",
-        "|----------|----------|------------|--------|",
-    ])
-    for decision in state.build_decisions:
-        req = "yes" if decision.required else "no"
-        lines.append(
-            f"| {decision.name} | {req} | {decision.confidence} | {decision.reason} |"
-        )
-
-    lines.extend(["", "## Artifacts", ""])
-    for artifact in state.artifacts:
-        lines.append(f"- **{artifact.artifact_type}:** `{artifact.identifier}` — {artifact.notes}")
-
-    lines.extend(["", "## Execution plan", ""])
-    for step in state.execution_plan:
-        flag = "required" if step.required else "optional"
-        lines.append(f"{step.order}. **{step.action}** ({flag}) — {step.description}")
-
-    lines.extend(["", "## Risk rationale", ""])
-    for item in state.risk_rationale:
-        lines.append(f"- {item}")
-
+    report = build_release_plan_report(state, transaction)
+    lines = render_guardian_report(report)
     if transaction is not None:
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
-
     return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: ReleasePlanState, *, transaction: WorkflowTransaction) -> str:
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_release_plan_report
+
+    report = build_release_plan_report(state, transaction)
     payload: dict[str, Any] = {
         "schema": "ifg_release_plan_report_v1",
+        "standard_schema": report.schema_version(),
         "workflow": transaction.to_dict(),
         "release_plan": state.to_dict(),
+        "standard_report": {
+            "title": report.title,
+            "executive_summary": report.executive_summary.__dict__,
+            "decision_matrix": [row.__dict__ for row in report.decision_matrix],
+        },
     }
     return json.dumps(payload, indent=2)
 
@@ -106,8 +64,14 @@ def render_terminal(state: ReleasePlanState, *, transaction: WorkflowTransaction
 
     lines.extend(["", "Build decisions:", ""])
     for decision in state.build_decisions:
-        mark = "YES" if decision.required else "NO"
+        if decision.confidence == "BLOCKED":
+            mark = "BLOCKED"
+        else:
+            mark = "YES" if decision.required else "NO"
         lines.append(f"  [{mark}] {decision.name} ({decision.confidence}) — {decision.reason}")
+        if decision.trigger_files:
+            for path in decision.trigger_files[:8]:
+                lines.append(f"      - {path}")
 
     lines.extend(["", "Execution plan:", ""])
     for step in state.execution_plan:

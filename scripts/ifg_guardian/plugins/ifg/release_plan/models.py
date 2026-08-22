@@ -26,6 +26,7 @@ class BuildDecision:
     required: bool
     reason: str
     confidence: str = "HIGH"
+    trigger_files: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +34,7 @@ class BuildDecision:
             "required": self.required,
             "reason": self.reason,
             "confidence": self.confidence,
+            "trigger_files": list(self.trigger_files),
         }
 
     @classmethod
@@ -42,7 +44,26 @@ class BuildDecision:
             required=data.get("required", False),
             reason=data.get("reason", ""),
             confidence=data.get("confidence", "HIGH"),
+            trigger_files=list(data.get("trigger_files", [])),
         )
+
+
+@dataclass
+class AlembicSnapshot:
+    local_head: str = ""
+    local_current: str = ""
+    remote_revision: str = ""
+    pending_revisions: list[str] = field(default_factory=list)
+    remote_available: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "local_head": self.local_head,
+            "local_current": self.local_current,
+            "remote_revision": self.remote_revision,
+            "pending_revisions": list(self.pending_revisions),
+            "remote_available": self.remote_available,
+        }
 
 
 @dataclass
@@ -103,8 +124,10 @@ class RepositorySnapshot:
     dirty: bool = False
     ahead: int = 0
     behind: int = 0
+    deploy_changed_files: list[str] = field(default_factory=list)
     backend_changes: list[str] = field(default_factory=list)
     frontend_changes: list[str] = field(default_factory=list)
+    alembic: AlembicSnapshot = field(default_factory=AlembicSnapshot)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -114,8 +137,10 @@ class RepositorySnapshot:
             "dirty": self.dirty,
             "ahead": self.ahead,
             "behind": self.behind,
+            "deploy_changed_files": list(self.deploy_changed_files),
             "backend_changes": list(self.backend_changes),
             "frontend_changes": list(self.frontend_changes),
+            "alembic": self.alembic.to_dict(),
         }
 
 
@@ -160,8 +185,16 @@ class ReleasePlanState:
                 dirty=repo.get("dirty", False),
                 ahead=repo.get("ahead", 0),
                 behind=repo.get("behind", 0),
+                deploy_changed_files=list(repo.get("deploy_changed_files", [])),
                 backend_changes=list(repo.get("backend_changes", [])),
                 frontend_changes=list(repo.get("frontend_changes", [])),
+                alembic=AlembicSnapshot(
+                    local_head=repo.get("alembic", {}).get("local_head", ""),
+                    local_current=repo.get("alembic", {}).get("local_current", ""),
+                    remote_revision=repo.get("alembic", {}).get("remote_revision", ""),
+                    pending_revisions=list(repo.get("alembic", {}).get("pending_revisions", [])),
+                    remote_available=repo.get("alembic", {}).get("remote_available", False),
+                ),
             ),
             build_decisions=[BuildDecision.from_dict(d) for d in data.get("build_decisions", [])],
             artifacts=[PlannedArtifact.from_dict(a) for a in data.get("artifacts", [])],

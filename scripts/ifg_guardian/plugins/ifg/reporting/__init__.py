@@ -1,0 +1,1 @@
+"""IFG plugin reporting helpers."""

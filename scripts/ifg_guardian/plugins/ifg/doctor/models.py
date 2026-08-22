@@ -34,6 +34,7 @@ class CheckResult:
     status: CheckStatus
     message: str
     details: list[str] = field(default_factory=list)
+    scope: str = "local"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class CheckResult:
             "status": self.status.value,
             "message": self.message,
             "details": list(self.details),
+            "scope": self.scope,
         }
 
     @classmethod
@@ -54,6 +56,7 @@ class CheckResult:
             status=CheckStatus(data["status"]),
             message=data.get("message", ""),
             details=list(data.get("details", [])),
+            scope=data.get("scope", "local"),
         )
 
 

@@ -1,54 +1,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any
 
 from ifg_guardian.core.reporting.debt import finish_markdown
+from ifg_guardian.core.reporting.renderer import render_guardian_report
 from ifg_guardian.core.progress.report import render_timeline_section
-from ifg_guardian.core.time_compat import UTC
 from ifg_guardian.core.workflow.transaction import WorkflowTransaction
-from ifg_guardian.plugins.ifg.release_evaluate.models import ReleaseEvaluateState, StatusSummary
+from ifg_guardian.plugins.ifg.release_evaluate.models import ReleaseEvaluateState
 
 
 def evaluate_from_transaction(transaction: WorkflowTransaction) -> ReleaseEvaluateState:
     return ReleaseEvaluateState.from_dict(transaction.release_evaluate or {})
-
-
-def _workflow_duration_ms(transaction: WorkflowTransaction | None) -> int:
-    if transaction is None:
-        return 0
-    return transaction.elapsed_ms()
-
-
-def _render_summary_block(summary: StatusSummary | None, state: ReleaseEvaluateState) -> list[str]:
-    if summary is None:
-        return []
-    return [
-        "## Executive Summary",
-        "",
-        "| Dimension | Status |",
-        "|---|---|",
-        f"| **Project status** | `{summary.project_status}` |",
-        f"| **Environment status** | `{summary.environment_status}` |",
-        f"| **Policy status** | `{summary.policy_status}` |",
-        f"| **Deployment recommendation** | `{state.deployment_recommendation}` |",
-        "",
-        "Operator note: blockers in **BLOCKERS** concern the project or policy. "
-        "Items in **LOCAL ENVIRONMENT** reflect this machine's interpreter/tools — "
-        "they do not block release by themselves.",
-        "",
-    ]
-
-
-def _section(title: str, items: list[str]) -> list[str]:
-    lines = [f"## {title}", ""]
-    if items:
-        lines.extend([f"- {item}" for item in items])
-    else:
-        lines.append("- None")
-    lines.append("")
-    return lines
 
 
 def render_markdown(
@@ -57,53 +20,10 @@ def render_markdown(
     transaction: WorkflowTransaction | None = None,
     debt=None,
 ) -> str:
-    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    duration = _workflow_duration_ms(transaction)
-    lines = [
-        "# IFG Guardian — Release Engine Evaluation",
-        "",
-        f"**Generated:** {ts}  ",
-        f"**Decision:** `{state.status.value}`  ",
-        f"**Deployment Profile:** `{state.deployment_profile}`  ",
-        f"**Policy Engine:** final decision authority  ",
-        f"**Release Score:** `{state.release_score}/100`  ",
-        f"**Deployment Recommendation:** **{state.deployment_recommendation}**  ",
-        f"**Backup Required:** `{state.backup_required}`  ",
-        f"**Staging Required:** `{state.staging_required}`  ",
-        f"**Production Blocked:** `{state.production_blocked}`  ",
-    ]
-    if transaction is not None:
-        lines.append(f"**Workflow ID:** `{transaction.workflow_id}`  ")
-        lines.append(f"**Duration:** {duration} ms  ")
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_release_evaluate_report
 
-    lines.extend(_render_summary_block(state.summary, state))
-    lines.extend(["## Decision Rationale", "", state.rationale or "No rationale provided.", ""])
-    lines.extend(_section("BLOCKERS", state.blockers))
-    lines.extend(_section("WARNINGS", state.warnings))
-    lines.extend(_section("LOCAL ENVIRONMENT", state.local_environment))
-    lines.extend(_section("INFORMATION", state.information))
-
-    lines.extend(["", "## Release Score Breakdown", "", "| Component | Weight | Score | Rationale |", "|---|---:|---:|---|"])
-    for part in state.release_score_parts:
-        lines.append(f"| {part.name} | {part.weight} | {part.score} | {part.rationale} |")
-
-    lines.extend(["", "## Change Impact", "", "| Area | Impact |", "|---|---|"])
-    for area, level in state.impact.items():
-        lines.append(f"| {area} | {level.value} |")
-
-    lines.extend(["", "## Policy Rules Triggered", ""])
-    if state.policy_rules_triggered:
-        lines.extend([f"- `{rule}`" for rule in state.policy_rules_triggered])
-    else:
-        lines.append("- None")
-
-    lines.extend(["", "## Required Actions Before Production", ""])
-    if state.required_actions:
-        lines.extend([f"- {item}" for item in state.required_actions])
-    else:
-        lines.append("- None")
-
-    lines.extend(["", "## Next Step", "", state.next_step or "N/A", ""])
+    report = build_release_evaluate_report(state, transaction)
+    lines = render_guardian_report(report)
     if transaction is not None:
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
@@ -111,16 +31,25 @@ def render_markdown(
 
 
 def render_json(state: ReleaseEvaluateState, *, transaction: WorkflowTransaction) -> str:
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_release_evaluate_report
+
+    report = build_release_evaluate_report(state, transaction)
     payload: dict[str, Any] = {
         "schema": "ifg_release_evaluate_report_v1",
+        "standard_schema": report.schema_version(),
         "workflow": transaction.to_dict(),
         "release_evaluate": state.to_dict(),
+        "standard_report": {
+            "title": report.title,
+            "executive_summary": report.executive_summary.__dict__,
+            "decision_matrix": [row.__dict__ for row in report.decision_matrix],
+        },
     }
     return json.dumps(payload, indent=2)
 
 
 def render_terminal(state: ReleaseEvaluateState, *, transaction: WorkflowTransaction) -> str:
-    duration = _workflow_duration_ms(transaction)
+    duration = transaction.elapsed_ms()
     lines = [
         "IFG Guardian — Release Engine Evaluation",
         "=" * 44,

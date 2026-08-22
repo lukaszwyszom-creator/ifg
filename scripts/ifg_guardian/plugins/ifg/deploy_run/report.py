@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-
-from ifg_guardian.core.progress.report import render_timeline_section
-from ifg_guardian.core.time_compat import UTC
 from typing import Any
 
-from ifg_guardian.core.workflow.transaction import WorkflowTransaction
+from ifg_guardian.core.progress.report import render_timeline_section
 from ifg_guardian.core.reporting.debt import finish_markdown
+from ifg_guardian.core.reporting.renderer import render_guardian_report
+from ifg_guardian.core.workflow.transaction import WorkflowTransaction
 from ifg_guardian.plugins.ifg.deploy_run.models import DeployRunState, DeployStepStatus
 
 
@@ -23,112 +21,30 @@ def render_markdown(
     transaction: WorkflowTransaction | None = None,
     debt=None,
 ) -> str:
-    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    mode = "DRY-RUN" if state.dry_run else "LIVE"
-    lines = [
-        "# IFG Guardian — Deploy Run",
-        "",
-        f"**Generated:** {ts}  ",
-        f"**Mode:** {mode}  ",
-        f"**Deployment risk:** `{state.deployment_risk}`  ",
-        f"**Doctor status:** `{state.doctor_status}`  ",
-        f"**Release plan:** `{state.release_plan_workflow_id}`  ",
-        f"**Release evaluate:** `{state.release_evaluate_workflow_id}`  ",
-        f"**Release decision:** `{state.release_decision}`  ",
-    ]
-    if state.allow_dirty_build_override:
-        lines.append("**Dirty tree override:** `YES` (--allow-dirty-build)  ")
-    if transaction is not None:
-        lines.append(f"**Workflow ID:** `{transaction.workflow_id}`  ")
-        lines.append(f"**Duration:** {transaction.duration_ms} ms  ")
-        if transaction.dependencies:
-            lines.extend(["", "## Dependencies", ""])
-            for dep_id, meta in transaction.dependencies.items():
-                lines.append(f"- `{dep_id}` → {meta.get('outcome', '?')}")
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_deploy_run_report
 
-    if state.rollback_point.commit_before or state.rollback_point.alembic_before:
-        lines.extend(["", "## Rollback point", ""])
-        lines.append(f"- **commit_before:** `{state.rollback_point.commit_before}`")
-        lines.append(f"- **images_before:** `{state.rollback_point.images_before}`")
-        lines.append(f"- **alembic_before:** `{state.rollback_point.alembic_before}`")
-
-    if state.blockers:
-        lines.extend(["", "## Blockers", ""])
-        for blocker in state.blockers:
-            lines.append(f"- 🛑 {blocker}")
-
-    if state.warnings:
-        lines.extend(["", "## Warnings", ""])
-        for warning in state.warnings:
-            lines.append(f"- ⚠ {warning}")
-
-    lines.extend(["", "## Execution pipeline", ""])
-    lines.append("| # | Action | Required | Status | Duration | Exit | Reason | Command |")
-    lines.append("|---|--------|----------|--------|----------|------|--------|---------|")
-    for step in state.steps:
-        req = "yes" if step.required else "no"
-        status = step.status.value
-        if step.skipped:
-            status = "SKIPPED"
-        exit_code = "" if step.exit_code is None else str(step.exit_code)
-        lines.append(
-            f"| {step.order} | {step.action} | {req} | {status} | {step.duration_ms}ms | {exit_code} "
-            f"| {step.reason} | `{step.command}` |"
-        )
-
-    if state.failed_step:
-        lines.extend(["", "## FAILED STEP", ""])
-        lines.append(f"**Step:** `{state.failed_step.get('step', '')}`")
-        lines.append("")
-        lines.append("**Command:**")
-        lines.append("")
-        lines.append(f"`{state.failed_step.get('command', '')}`")
-        lines.append("")
-        lines.append(f"**Exit Code:** `{state.failed_step.get('exit_code')}`")
-        lines.append("")
-        lines.append("**STDERR:**")
-        lines.append("")
-        lines.append("```")
-        lines.append(str(state.failed_step.get("stderr", "")).strip())
-        lines.append("```")
-        lines.append("")
-        lines.append("**STDOUT:**")
-        lines.append("")
-        lines.append("```")
-        lines.append(str(state.failed_step.get("stdout", "")).strip())
-        lines.append("```")
-        lines.append("")
-        lines.append(f"**Failure Reason:** {state.failed_step.get('failure_reason', '')}")
-        lines.append("")
-        lines.append(f"**ROOT CAUSE:** {state.failed_step.get('root_cause', '')}")
-
-    if state.executed_commands:
-        lines.extend(["", "## Executed commands", ""])
-        for cmd in state.executed_commands:
-            lines.append(f"- `{cmd}`")
-
-    if state.health:
-        lines.extend(["", "## Health", "", f"```\n{state.health}\n```"])
-
-    if state.containers:
-        lines.extend(["", "## Containers", "", f"```\n{state.containers}\n```"])
-
-    lines.extend(["", "## Summary", ""])
-    for key, value in state.summary.items():
-        lines.append(f"- **{key}:** {value}")
-
+    report = build_deploy_run_report(state, transaction)
+    lines = render_guardian_report(report)
     if transaction is not None:
         timeline = transaction.audit.get("progress_timeline")
         lines.extend(render_timeline_section(timeline))
-
     return finish_markdown(lines, debt=debt, state=state, transaction=transaction)
 
 
 def render_json(state: DeployRunState, *, transaction: WorkflowTransaction) -> str:
+    from ifg_guardian.plugins.ifg.reporting.adapters import build_deploy_run_report
+
+    report = build_deploy_run_report(state, transaction)
     payload: dict[str, Any] = {
         "schema": "ifg_deploy_run_report_v1",
+        "standard_schema": report.schema_version(),
         "workflow": transaction.to_dict(),
         "deploy_run": state.to_dict(),
+        "standard_report": {
+            "title": report.title,
+            "executive_summary": report.executive_summary.__dict__,
+            "decision_matrix": [row.__dict__ for row in report.decision_matrix],
+        },
     }
     return json.dumps(payload, indent=2)
 
