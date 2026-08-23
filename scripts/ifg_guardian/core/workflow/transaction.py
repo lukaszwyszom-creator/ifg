@@ -79,6 +79,8 @@ class WorkflowTransaction:
     release_evaluate: dict[str, Any] = field(default_factory=dict)
     deploy_run: dict[str, Any] = field(default_factory=dict)
     cutover_run: dict[str, Any] = field(default_factory=dict)
+    smtp: dict[str, Any] = field(default_factory=dict)
+    env_reload: dict[str, Any] = field(default_factory=dict)
 
     def mark_started(self) -> None:
         self.started_at = datetime.now(UTC)
@@ -157,6 +159,8 @@ class WorkflowTransaction:
             "release_evaluate": dict(self.release_evaluate),
             "deploy_run": dict(self.deploy_run),
             "cutover_run": dict(self.cutover_run),
+            "smtp": dict(self.smtp),
+            "env_reload": dict(self.env_reload),
         }
 
     @classmethod
@@ -226,6 +230,8 @@ class WorkflowTransaction:
             release_evaluate=dict(data.get("release_evaluate", {})),
             deploy_run=dict(data.get("deploy_run", {})),
             cutover_run=dict(data.get("cutover_run", {})),
+            smtp=dict(data.get("smtp", {})),
+            env_reload=dict(data.get("env_reload", {})),
         )
 
 

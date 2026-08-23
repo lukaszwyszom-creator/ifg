@@ -8,6 +8,8 @@ from ifg_guardian.plugins.ifg.deploy_run import IFG_DEPLOY_RUN_WORKFLOW
 from ifg_guardian.plugins.ifg.doctor import IFG_DOCTOR_WORKFLOW
 from ifg_guardian.plugins.ifg.release_evaluate import IFG_RELEASE_EVALUATE_WORKFLOW
 from ifg_guardian.plugins.ifg.release_plan import IFG_RELEASE_PLAN_WORKFLOW
+from ifg_guardian.plugins.ifg.env_reload import IFG_ENV_RELOAD_WORKFLOW
+from ifg_guardian.plugins.ifg.smtp import IFG_SMTP_CHECK_WORKFLOW, IFG_SMTP_TEST_WORKFLOW
 
 
 class IFGPlugin(GuardianPlugin):
@@ -25,6 +27,9 @@ class IFGPlugin(GuardianPlugin):
         return [
             IFG_DOCTOR_WORKFLOW,
             IFG_RELEASE_PLAN_WORKFLOW,
+            IFG_SMTP_CHECK_WORKFLOW,
+            IFG_SMTP_TEST_WORKFLOW,
+            IFG_ENV_RELOAD_WORKFLOW,
             IFG_RELEASE_EVALUATE_WORKFLOW,
             IFG_DEPLOY_RUN_WORKFLOW,
             IFG_CONTAINER_CUTOVER_WORKFLOW,
