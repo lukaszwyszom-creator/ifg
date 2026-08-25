@@ -209,7 +209,7 @@ class TestReportRendering:
         md = render_markdown(state, transaction=tx)
         assert "# IFG Guardian — IFG Doctor" in md
         assert "READY_WITH_WARNINGS" in md
-        assert "Workflow ID" in md
+        assert "| **Workflow** |" in md
 
     def test_json_report(self):
         state, tx = self._sample_state()
