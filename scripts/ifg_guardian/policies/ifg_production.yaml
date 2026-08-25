@@ -79,6 +79,11 @@
       "category": "BLOCKER",
       "penalty": 0
     },
+    "frontend_change_requires_pipeline_build": {
+      "scope": "PROJECT",
+      "category": "WARNING",
+      "penalty": 0
+    },
     "suspicious_untracked_files_block": {
       "scope": "POLICY",
       "category": "BLOCKER",

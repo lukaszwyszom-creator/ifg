@@ -132,6 +132,9 @@ class TestPipelineBuilder:
         required = [s.action for s in pipeline if s.required and not s.skipped]
         assert "git pull" in required
         assert "frontend build" in required
+        fe = next(s for s in pipeline if s.action == "frontend build")
+        assert "npm ci" in fe.command
+        assert "npm run build" in fe.command
         assert "artifact verify local" in required
         assert "dist sync" in required
         assert "artifact verify" in required

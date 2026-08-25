@@ -84,6 +84,7 @@ def classify_doctor_check(check: CheckResult) -> ClassifiedFinding:
     scope = _doctor_check_scope(check)
     message = f"[{check.group}] {check.name}: {check.message}"
     source = f"doctor:{check.check_id}"
+    raw_msg = (check.message or "").upper()
 
     if is_local_environment_error(check.message):
         return ClassifiedFinding(
@@ -100,6 +101,33 @@ def classify_doctor_check(check: CheckResult) -> ClassifiedFinding:
             scope=scope,
             source=source,
         )
+
+    # Pre-build / rebuild signals are actionable warnings, not circular hard blocks.
+    if (
+        check.status in {CheckStatus.WARN, CheckStatus.FAIL}
+        and (
+            "BUILD_REQUIRED" in raw_msg
+            or "IMAGE_REBUILD_REQUIRED" in raw_msg
+            or "OPERATOR_INPUT" in raw_msg
+            or check.check_id
+            in {
+                "frontend.build_required",
+                "frontend.dist_freshness",
+            }
+        )
+    ):
+        if check.status != CheckStatus.CRITICAL and (
+            check.status == CheckStatus.WARN
+            or "BUILD_REQUIRED" in raw_msg
+            or "IMAGE_REBUILD_REQUIRED" in raw_msg
+            or "OPERATOR_INPUT" in raw_msg
+        ):
+            return ClassifiedFinding(
+                message=message,
+                category=FindingCategory.WARNING,
+                scope=scope,
+                source=source,
+            )
 
     if check.status == CheckStatus.WARN:
         return ClassifiedFinding(

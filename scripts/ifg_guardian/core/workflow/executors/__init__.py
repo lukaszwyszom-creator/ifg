@@ -133,18 +133,7 @@ class IntentExecutor:
             return remote
 
         if kind == DeployCommandKind.LOCAL_NPM:
-            build_root = self.deploy_context.local_build_root(self.root)
-            frontend_dir = build_root / "frontend-react"
-            npm_intent = LocalExecIntent(
-                command=["npm", "run", "build"],
-                cwd=str(frontend_dir),
-                mutating=True,
-            )
-            source = self.deploy_context.build_source or "working_tree"
-            self.deploy_context.record(
-                f"cd {frontend_dir} && npm run build  # build_source={source}"
-            )
-            return self._local.execute(npm_intent)
+            return self._execute_frontend_npm_build(intent)
 
         if kind == DeployCommandKind.RSYNC:
             # Ensure rsync runs from the immutable snapshot tree when present.
@@ -236,6 +225,63 @@ class IntentExecutor:
 
         self.deploy_context.record(shell_cmd)
         return self._local.execute(intent)
+
+    def _execute_frontend_npm_build(self, intent: LocalExecIntent) -> IntentResult:
+        """Install locked deps then build frontend inside immutable build_root."""
+        build_root = self.deploy_context.local_build_root(self.root)
+        frontend_dir = build_root / "frontend-react"
+        source = self.deploy_context.build_source or "working_tree"
+        lockfile = frontend_dir / "package-lock.json"
+        if not lockfile.is_file():
+            self.deploy_context.record(
+                f"cd {frontend_dir} && npm ci  # MISSING package-lock.json build_source={source}"
+            )
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                error="package-lock.json missing — refusing npm install; npm ci required",
+                data={"exit_code": 2, "stdout": "", "stderr": "missing package-lock.json"},
+            )
+
+        ci_cmd = ["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"]
+        ci_intent = LocalExecIntent(command=ci_cmd, cwd=str(frontend_dir), mutating=True)
+        self.deploy_context.record(
+            f"cd {frontend_dir} && {' '.join(ci_cmd)}  # build_source={source}"
+        )
+        ci_result = self._local.execute(ci_intent)
+        if not ci_result.ok:
+            ci_result.intent = intent
+            return ci_result
+
+        build_intent = LocalExecIntent(
+            command=["npm", "run", "build"],
+            cwd=str(frontend_dir),
+            mutating=True,
+        )
+        self.deploy_context.record(
+            f"cd {frontend_dir} && npm run build  # build_source={source}"
+        )
+        build_result = self._local.execute(build_intent)
+        build_result.intent = intent
+        if not build_result.ok:
+            return build_result
+
+        # Post-build hard gate: index.html + at least one assets/*.js
+        from ifg_guardian.core.frontend_artifacts import verify_local_dist
+
+        gate = verify_local_dist(build_root)
+        if not gate.is_go:
+            return IntentResult(
+                intent=intent,
+                ok=False,
+                output=gate.message,
+                error=f"Artifact Verification Gate {gate.status} after npm run build",
+                data={"artifact_gate": gate.status, "js_count": gate.js_count},
+            )
+        build_result.data = dict(build_result.data or {})
+        build_result.data["artifact_gate"] = gate.status
+        build_result.data["js_count"] = gate.js_count
+        return build_result
 
 
 __all__ = [

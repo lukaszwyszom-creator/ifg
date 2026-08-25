@@ -34,6 +34,10 @@ class TestDeployCommandRouter:
         [
             ("git pull origin production", DeployCommandKind.LOCAL_GIT),
             ("cd frontend-react && npm run build", DeployCommandKind.LOCAL_NPM),
+            (
+                "cd frontend-react && npm ci --prefer-offline --no-audit --no-fund && npm run build",
+                DeployCommandKind.LOCAL_NPM,
+            ),
             ("ifg_guardian_frontend_artifact_gate local", DeployCommandKind.ARTIFACT_GATE_LOCAL),
             ("ifg_guardian_frontend_artifact_gate remote", DeployCommandKind.ARTIFACT_GATE_REMOTE),
             ("python3 scripts/ifg_guardian_frontend_artifact_gate.py local", DeployCommandKind.ARTIFACT_GATE_LOCAL),

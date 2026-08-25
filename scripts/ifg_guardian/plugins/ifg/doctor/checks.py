@@ -114,6 +114,17 @@ def run_environment_checks(*, do_fetch: bool = False) -> list[CheckResult]:
                 f"on {TARGET_BRANCH} ({head})",
             )
         )
+    elif not branch.strip():
+        # Detached HEAD is expected for immutable commit snapshots / release clones.
+        checks.append(
+            CheckResult(
+                "env.branch",
+                GROUP,
+                "branch",
+                CheckStatus.WARN,
+                f"detached HEAD at {head} — immutable snapshot builds pin commit explicitly",
+            )
+        )
     else:
         checks.append(
             CheckResult(
@@ -327,8 +338,8 @@ def run_frontend_checks() -> list[CheckResult]:
             "frontend.build_required",
             group,
             "npm run build",
-            CheckStatus.PASS if build_ok else CheckStatus.FAIL,
-            build_msg,
+            CheckStatus.PASS if build_ok else CheckStatus.WARN,
+            build_msg if build_ok else f"BUILD_REQUIRED: {build_msg}",
         )
     )
 
@@ -338,8 +349,8 @@ def run_frontend_checks() -> list[CheckResult]:
             "frontend.dist_freshness",
             group,
             "dist freshness",
-            CheckStatus.PASS if dist_ok else CheckStatus.FAIL,
-            dist_msg,
+            CheckStatus.PASS if dist_ok else CheckStatus.WARN,
+            dist_msg if dist_ok else f"BUILD_REQUIRED: {dist_msg}",
         )
     )
     return checks
@@ -436,9 +447,10 @@ def run_backend_checks(
                 "backend.build_required",
                 group,
                 "build required",
-                CheckStatus.FAIL,
+                CheckStatus.WARN if dockerfile_ok else CheckStatus.FAIL,
                 (
-                    "rebuild api/worker required before deploy (image rebuild gate)"
+                    "IMAGE_REBUILD_REQUIRED: rebuild api/worker required before deploy "
+                    "(image rebuild gate)"
                     if dockerfile_ok
                     else "image rebuild required but Dockerfile missing — deploy blocked"
                 ),
@@ -495,15 +507,38 @@ def run_docker_checks(*, remote_host: str, remote_path: str, dry_run: bool) -> l
         code, output = _run(
             ["docker", "compose", "-f", str(compose_path), "config", "--quiet"],
         )
-        checks.append(
-            CheckResult(
-                "docker.compose_config",
-                group,
-                "compose config",
-                CheckStatus.PASS if code == 0 else CheckStatus.FAIL,
-                "compose file valid" if code == 0 else (output or f"exit {code}"),
+        if code == 0:
+            checks.append(
+                CheckResult(
+                    "docker.compose_config",
+                    group,
+                    "compose config",
+                    CheckStatus.PASS,
+                    "compose file valid",
+                )
             )
-        )
+        elif ".env.production" in (output or ""):
+            # Secret stays on DS723+ / operator input — never required inside snapshot.
+            checks.append(
+                CheckResult(
+                    "docker.compose_config",
+                    group,
+                    "compose config",
+                    CheckStatus.WARN,
+                    "OPERATOR_INPUT: .env.production missing locally "
+                    "(expected only on DS723+; not part of immutable snapshot)",
+                )
+            )
+        else:
+            checks.append(
+                CheckResult(
+                    "docker.compose_config",
+                    group,
+                    "compose config",
+                    CheckStatus.FAIL,
+                    output or f"exit {code}",
+                )
+            )
     else:
         checks.append(
             CheckResult(

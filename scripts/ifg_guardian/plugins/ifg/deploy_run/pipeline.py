@@ -65,7 +65,7 @@ def build_deploy_pipeline(
             reason="Mandatory — dist is not in git; API bind-mount requires host artifacts",
             required=True,
             skipped=False,
-            command="cd frontend-react && npm run build",
+            command="cd frontend-react && npm ci --prefer-offline --no-audit --no-fund && npm run build",
         )
     )
     order += 1

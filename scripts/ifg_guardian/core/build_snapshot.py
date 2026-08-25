@@ -281,6 +281,13 @@ def verify_snapshot_against_commit(
         raise SnapshotError("snapshot verification failed: " + "; ".join(mismatches))
 
 
+def snapshot_contains_env_production(tree_dir: Path) -> bool:
+    """True if a forbidden .env.production leaked into the snapshot tree."""
+    return (tree_dir / ".env.production").exists() or any(
+        p.name == ".env.production" for p in tree_dir.rglob(".env.production")
+    )
+
+
 def create_immutable_commit_snapshot(
     *,
     repo_root: Path,
@@ -308,6 +315,11 @@ def create_immutable_commit_snapshot(
 
     try:
         extract_git_archive(repo_root=repo_root, commit_sha=commit_sha, dest=tree_dir)
+        if snapshot_contains_env_production(tree_dir):
+            raise SnapshotError(
+                ".env.production must not appear in immutable snapshot "
+                "(secret stays operator/DS723+ input)"
+            )
         entries = build_manifest_from_tree(tree_dir)
         verify_snapshot_against_commit(
             repo_root=repo_root,
@@ -373,5 +385,16 @@ def cleanup_snapshot(snapshot: BuildSnapshot | Path | None) -> None:
     if snapshot is None:
         return
     root = snapshot.snapshot_root if isinstance(snapshot, BuildSnapshot) else Path(snapshot)
-    if root.exists():
-        shutil.rmtree(root, ignore_errors=True)
+    if not root.exists():
+        return
+    # Explicitly drop generated frontend artifacts before rmtree (defense in depth).
+    for rel in (
+        Path("tree") / "frontend-react" / "node_modules",
+        Path("tree") / "frontend-react" / "dist",
+        Path("frontend-react") / "node_modules",
+        Path("frontend-react") / "dist",
+    ):
+        target = root / rel
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+    shutil.rmtree(root, ignore_errors=True)

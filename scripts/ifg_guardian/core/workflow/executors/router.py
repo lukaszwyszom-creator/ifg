@@ -29,7 +29,7 @@ def classify_deploy_command(shell_cmd: str) -> DeployCommandKind:
     normalized = shell_cmd.strip()
     if normalized.startswith("git pull"):
         return DeployCommandKind.LOCAL_GIT
-    if "npm run build" in normalized:
+    if "npm run build" in normalized or "npm ci" in normalized:
         return DeployCommandKind.LOCAL_NPM
     if normalized.startswith("rsync"):
         return DeployCommandKind.RSYNC

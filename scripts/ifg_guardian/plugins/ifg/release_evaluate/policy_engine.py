@@ -139,12 +139,32 @@ def apply_policy_engine(state: ReleaseEvaluateState, *, doctor: DoctorState, pol
         required_actions.append("Napraw test discovery i uruchom ponownie evaluate.")
 
     frontend_build = check_by_id.get("frontend.build_required")
-    if frontend_changed and frontend_build is not None and frontend_build.status.value in {"FAIL", "CRITICAL"}:
-        decision = ReleaseDecisionStatus.PRODUCTION_BLOCKED
-        state.production_blocked = True
-        rules.append("frontend_change_requires_passing_build")
-        blockers.append("Frontend changed and build check failed.")
-        required_actions.append("Zbuduj frontend (`npm run build`) i odśwież artefakty dist.")
+    frontend_dist = check_by_id.get("frontend.dist_freshness")
+    frontend_needs_build = False
+    for fe_check in (frontend_build, frontend_dist):
+        if fe_check is None:
+            continue
+        msg = (fe_check.message or "").upper()
+        if fe_check.status.value == "CRITICAL":
+            frontend_needs_build = True
+        elif fe_check.status.value in {"FAIL", "WARN"} and "BUILD_REQUIRED" in msg:
+            frontend_needs_build = True
+        elif fe_check.status.value == "FAIL":
+            # Legacy hard fail without BUILD_REQUIRED prefix — still actionable.
+            frontend_needs_build = True
+    if frontend_changed and frontend_needs_build:
+        # Deploy pipeline always runs npm ci + build + artifact gate; do not
+        # circular-block production solely because dist is missing/stale pre-build.
+        rules.append("frontend_change_requires_pipeline_build")
+        required_actions.append(
+            "Pipeline wykona `npm ci` + `npm run build` w immutable snapshot; "
+            "artifact gate musi przejść przed rsync."
+        )
+        if frontend_build is not None and frontend_build.status.value == "CRITICAL":
+            decision = ReleaseDecisionStatus.PRODUCTION_BLOCKED
+            state.production_blocked = True
+            rules.append("frontend_change_requires_passing_build")
+            blockers.append("Frontend changed and build check failed critically.")
 
     if backend_changed:
         rules.append("backend_change_requires_api_worker_rebuild")
