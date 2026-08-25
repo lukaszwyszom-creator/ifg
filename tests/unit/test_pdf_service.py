@@ -154,3 +154,36 @@ def test_html_net_mode_gross_unit_price_from_net_and_vat() -> None:
     )
     html = render_invoice_html(_sample_invoice(items=[item]))
     assert ">123.00<" in html
+
+
+def test_html_forces_light_paper_against_dark_color_scheme() -> None:
+    """Podgląd/PDF nie mogą dziedziczyć ciemnego motywu — biała kartka + ciemny tekst."""
+    html = render_invoice_html(_sample_invoice())
+
+    assert "color-scheme: light" in html
+    assert "html {" in html or "html {" in html.replace("  ", " ")
+    assert "background: #ffffff" in html
+    assert "color: #111111" in html
+
+    # Cały dokument (html/body), nie tylko sekcja płatności.
+    assert "html {\n    color-scheme: light;\n    background: #ffffff;\n  }" in html
+    assert "body {\n    font-family: -apple-system, Arial, sans-serif;\n    font-size: 13px;\n    color: #111111;\n    background: #ffffff;" in html
+
+    # Komórki tabeli i podsumowanie też mają jawny ciemny tekst na jasnym tle.
+    assert "th, td {" in html
+    assert "color: #111111; background: #ffffff;" in html
+    assert ".totals {" in html
+    assert ".totals .total-gross {" in html
+    assert "color: #111111;" in html
+
+    # Druk / PDF zachowuje jasną kartkę.
+    assert "@media print" in html
+    assert "html, body {" in html
+    assert "background: #ffffff !important;" in html
+    assert "color: #111111 !important;" in html
+    assert "print-color-adjust: exact;" in html
+
+    # Sekcja płatności nadal czytelna (regresja istniejącego zachowania).
+    assert ".payment-box {" in html
+    assert "background: #fafafa;" in html
+    assert "Płatność" in html

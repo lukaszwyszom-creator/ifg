@@ -205,37 +205,44 @@ def render_invoice_html(
 <title>Faktura {_esc(number)}</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  /* Invoice sheet must stay light paper even when OS/app uses dark color-scheme. */
+  html {{
+    color-scheme: light;
+    background: #ffffff;
+  }}
   body {{
     font-family: -apple-system, Arial, sans-serif;
     font-size: 13px;
-    color: #111;
+    color: #111111;
+    background: #ffffff;
     padding: 24px;
     max-width: 900px;
     margin: 0 auto;
   }}
-  h1 {{ font-size: 22px; margin-bottom: 4px; }}
-  .meta {{ color: #555; margin-bottom: 20px; font-size: 12px; }}
+  h1 {{ font-size: 22px; margin-bottom: 4px; color: #111111; }}
+  .meta {{ color: #555555; margin-bottom: 20px; font-size: 12px; }}
   .parties {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; }}
-  .party h3 {{ font-size: 12px; text-transform: uppercase; color: #888; margin-bottom: 6px; }}
-  .party p {{ margin-bottom: 2px; }}
-  table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
-  th, td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; }}
-  th {{ background: #f5f5f5; font-size: 11px; font-weight: 600; text-transform: uppercase; }}
+  .party h3 {{ font-size: 12px; text-transform: uppercase; color: #888888; margin-bottom: 6px; }}
+  .party p {{ margin-bottom: 2px; color: #111111; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #ffffff; }}
+  th, td {{ border: 1px solid #dddddd; padding: 6px 8px; text-align: left; color: #111111; background: #ffffff; }}
+  th {{ background: #f5f5f5; font-size: 11px; font-weight: 600; text-transform: uppercase; color: #111111; }}
   .num {{ text-align: right; }}
   .bold {{ font-weight: 700; }}
-  .totals {{ text-align: right; }}
-  .totals p {{ margin-bottom: 4px; }}
-  .totals .total-gross {{ font-size: 18px; font-weight: 700; margin-top: 8px; }}
+  .totals {{ text-align: right; color: #111111; }}
+  .totals p {{ margin-bottom: 4px; color: #111111; }}
+  .totals .total-gross {{ font-size: 18px; font-weight: 700; margin-top: 8px; color: #111111; }}
   .payment-box {{
     margin: 18px 0 20px;
     padding: 12px 14px;
-    border: 1px solid #ddd;
+    border: 1px solid #dddddd;
     border-radius: 6px;
     background: #fafafa;
+    color: #111111;
   }}
-  .payment-box h3 {{ font-size: 12px; text-transform: uppercase; color: #555; margin-bottom: 10px; }}
+  .payment-box h3 {{ font-size: 12px; text-transform: uppercase; color: #555555; margin-bottom: 10px; }}
   .payment-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
-  .payment-label {{ display: block; color: #777; font-size: 11px; margin-bottom: 3px; }}
+  .payment-label {{ display: block; color: #777777; font-size: 11px; margin-bottom: 3px; }}
   .payment-paid {{ color: #155724; }}
   .payment-due {{ color: #721c24; }}
   .badge {{
@@ -245,7 +252,7 @@ def render_invoice_html(
     font-size: 11px;
     font-weight: 600;
     background: #e0e0e0;
-    color: #333;
+    color: #333333;
   }}
   .badge-accepted {{ background: #d4edda; color: #155724; }}
   .badge-rejected {{ background: #f8d7da; color: #721c24; }}
@@ -256,7 +263,7 @@ def render_invoice_html(
     margin: 0 auto 24px;
     padding: 10px 32px;
     background: #0d6efd;
-    color: #fff;
+    color: #ffffff;
     border: none;
     border-radius: 6px;
     cursor: pointer;
@@ -264,7 +271,13 @@ def render_invoice_html(
   }}
   @media print {{
     .print-btn {{ display: none; }}
-    body {{ padding: 0; }}
+    html, body {{
+      background: #ffffff !important;
+      color: #111111 !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      padding: 0;
+    }}
   }}
 </style>
 </head>
