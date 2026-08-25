@@ -103,7 +103,10 @@ class TestWorkflowRegistry:
             assert wf.plugin == "ifg"
             assert wf.mutating is True
             assert wf.depends_on == ["ifg.release.plan", "ifg.release.evaluate"]
-            assert len(wf.stages) == 9
+            assert len(wf.stages) == 11
+            assert wf.stages[0].id == "init"
+            assert wf.stages[6].id == "prepare_build_snapshot"
+            assert wf.stages[-1].id == "cleanup_build_snapshot"
         finally:
             runtime.shutdown()
 
@@ -306,7 +309,12 @@ class TestDeployWorkflowIntegration:
             patch("ifg_guardian.core.workflow.executors.local_executor.subprocess.run", block_mutations),
             patch("ifg_guardian.core.workflow.executors.ssh_executor.subprocess.run", block_mutations),
         ):
-            ctx = execute_ifg_deploy_run(dry_run=True, output_format="none", root=tmp_path)
+            ctx = execute_ifg_deploy_run(
+                dry_run=True,
+                output_format="none",
+                root=tmp_path,
+                skip_build_snapshot=True,
+            )
 
         assert ctx.state_machine.state == WorkflowState.SUCCESS
         assert "ifg.release.plan" in ctx.transaction.dependencies
@@ -427,6 +435,7 @@ class TestLiveDeploy:
                 skip_preflight=True,
                 output_format="none",
                 root=tmp_path,
+                skip_build_snapshot=True,
             )
 
         assert ctx.state_machine.state == WorkflowState.SUCCESS

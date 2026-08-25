@@ -5,8 +5,10 @@ from ifg_guardian.plugins.ifg.deploy_run.preflight_stage import PreflightStage
 from ifg_guardian.plugins.ifg.deploy_run.stages import (
     BlockerStage,
     BuildPipelineStage,
+    CleanupBuildSnapshotStage,
     DependencyStage,
     InitStage,
+    PrepareBuildSnapshotStage,
     ReleaseEvaluateStage,
     ReleasePlanStage,
     SimulateExecutionStage,
@@ -27,8 +29,10 @@ IFG_DEPLOY_RUN_WORKFLOW = WorkflowDefinition(
         ReleaseEvaluateStage(),
         BlockerStage(),
         PreflightStage(),
+        PrepareBuildSnapshotStage(),
         BuildPipelineStage(),
         SimulateExecutionStage(),
         SummaryStage(),
+        CleanupBuildSnapshotStage(),
     ],
 )

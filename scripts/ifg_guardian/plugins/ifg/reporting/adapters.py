@@ -457,6 +457,18 @@ def build_deploy_run_report(
     }
     if state.allow_dirty_build_override:
         extras["Dirty override"] = "YES"
+    if state.build_source:
+        extras["Build source"] = state.build_source
+    if state.build_commit:
+        extras["Build commit"] = state.build_commit
+    if state.build_snapshot_path:
+        extras["Build snapshot"] = state.build_snapshot_path
+    if state.build_manifest_sha256:
+        extras["Snapshot manifest"] = state.build_manifest_sha256[:16]
+    if state.source_wip_detected:
+        extras["Source WIP"] = "detected (excluded from snapshot)"
+    elif state.build_source:
+        extras["Source WIP"] = "none"
 
     pipeline_lines = [
         "| # | Action | Required | Status | Duration | Exit | Reason | Command |",

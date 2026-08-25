@@ -33,6 +33,9 @@ def execute_ifg_deploy_run(
     remote_path: str = DEFAULT_REMOTE_PATH,
     progress_enabled: bool | None = None,
     root: Path | None = None,
+    build_commit: str | None = None,
+    keep_build_snapshot: bool = False,
+    skip_build_snapshot: bool = False,
 ):
     if not dry_run and not assume_yes:
         raise RuntimeError(LIVE_REQUIRES_YES)
@@ -57,6 +60,9 @@ def execute_ifg_deploy_run(
                 "allow_dirty_build": allow_dirty_build,
                 "skip_preflight": skip_preflight,
                 "progress_enabled": progress_enabled,
+                "build_commit": build_commit,
+                "keep_build_snapshot": keep_build_snapshot,
+                "skip_build_snapshot": skip_build_snapshot,
             },
             plugin_registry=runtime.plugin_registry,
         )

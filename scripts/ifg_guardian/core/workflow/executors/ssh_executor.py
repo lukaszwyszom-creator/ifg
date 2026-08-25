@@ -67,12 +67,19 @@ class SSHExecutor:
             },
         )
 
-    def execute_rsync(self, intent: LocalExecIntent, shell_cmd: str) -> IntentResult:
+    def execute_rsync(
+        self,
+        intent: LocalExecIntent,
+        shell_cmd: str,
+        *,
+        cwd: Path | None = None,
+    ) -> IntentResult:
         self.deploy_context.record(shell_cmd)
+        run_cwd = cwd if cwd is not None else self.root
         try:
             result = subprocess.run(
                 ["/bin/sh", "-c", shell_cmd],
-                cwd=self.root,
+                cwd=run_cwd,
                 capture_output=True,
                 text=True,
                 check=False,

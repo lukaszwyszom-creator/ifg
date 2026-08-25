@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from time import perf_counter
 
+from ifg_guardian.core.build_snapshot import (
+    SnapshotError,
+    cleanup_snapshot,
+    create_immutable_commit_snapshot,
+    reverify_snapshot,
+)
 from ifg_guardian.config import DEFAULT_REMOTE_PATH, TARGET_BRANCH
 from ifg_guardian.core.git import git, porcelain_is_dirty
 from ifg_guardian.core.preflight.checks import DIRTY_TREE_BLOCK_MESSAGE, DIRTY_TREE_OVERRIDE_WARNING
@@ -240,6 +246,109 @@ class BlockerStage(_DeployStage):
         return StageResult(status=StageStatus.PASS, message="no blockers")
 
 
+class PrepareBuildSnapshotStage(_DeployStage):
+    id = "prepare_build_snapshot"
+    label = "Prepare immutable git-archive build snapshot"
+
+    def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
+        state = get_deploy_state(ctx)
+        # LIVE with blockers: do not create snapshot (no build will run).
+        if state.blockers and ctx.mode == ExecutionMode.LIVE:
+            return StageResult(status=StageStatus.SKIP, message="snapshot skipped due to blockers")
+
+        if bool(ctx.data.get("skip_build_snapshot")):
+            return StageResult(status=StageStatus.SKIP, message="build snapshot skipped by request")
+
+        existing = ctx.data.get("build_snapshot")
+        if existing is not None and getattr(existing, "tree_dir", None):
+            snapshot = existing
+        else:
+            commit_ref = str(ctx.data.get("build_commit") or "HEAD")
+            try:
+                snapshot = create_immutable_commit_snapshot(
+                    repo_root=ctx.root,
+                    commit=commit_ref,
+                )
+                # Tamper gate: re-verify immediately after creation.
+                reverify_snapshot(snapshot, repo_root=ctx.root)
+            except SnapshotError as exc:
+                state.blockers.append(f"Immutable build snapshot failed: {exc}")
+                status = StageStatus.FAIL if ctx.mode == ExecutionMode.LIVE else StageStatus.WARN
+                return StageResult(status=status, message=str(exc))
+
+        ctx.data["build_snapshot"] = snapshot
+        state.build_commit = snapshot.commit_sha
+        state.build_snapshot_path = str(snapshot.snapshot_root)
+        state.build_source = "git_archive"
+        state.build_manifest_sha256 = snapshot.manifest_sha256
+        state.source_wip_detected = snapshot.source_wip_detected
+        state.source_wip_excluded = snapshot.source_wip_excluded
+
+        deploy_ctx = ctx.data.get("deploy_executor_context")
+        if not isinstance(deploy_ctx, DeployExecutorContext):
+            deploy_ctx = DeployExecutorContext(
+                remote_host=ctx.data.get("remote_host"),
+                remote_path=str(ctx.data.get("remote_path") or DEFAULT_REMOTE_PATH),
+            )
+            ctx.data["deploy_executor_context"] = deploy_ctx
+        deploy_ctx.build_root = snapshot.tree_dir
+        deploy_ctx.build_commit = snapshot.commit_sha
+        deploy_ctx.build_source = "git_archive"
+
+        if snapshot.source_wip_detected:
+            state.warnings.append(
+                "Source working tree has WIP; immutable snapshot excludes uncommitted "
+                f"paths ({len(snapshot.source_wip_paths)} listed, build_source=git_archive)."
+            )
+
+        ctx.transaction.artifacts.append(
+            ArtifactRecord(
+                type="ifg_build_snapshot",
+                path=str(snapshot.snapshot_root),
+            )
+        )
+        return StageResult(
+            status=StageStatus.PASS,
+            message=(
+                f"immutable snapshot {snapshot.commit_sha[:7]} "
+                f"({snapshot.file_count} files, wip_excluded={snapshot.source_wip_excluded})"
+            ),
+            reasons=[
+                BuildReason(
+                    decision="build_source_git_archive",
+                    because=[
+                        snapshot.commit_sha,
+                        f"manifest={snapshot.manifest_sha256[:12]}",
+                        f"wip_detected={snapshot.source_wip_detected}",
+                    ],
+                    source_stage=self.id,
+                )
+            ],
+        )
+
+
+class CleanupBuildSnapshotStage(_DeployStage):
+    id = "cleanup_build_snapshot"
+    label = "Cleanup immutable build snapshot"
+
+    def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
+        snapshot = ctx.data.pop("build_snapshot", None)
+        keep = bool(ctx.data.get("keep_build_snapshot"))
+        if snapshot is None:
+            return StageResult(status=StageStatus.SKIP, message="no snapshot to cleanup")
+        path = getattr(snapshot, "snapshot_root", None)
+        if keep:
+            return StageResult(
+                status=StageStatus.PASS,
+                message=f"snapshot retained for evidence: {path}",
+            )
+        cleanup_snapshot(snapshot)
+        deploy_ctx = ctx.data.get("deploy_executor_context")
+        if isinstance(deploy_ctx, DeployExecutorContext):
+            deploy_ctx.build_root = None
+        return StageResult(status=StageStatus.PASS, message=f"snapshot removed: {path}")
+
+
 class BuildPipelineStage(_DeployStage):
     id = "build_pipeline"
     label = "Build deployment execution pipeline"
@@ -248,6 +357,16 @@ class BuildPipelineStage(_DeployStage):
         state = get_deploy_state(ctx)
         if state.blockers and ctx.mode == ExecutionMode.LIVE:
             return StageResult(status=StageStatus.SKIP, message="pipeline skipped due to blockers")
+
+        # Before executing/simulating pipeline, re-verify snapshot integrity.
+        snapshot = ctx.data.get("build_snapshot")
+        if snapshot is not None:
+            try:
+                reverify_snapshot(snapshot, repo_root=ctx.root)
+            except SnapshotError as exc:
+                state.blockers.append(f"Build snapshot tampered or invalid: {exc}")
+                status = StageStatus.FAIL if ctx.mode == ExecutionMode.LIVE else StageStatus.WARN
+                return StageResult(status=status, message=str(exc))
 
         plan = ctx.data["release_plan_state"]
         remote_path = str(ctx.data.get("remote_path", DEFAULT_REMOTE_PATH))
@@ -411,6 +530,12 @@ class SummaryStage(_DeployStage):
             "steps_simulated": sum(1 for s in state.steps if s.status == DeployStepStatus.SIMULATED),
             "steps_executed": sum(1 for s in state.steps if s.status == DeployStepStatus.EXECUTED),
             "steps_failed": sum(1 for s in state.steps if s.status == DeployStepStatus.FAILED),
+            "build_commit": state.build_commit,
+            "build_snapshot_path": state.build_snapshot_path,
+            "build_source": state.build_source,
+            "build_manifest_sha256": state.build_manifest_sha256,
+            "source_wip_detected": state.source_wip_detected,
+            "source_wip_excluded": state.source_wip_excluded,
         }
         ctx.transaction.deploy_run = state.to_dict()
         ctx.transaction.warnings.extend(state.warnings)

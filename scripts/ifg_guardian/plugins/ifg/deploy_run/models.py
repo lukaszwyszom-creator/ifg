@@ -115,6 +115,12 @@ class DeployRunState:
     failed_step: dict[str, Any] = field(default_factory=dict)
     summary: dict[str, Any] = field(default_factory=dict)
     allow_dirty_build_override: bool = False
+    build_commit: str = ""
+    build_snapshot_path: str = ""
+    build_source: str = ""
+    build_manifest_sha256: str = ""
+    source_wip_detected: bool = False
+    source_wip_excluded: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +140,12 @@ class DeployRunState:
             "failed_step": dict(self.failed_step),
             "summary": dict(self.summary),
             "allow_dirty_build_override": self.allow_dirty_build_override,
+            "build_commit": self.build_commit,
+            "build_snapshot_path": self.build_snapshot_path,
+            "build_source": self.build_source,
+            "build_manifest_sha256": self.build_manifest_sha256,
+            "source_wip_detected": self.source_wip_detected,
+            "source_wip_excluded": self.source_wip_excluded,
         }
 
     @classmethod
@@ -155,4 +167,10 @@ class DeployRunState:
             failed_step=dict(data.get("failed_step", {})),
             summary=dict(data.get("summary", {})),
             allow_dirty_build_override=bool(data.get("allow_dirty_build_override", False)),
+            build_commit=data.get("build_commit", ""),
+            build_snapshot_path=data.get("build_snapshot_path", ""),
+            build_source=data.get("build_source", ""),
+            build_manifest_sha256=data.get("build_manifest_sha256", ""),
+            source_wip_detected=bool(data.get("source_wip_detected", False)),
+            source_wip_excluded=bool(data.get("source_wip_excluded", True)),
         )

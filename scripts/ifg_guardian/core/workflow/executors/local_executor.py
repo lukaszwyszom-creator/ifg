@@ -14,7 +14,12 @@ class LocalExecutor:
         self.root = root
 
     def execute(self, intent: LocalExecIntent) -> IntentResult:
-        cwd = Path(intent.cwd) if intent.cwd else self.root
+        if intent.cwd:
+            cwd = Path(intent.cwd)
+            if not cwd.is_absolute():
+                cwd = self.root / cwd
+        else:
+            cwd = self.root
         try:
             result = subprocess.run(
                 intent.command,

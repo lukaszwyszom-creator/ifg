@@ -133,22 +133,30 @@ class IntentExecutor:
             return remote
 
         if kind == DeployCommandKind.LOCAL_NPM:
+            build_root = self.deploy_context.local_build_root(self.root)
+            frontend_dir = build_root / "frontend-react"
             npm_intent = LocalExecIntent(
                 command=["npm", "run", "build"],
-                cwd="frontend-react",
+                cwd=str(frontend_dir),
                 mutating=True,
             )
-            self.deploy_context.record("cd frontend-react && npm run build")
+            source = self.deploy_context.build_source or "working_tree"
+            self.deploy_context.record(
+                f"cd {frontend_dir} && npm run build  # build_source={source}"
+            )
             return self._local.execute(npm_intent)
 
         if kind == DeployCommandKind.RSYNC:
-            return self._ssh.execute_rsync(intent, shell_cmd)
+            # Ensure rsync runs from the immutable snapshot tree when present.
+            build_root = self.deploy_context.local_build_root(self.root)
+            return self._ssh.execute_rsync(intent, shell_cmd, cwd=build_root)
 
         if kind == DeployCommandKind.ARTIFACT_GATE_LOCAL:
             from ifg_guardian.core.frontend_artifacts import verify_local_dist
 
             self.deploy_context.record(shell_cmd)
-            gate = verify_local_dist(self.root)
+            build_root = self.deploy_context.local_build_root(self.root)
+            gate = verify_local_dist(build_root)
             if gate.is_go:
                 return IntentResult(
                     intent=intent,

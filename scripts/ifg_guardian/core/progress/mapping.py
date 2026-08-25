@@ -33,6 +33,8 @@ _STAGE_PHASE_MAP: dict[str, str] = {
     "blocker": "repo_status",
     "build_pipeline": "repo_status",
     "preflight": "repo_status",
+    "prepare_build_snapshot": "repo_status",
+    "cleanup_build_snapshot": "report_write",
     "summary": "report_write",
     "simulate_execution": "remote_build",
 }
