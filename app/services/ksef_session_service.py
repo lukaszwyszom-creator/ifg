@@ -772,11 +772,19 @@ class KSeFSessionService:
         nip: str,
         correlation_id: UUID | None = None,
     ) -> None:
+        # Completeness vs DB is keyed by exact ksef_reference_number.
+        # Sync window may limit KSeF metadata fetch, but must NOT hide existing
+        # invoices whose issue_date falls outside that window (false SYNC_INCOMPLETE).
+        _ = (date_from, date_to)  # retained for call-site compatibility / future window metrics
         if self.invoice_repository is not None:
+            candidate_refs = (
+                set(audit.refs_received_from_metadata)
+                | set(audit.refs_xml_downloaded)
+                | set(audit.refs_saved)
+            )
             audit.db_refs_in_window = set(
-                self.invoice_repository.list_ksef_purchase_refs_in_issue_range(
-                    date_from,
-                    date_to,
+                self.invoice_repository.list_existing_ksef_purchase_refs(
+                    candidate_refs,
                     buyer_nip=nip,
                 )
             )

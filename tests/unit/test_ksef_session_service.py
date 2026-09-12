@@ -192,6 +192,7 @@ class TestSyncReceivedInvoicesUsesPurchaseAuth:
         repo = MagicMock()
         repo.exists_by_ksef_number.return_value = True
         repo.list_ksef_purchase_refs_in_issue_range.return_value = ["KSEF-1"]
+        repo.list_existing_ksef_purchase_refs.return_value = ["KSEF-1"]
         service.invoice_repository = repo
 
         auth_ctx = MagicMock()
@@ -206,7 +207,7 @@ class TestSyncReceivedInvoicesUsesPurchaseAuth:
         )
 
         service.purchase_auth.ensure_purchase_auth.assert_called_once_with(
-            "1234567890", actor_user_id=None
+            "1234567890", actor_user_id=None, correlation_id=None
         )
         assert counts["skipped_existing"] == 1
         service.ksef_client.get_purchase_invoice_xml.assert_not_called()

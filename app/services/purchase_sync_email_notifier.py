@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 
 _EMAIL_SUBJECT = "IFG — nowe faktury zakupowe z KSeF"
 
+# Controlled one-shot backfill (GWO-IFG-SYNC-COMPLETENESS-FIX-AND-NOTIFICATION-BACKFILL-2026-09-12)
+BACKFILL_CORRELATION_ID = UUID("a11c0ffe-2026-0912-b001-000000000001")
+BACKFILL_IDEMPOTENCY_SCOPE = "purchase_sync_notify_backfill"
+BACKFILL_IDEMPOTENCY_KEY = "missed-since-2026-09-01T14:00-to-2026-09-12T08:00"
+BACKFILL_EMAIL_SUBJECT = (
+    "Zaległe powiadomienie — faktury zakupowe pobrane od 01.09.2026"
+)
+
 
 _ITEM_TITLE_MAX_LEN = 80
 
@@ -160,12 +168,17 @@ class PurchaseSyncEmailNotifier:
 
         invoice_lines = self._load_invoice_lines(row.new_invoice_ids)
         body = self._render_body(row, invoice_lines)
+        subject = (
+            BACKFILL_EMAIL_SUBJECT
+            if row.correlation_id == BACKFILL_CORRELATION_ID
+            else _EMAIL_SUBJECT
+        )
 
         try:
             send_email(
                 config=smtp_config,
                 to_addrs=recipients,
-                subject=_EMAIL_SUBJECT,
+                subject=subject,
                 body_text=body,
             )
         except SmtpSendError as exc:
@@ -344,16 +357,29 @@ class PurchaseSyncEmailNotifier:
         bullets = [self._format_invoice_bullet(line) for line in invoice_lines]
         invoice_list = "\n".join(bullets) if bullets else "(brak pozycji)"
         total_line = self._format_money(row.gross_sum, "PLN")
-        greeting = (
-            "Małgosiu!\n\n"
-            f"Synchronizacja zakupów z KSeF o godzinie {hour_label} została zakończona pomyślnie! "
-            f"{self._zakupki_phrase(row.invoice_count)}\n\n"
-            "Oto one!\n\n"
-            f"{invoice_list}\n"
-        )
+        if row.correlation_id == BACKFILL_CORRELATION_ID:
+            greeting = (
+                "Małgosiu!\n\n"
+                "To zaległe powiadomienie zbiorcze — faktury zakupowe pobrane z KSeF "
+                "od 01.09.2026, które wcześniej nie zostały objęte mailem przez błąd "
+                "audytu kompletności (fałszywy SYNC_INCOMPLETE).\n\n"
+                f"{self._zakupki_phrase(row.invoice_count)}\n\n"
+                "Oto one!\n\n"
+                f"{invoice_list}\n"
+            )
+            session_type = "backfill (jednorazowy)"
+        else:
+            greeting = (
+                "Małgosiu!\n\n"
+                f"Synchronizacja zakupów z KSeF o godzinie {hour_label} została zakończona pomyślnie! "
+                f"{self._zakupki_phrase(row.invoice_count)}\n\n"
+                "Oto one!\n\n"
+                f"{invoice_list}\n"
+            )
+            session_type = "automatyczna"
         technical = (
             "---\n\n"
-            "Typ sesji: automatyczna\n"
+            f"Typ sesji: {session_type}\n"
             f"Sesja: {hour_label}\n"
             f"Rozpoczęcie: {started}\n"
             f"Zakończenie: {finished}\n"

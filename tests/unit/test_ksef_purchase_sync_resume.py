@@ -98,6 +98,14 @@ class _FakeInvoiceRepository:
     ) -> list[str]:
         return [ref for ref, _ in self.rows]
 
+    def list_existing_ksef_purchase_refs(
+        self,
+        refs,
+        buyer_nip: str | None = None,
+    ) -> list[str]:
+        present = {ref for ref, _ in self.rows}
+        return [ref for ref in refs if ref in present]
+
 
 def _make_incremental_service(repo: _FakeInvoiceRepository) -> KSeFSessionService:
     session = MagicMock()

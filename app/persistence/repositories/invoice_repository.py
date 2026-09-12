@@ -142,6 +142,38 @@ class InvoiceRepository:
         )
         return bool(self.session.execute(stmt).scalar())
 
+    def list_existing_ksef_purchase_refs(
+        self,
+        refs: list[str] | set[str] | tuple[str, ...],
+        buyer_nip: str | None = None,
+    ) -> list[str]:
+        """Zwraca podzbiór ``refs`` obecnych w DB (dokładny ``ksef_reference_number``).
+
+        Celowo **bez** filtra ``issue_date`` — okno sync ogranicza metadata KSeF,
+        ale nie może wykluczać już zapisanych faktur z wcześniejszą datą wystawienia.
+        """
+        candidates = sorted({r.strip() for r in refs if isinstance(r, str) and r.strip()})
+        if not candidates:
+            return []
+
+        stmt = select(InvoiceORM.ksef_reference_number).where(
+            InvoiceORM.direction == "purchase",
+            InvoiceORM.ksef_reference_number.in_(candidates),
+        )
+        if buyer_nip:
+            normalized = buyer_nip.replace("-", "").replace(" ", "")
+            buyer_nip_expr = func.replace(
+                func.replace(InvoiceORM.buyer_snapshot_json["nip"].astext, "-", ""),
+                " ",
+                "",
+            )
+            stmt = stmt.where(buyer_nip_expr == normalized)
+
+        rows = self.session.execute(stmt).scalars().all()
+        found = {ref for ref in rows if isinstance(ref, str) and ref}
+        # Preserve stable order matching candidates for deterministic audits/tests.
+        return [ref for ref in candidates if ref in found]
+
     def count_ksef_purchases_in_issue_range(
         self,
         date_from: date,
