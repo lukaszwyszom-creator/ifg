@@ -17,15 +17,18 @@ EOL_BASELINE_OK: **YES**
 
 ## ETAP 2 — FEATURE DIFF (contractor + CSS)
 
-| Plik | Oczekiwany charakter diffu |
+| Plik | cached `--stat` |
 |---|---|
-| `contractor_service.py` | mała zmiana logiki (bez masowego EOL) |
-| `contractors.js` | mała zmiana logiki (bez masowego EOL) |
-| `InvoiceForm.module.css` | tylko reguły adresu (~+49), LF |
+| `contractor_service.py` | +3/−1 (bez masowego EOL) |
+| `contractors.js` | +3 (bez masowego EOL) |
+| `InvoiceForm.module.css` | +49 (tylko reguły adresu, LF) |
 
-FEATURE_EOL_NOISE: **NO** (bramka `git diff --cached --check` = 0)
+`git diff --cached --check` → exit 0.
+FEATURE_EOL_NOISE: **NO**
 
 ## ETAP 3 — SCOPE (whitelist w feature commit)
+
+16 ścieżek (dokładnie whitelist):
 
 - `app/domain/party_address.py` (new)
 - `app/domain/models/invoice.py`
@@ -39,16 +42,13 @@ FEATURE_EOL_NOISE: **NO** (bramka `git diff --cached --check` = 0)
 - `frontend-react/src/components/invoice/InvoiceActions.jsx`
 - `frontend-react/src/components/invoice/InvoiceCardList.jsx`
 - `tests/unit/test_ksef_partial_regon_address.py` (new)
-- `docs/reports/2026-09-22_GWO-IFG-KSEF-PARTIAL-REGON-ADDRESS-0001.md`
-- `docs/reports/2026-09-22_GWO-IFG-KSEF-PARTIAL-REGON-ADDRESS-0002-LOCAL-REVIEW.md`
-- `docs/reports/2026-09-22_GWO-IFG-KSEF-PARTIAL-REGON-ADDRESS-0003-PRECOMMIT-GATE.md`
-- `docs/reports/2026-09-22_GWO-IFG-KSEF-PARTIAL-REGON-ADDRESS-0004-FEATURE-COMMIT.md`
+- reports KSeF 0001, 0002, 0003, 0004
 
-Wykluczone (pozostają w WT): `package.json`, Cursor/npm reports, EOL-0001/0002 reports, Guardian, numbering WIP, `docs/gwo`, inne docs.
+Wykluczone (pozostają w WT): `package.json`, Cursor/npm, EOL reports, Guardian, numbering WIP, `docs/gwo`, inne docs.
 
 DIFF_SCOPE_OK: **YES**
 
-## ETAP 4 — TESTY (z wcześniejszego GWO / lokalny review)
+## ETAP 4 — TESTY (z GWO / lokalny review)
 
 | Suite | Wynik |
 |---|---|
@@ -61,15 +61,14 @@ DIFF_SCOPE_OK: **YES**
 
 Feature GWO: **PASS**.
 
-## ETAP 5 — COMMIT
-
-Message:
+## ETAP 5 — COMMIT (wykonany)
 
 ```text
-fix(ksef): support partial REGON buyer addresses
+23c72b2 fix(ksef): support partial REGON buyer addresses
+16 files changed, 1464 insertions(+), 61 deletions(-)
+PARENT = c87452fbf7f8f6a2a6b4d124d81fd41ea0345358
 ```
 
-FEATURE_COMMIT_SHA: filled after commit via `git rev-parse HEAD` (PARENT = PREVIOUS_HEAD above).
 Push / deploy: **NIE** w tym GWO.
 
 ## STATUS
@@ -77,7 +76,7 @@ Push / deploy: **NIE** w tym GWO.
 ```
 STATUS: FEATURE_COMMIT_READY_FOR_PUSH
 PREVIOUS_HEAD: c87452fbf7f8f6a2a6b4d124d81fd41ea0345358
-FEATURE_COMMIT_SHA: (this commit — git rev-parse HEAD / git log -1 --grep='partial REGON')
+FEATURE_COMMIT_SHA: 23c72b2af99e30870dd7793b92050366102633df
 EOL_BASELINE_OK: YES
 FEATURE_EOL_NOISE: NO
 DIFF_SCOPE_OK: YES
