@@ -9,4 +9,7 @@ export const contractorsApi = {
 
   createManual: (body) =>
     client.post('/contractors/', body).then((r) => r.data),
+
+  updateOverride: (contractorId, body) =>
+    client.patch(`/contractors/${contractorId}/override`, body).then((r) => r.data),
 };

@@ -2,7 +2,37 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { contractorsApi } from '../../api/contractors';
 import { warehouseItemsApi } from '../../api/warehouseItems';
 import { catalogItemToLineFields } from './catalogItemLineFromWarehouse';
+import { canBuildAdresL1, formatAdresL1 } from './partyAddress';
 import styles from './InvoiceForm.module.css';
+
+const BUYER_ADDRESS_FIELDS = ['street', 'building_no', 'apartment_no', 'postal_code', 'city'];
+
+function emptyBuyerAddress() {
+  return {
+    street: '',
+    building_no: '',
+    apartment_no: '',
+    postal_code: '',
+    city: '',
+  };
+}
+
+function addressFromSource(source) {
+  const src = source || {};
+  return {
+    street: String(src.street || ''),
+    building_no: String(src.building_no || ''),
+    apartment_no: String(src.apartment_no || ''),
+    postal_code: String(src.postal_code || ''),
+    city: String(src.city || ''),
+  };
+}
+
+function addressDiffers(a, b) {
+  return BUYER_ADDRESS_FIELDS.some(
+    (key) => String(a?.[key] || '').trim() !== String(b?.[key] || '').trim(),
+  );
+}
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -440,6 +470,7 @@ function useBuyerLookup(initialBuyerNip) {
     buyerNip,
     setBuyerNip,
     buyerInfo,
+    setBuyerInfo,
     nipError,
   };
 }
@@ -493,32 +524,111 @@ function mapItemsToPayload(items) {
   }));
 }
 
-function BuyerFields({ buyerNip, setBuyerNip, nipError, buyerInfo }) {
+function BuyerFields({
+  buyerNip,
+  setBuyerNip,
+  nipError,
+  buyerInfo,
+  buyerAddress,
+  setBuyerAddress,
+  addressIncomplete,
+  addressPreview,
+}) {
+  const updateAddress = (field, value) => {
+    setBuyerAddress((prev) => ({ ...prev, [field]: value }));
+  };
+
   return (
-    <>
-      <div className={`form-group ${styles.compactField}`}>
-        <label className="form-label">NIP nabywcy *</label>
-        <input
-          className="input"
-          type="text"
-          placeholder="10 cyfr"
-          maxLength={10}
-          value={buyerNip}
-          onChange={(e) => setBuyerNip(e.target.value.replace(/\D/g, ''))}
-        />
-        {nipError && <span className="form-error">{nipError}</span>}
+    <div className={styles.buyerFieldsWrap}>
+      <div className={styles.buyerFieldsTop}>
+        <div className={`form-group ${styles.compactField}`}>
+          <label className="form-label">NIP nabywcy *</label>
+          <input
+            className="input"
+            type="text"
+            placeholder="10 cyfr"
+            maxLength={10}
+            value={buyerNip}
+            onChange={(e) => setBuyerNip(e.target.value.replace(/\D/g, ''))}
+          />
+          {nipError && <span className="form-error">{nipError}</span>}
+        </div>
+        <div className={`form-group ${styles.compactField}`}>
+          <label className="form-label">Nabywca</label>
+          <input
+            className="input"
+            type="text"
+            readOnly
+            value={buyerInfo ? `${buyerInfo.name}${buyerAddress.city ? ` (${buyerAddress.city})` : ''}` : ''}
+            placeholder={buyerNip.length === 10 ? 'Pobieranie...' : '—'}
+          />
+        </div>
       </div>
-      <div className={`form-group ${styles.compactField}`}>
-        <label className="form-label">Nabywca</label>
-        <input
-          className="input"
-          type="text"
-          readOnly
-          value={buyerInfo ? `${buyerInfo.name} (${buyerInfo.city})` : ''}
-          placeholder={buyerNip.length === 10 ? 'Pobieranie...' : '—'}
-        />
-      </div>
-    </>
+      {buyerInfo && (
+        <div className={styles.buyerAddressBlock} id="buyer-address-edit">
+          <div className={styles.buyerAddressTitle}>Adres nabywcy (KSeF)</div>
+          {addressIncomplete && (
+            <div className={`alert alert-error ${styles.buyerAddressHint}`} role="alert">
+              Uzupełnij dane nabywcy — REGON nie zwrócił pełnego adresu.
+              Dopisz ulicę lub numer, aby powstała poprawna linia AdresL1.
+            </div>
+          )}
+          <div className={styles.buyerAddressGrid}>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Ulica</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.street}
+                onChange={(e) => updateAddress('street', e.target.value)}
+                placeholder="opcjonalnie (nie wymagane przy adresie wiejskim)"
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Nr budynku</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.building_no}
+                onChange={(e) => updateAddress('building_no', e.target.value)}
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Nr lokalu</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.apartment_no}
+                onChange={(e) => updateAddress('apartment_no', e.target.value)}
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Kod pocztowy *</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.postal_code}
+                onChange={(e) => updateAddress('postal_code', e.target.value)}
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Miejscowość *</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.city}
+                onChange={(e) => updateAddress('city', e.target.value)}
+              />
+            </div>
+          </div>
+          {!addressIncomplete && addressPreview && (
+            <div className={styles.buyerAddressPreview}>
+              AdresL1: <strong>{addressPreview}</strong>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -869,7 +979,12 @@ function InvoiceFooter({ totals, loading }) {
  */
 export default function InvoiceForm({ initial = null, onSubmit, loading = false }) {
   const isNewInvoice = !initial?.id;
-  const { buyerNip, setBuyerNip, buyerInfo, nipError } = useBuyerLookup(initial?.buyer_snapshot?.nip ?? '');
+  const { buyerNip, setBuyerNip, buyerInfo, setBuyerInfo, nipError } = useBuyerLookup(
+    initial?.buyer_snapshot?.nip ?? '',
+  );
+  const [buyerAddress, setBuyerAddress] = useState(() => (
+    addressFromSource(initial?.buyer_snapshot) || emptyBuyerAddress()
+  ));
   const [issueDate, setIssueDate] = useState(initial?.issue_date ?? TODAY);
   const [saleDate, setSaleDate] = useState(initial?.sale_date ?? TODAY);
   const initialDue = inferDueDateState(
@@ -893,6 +1008,23 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
   ));
   const [amountPaidError, setAmountPaidError] = useState('');
   const syncedInvoiceKeyRef = useRef('');
+  const syncedBuyerIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!buyerInfo?.id) {
+      if (!buyerNip || buyerNip.length !== 10) {
+        setBuyerAddress(emptyBuyerAddress());
+        syncedBuyerIdRef.current = null;
+      }
+      return;
+    }
+    if (syncedBuyerIdRef.current === buyerInfo.id) return;
+    syncedBuyerIdRef.current = buyerInfo.id;
+    setBuyerAddress(addressFromSource(buyerInfo));
+  }, [buyerInfo, buyerNip]);
+
+  const addressIncomplete = Boolean(buyerInfo) && !canBuildAdresL1(buyerAddress);
+  const addressPreview = canBuildAdresL1(buyerAddress) ? formatAdresL1(buyerAddress) : '';
 
   useEffect(() => {
     if (dueDateSet && dueDateMode === 'preset') {
@@ -938,6 +1070,15 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
     setAmountPaidError('');
     if (!buyerNip || buyerNip.length !== 10) {
       setError('NIP nabywcy jest wymagany (10 cyfr)');
+      return;
+    }
+    if (!buyerInfo?.id) {
+      setError('Najpierw pobierz dane nabywcy po NIP (REGON / baza lokalna)');
+      return;
+    }
+    if (!canBuildAdresL1(buyerAddress)) {
+      setError('Uzupełnij dane nabywcy — brakuje danych do linii adresowej KSeF (AdresL1).');
+      document.getElementById('buyer-address-edit')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     if (!paymentMethod) {
@@ -1003,6 +1144,20 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
         : (amountPaid.trim() ? parsedAmountPaid : 0),
     };
     try {
+      const baseAddr = addressFromSource(buyerInfo);
+      if (addressDiffers(buyerAddress, baseAddr) || !canBuildAdresL1(baseAddr)) {
+        const updated = await contractorsApi.updateOverride(buyerInfo.id, {
+          street: buyerAddress.street || null,
+          building_no: buyerAddress.building_no || null,
+          apartment_no: buyerAddress.apartment_no || null,
+          postal_code: buyerAddress.postal_code || null,
+          city: buyerAddress.city || null,
+          override_reason: 'manual_address_for_ksef',
+        });
+        setBuyerInfo(updated);
+        syncedBuyerIdRef.current = updated.id;
+        setBuyerAddress(addressFromSource(updated));
+      }
       await onSubmit(payload);
     } catch (err) {
       setError(err.response?.data?.detail ?? err.response?.data?.error?.message ?? 'Błąd zapisu');
@@ -1019,6 +1174,10 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
           setBuyerNip={setBuyerNip}
           nipError={nipError}
           buyerInfo={buyerInfo}
+          buyerAddress={buyerAddress}
+          setBuyerAddress={setBuyerAddress}
+          addressIncomplete={addressIncomplete}
+          addressPreview={addressPreview}
           issueDate={issueDate}
           saleDate={saleDate}
           setIssueDate={setIssueDate}

@@ -449,19 +449,7 @@ def _is_valid_nip(nip: str) -> bool:
 
 
 def _has_minimum_address(snapshot: dict) -> bool:
-    if not snapshot:
-        return False
+    """Minimum adresu = możliwość zbudowania FA(3) AdresL1 (street nie jest wymagane)."""
+    from app.domain.party_address import can_build_adres_l1
 
-    address_text = str(snapshot.get("address") or "").strip()
-    if address_text:
-        return True
-
-    street = str(snapshot.get("street") or "").strip()
-    building_no = str(snapshot.get("building_no") or "").strip()
-    apartment_no = str(snapshot.get("apartment_no") or "").strip()
-    postal_code = str(snapshot.get("postal_code") or "").strip()
-    city = str(snapshot.get("city") or "").strip()
-
-    has_street_line = bool(street or building_no or apartment_no)
-    has_locality = bool(city or postal_code)
-    return has_street_line and has_locality
+    return can_build_adres_l1(snapshot)

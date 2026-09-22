@@ -737,7 +737,11 @@ export default function InvoiceCardList({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <span className={styles.label}>Status KSeF</span>
-                    <InvoiceActions invoice={invoice} onRefresh={onRefresh} />
+                    <InvoiceActions
+                      invoice={invoice}
+                      onRefresh={onRefresh}
+                      onRequestEdit={(inv) => onOpenInvoice?.(inv, 'edit')}
+                    />
                   </div>
                 )}
 

@@ -4,12 +4,14 @@ import { ksefApi } from '../../api/ksef';
 import { transmissionsApi } from '../../api/transmissions';
 import { useAppStore } from '../../store/useAppStore';
 import { resolveKsefState } from './invoiceOpenMode';
+import { canBuildAdresL1 } from './partyAddress';
 import styles from './InvoiceActions.module.css';
 
 const REFRESH_EVENT = 'ksef:status-refresh';
 const KSEF_STATUS_POLL_MS = 5000;
 const GENERIC_REJECTION_MSG = 'Faktura odrzucona przez KSeF';
 const COMPANY_SETTINGS_MSG = 'Uzupełnij dane sprzedawcy w Ustawieniach firmy.';
+const BUYER_INCOMPLETE_MSG = 'Uzupełnij dane nabywcy na fakturze przed wysyłką do KSeF.';
 const KSEF_CONNECT_MSG = 'Połącz KSeF u góry strony, aby wysłać ponownie.';
 const RESUBMIT_HELP_MSG =
   'KSeF odrzucił fakturę. Otwórz ją do edycji, popraw dane i kliknij „Wyślij ponownie” — szczegóły błędu pojawią się po wysyłce.';
@@ -34,6 +36,7 @@ function isCompanySettingsComplete(settings) {
 }
 
 function isSellerSnapshotComplete(snapshot) {
+  // Sprzedawca: bez zmian względem wcześniejszej logiki UI (nie używamy canBuildAdresL1).
   if (!snapshot) return false;
   const name = String(snapshot.name || '').trim();
   const nip = String(snapshot.nip || '').trim();
@@ -47,13 +50,21 @@ function isSellerSnapshotComplete(snapshot) {
   return Boolean(name && nip && country && hasStreetLine && hasLocality);
 }
 
+function isBuyerSnapshotComplete(snapshot) {
+  if (!snapshot) return false;
+  const name = String(snapshot.name || '').trim();
+  const nip = String(snapshot.nip || '').trim();
+  return Boolean(name && nip && canBuildAdresL1(snapshot));
+}
+
 /**
  * Jednoelementowy kafelek KSeF — jednocześnie wskaźnik statusu i trigger akcji.
  *
- * @param {object}   invoice      - pełny obiekt faktury
- * @param {Function} onRefresh    - callback po akcji
+ * @param {object}   invoice       - pełny obiekt faktury
+ * @param {Function} onRefresh     - callback po akcji
+ * @param {Function} onRequestEdit - otwórz edycję (np. uzupełnienie nabywcy)
  */
-export default function InvoiceActions({ invoice, onRefresh }) {
+export default function InvoiceActions({ invoice, onRefresh, onRequestEdit }) {
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -174,6 +185,11 @@ export default function InvoiceActions({ invoice, onRefresh }) {
     return isSellerSnapshotComplete(invoice.seller_snapshot) ? null : COMPANY_SETTINGS_MSG;
   }, [canSubmitToKsef, companySettings, invoice.seller_snapshot, isSaleInvoice]);
 
+  const buyerIssue = useMemo(() => {
+    if (!isSaleInvoice || !canSubmitToKsef) return null;
+    return isBuyerSnapshotComplete(invoice.buyer_snapshot) ? null : BUYER_INCOMPLETE_MSG;
+  }, [canSubmitToKsef, invoice.buyer_snapshot, isSaleInvoice]);
+
   const getRejectedErrorMessage = () => {
     const fromInvoice = String(invoice?.ksef_last_error || '').trim();
     if (fromInvoice) {
@@ -203,6 +219,10 @@ export default function InvoiceActions({ invoice, onRefresh }) {
     e.stopPropagation();
     if (companyIssue) {
       setErrorMsg(companyIssue);
+      return;
+    }
+    if (buyerIssue) {
+      setErrorMsg(buyerIssue);
       return;
     }
     if (ksefConnectionStatus !== 'CONNECTED') {
@@ -238,7 +258,7 @@ export default function InvoiceActions({ invoice, onRefresh }) {
   const sendBlocked =
     canSubmitToKsef &&
     !isResubmit &&
-    (ksefConnectionStatus !== 'CONNECTED' || Boolean(companyIssue));
+    (ksefConnectionStatus !== 'CONNECTED' || Boolean(companyIssue) || Boolean(buyerIssue));
   const sendingNow = busy && canSubmitToKsef;
   const displayKind = sendingNow ? 'processing' : ksefState.kind;
   const displayLabel = sendingNow
@@ -253,6 +273,7 @@ export default function InvoiceActions({ invoice, onRefresh }) {
   const resubmitStatusMessage = useMemo(() => {
     if (!isResubmit) return null;
     if (companyIssue) return companyIssue;
+    if (buyerIssue) return buyerIssue;
     if (ksefConnectionStatus !== 'CONNECTED') return KSEF_CONNECT_MSG;
 
     const rejectionMessage = getRejectedErrorMessage();
@@ -261,6 +282,7 @@ export default function InvoiceActions({ invoice, onRefresh }) {
     }
     return rejectionMessage;
   }, [
+    buyerIssue,
     companyIssue,
     invoice,
     isResubmit,
@@ -275,21 +297,29 @@ export default function InvoiceActions({ invoice, onRefresh }) {
 
   const tileTitle =
     companyIssue ??
+    buyerIssue ??
     (sendBlocked && !busy ? KSEF_CONNECT_MSG :
     (isResubmit ? resubmitStatusMessage ?? undefined : ksefState.tooltip ?? undefined));
 
+  const shownBuyerMsg =
+    buyerIssue ||
+    (errorMsg && String(errorMsg).includes('Uzupełnij dane nabywcy') ? errorMsg : null);
+
   const inlineError =
     companyIssue ??
-    (canSubmitToKsef && errorMsg ? errorMsg : null) ??
+    (canSubmitToKsef && errorMsg && !shownBuyerMsg ? errorMsg : null) ??
     (ksefState.kind === 'rejected' && !isSaleInvoice && popoverOpen && errorMsg ? errorMsg : null);
 
-  const statusMessage = inlineError || resubmitStatusMessage;
+  const statusMessage = inlineError || shownBuyerMsg || resubmitStatusMessage;
   const isHintMessage = Boolean(
     resubmitStatusMessage &&
     !inlineError &&
+    !shownBuyerMsg &&
     ksefConnectionStatus === 'CONNECTED' &&
-    !companyIssue,
+    !companyIssue &&
+    !buyerIssue,
   );
+  const isBuyerFixMessage = Boolean(shownBuyerMsg);
 
   return (
     <div
@@ -307,9 +337,24 @@ export default function InvoiceActions({ invoice, onRefresh }) {
       </button>
       {statusMessage && (
         <div
-          className={`${styles.inlineError}${isHintMessage ? ` ${styles.inlineHint}` : ''}`}
-          role={inlineError ? 'alert' : 'status'}
-          onClick={(e) => e.stopPropagation()}
+          className={`${styles.inlineError}${isHintMessage ? ` ${styles.inlineHint}` : ''}${isBuyerFixMessage ? ` ${styles.inlineAction}` : ''}`}
+          role={inlineError || isBuyerFixMessage ? 'alert' : 'status'}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isBuyerFixMessage && onRequestEdit) {
+              onRequestEdit(invoice);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (!isBuyerFixMessage || !onRequestEdit) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onRequestEdit(invoice);
+            }
+          }}
+          tabIndex={isBuyerFixMessage && onRequestEdit ? 0 : undefined}
+          style={isBuyerFixMessage && onRequestEdit ? { cursor: 'pointer', textDecoration: 'underline' } : undefined}
         >
           {statusMessage}
         </div>

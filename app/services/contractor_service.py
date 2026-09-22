@@ -242,7 +242,8 @@ class ContractorService:
             "voivodeship",
         ):
             override_value = getattr(active_override, field_name)
-            if override_value:
+            # is not None: ręczna korekta ma pierwszeństwo także gdy REGON później wróci pusty
+            if override_value is not None:
                 response[field_name] = override_value
 
         response["source"] = "regon_with_override" if contractor.source == "regon" else contractor.source

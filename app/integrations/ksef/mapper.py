@@ -111,15 +111,9 @@ def _normalize_nip(raw_nip: str) -> str:
 
 
 def _format_adres_l1(snapshot: dict) -> str:
-    street_line = " ".join(
-        filter(None, [snapshot.get("street"), snapshot.get("building_no")])
-    )
-    if snapshot.get("apartment_no"):
-        street_line = f"{street_line} m. {snapshot['apartment_no']}".strip()
-    city_line = " ".join(filter(None, [snapshot.get("postal_code"), snapshot.get("city")]))
-    if street_line and city_line:
-        return f"{street_line}, {city_line}"
-    return street_line or city_line or "-"
+    from app.domain.party_address import format_adres_l1
+
+    return format_adres_l1(snapshot)
 
 
 def _seller_bank_account_from_snapshot(snapshot: dict) -> str | None:
