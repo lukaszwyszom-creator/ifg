@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { contractorsApi } from '../../api/contractors';
 import { warehouseItemsApi } from '../../api/warehouseItems';
 import { catalogItemToLineFields } from './catalogItemLineFromWarehouse';
-import { canBuildAdresL1, formatAdresL1 } from './partyAddress';
+import { canBuildAdresL1, formatAdresL1, shouldShowBuyerAddressEditor } from './partyAddress';
 import styles from './InvoiceForm.module.css';
 
 const BUYER_ADDRESS_FIELDS = ['street', 'building_no', 'apartment_no', 'postal_code', 'city'];
+const FOCUS_BUYER_ADDRESS_KEY = 'ifgFocusBuyerAddress';
 
 function emptyBuyerAddress() {
   return {
@@ -529,14 +530,20 @@ function BuyerFields({
   setBuyerNip,
   nipError,
   buyerInfo,
+  buyerNameFallback = '',
   buyerAddress,
   setBuyerAddress,
   addressIncomplete,
   addressPreview,
+  showAddressEditor,
 }) {
   const updateAddress = (field, value) => {
     setBuyerAddress((prev) => ({ ...prev, [field]: value }));
   };
+
+  const displayName = buyerInfo
+    ? `${buyerInfo.name}${buyerAddress.city ? ` (${buyerAddress.city})` : ''}`
+    : buyerNameFallback;
 
   return (
     <div className={styles.buyerFieldsWrap}>
@@ -559,29 +566,53 @@ function BuyerFields({
             className="input"
             type="text"
             readOnly
-            value={buyerInfo ? `${buyerInfo.name}${buyerAddress.city ? ` (${buyerAddress.city})` : ''}` : ''}
+            value={displayName}
             placeholder={buyerNip.length === 10 ? 'Pobieranie...' : '—'}
           />
         </div>
       </div>
-      {buyerInfo && (
-        <div className={styles.buyerAddressBlock} id="buyer-address-edit">
-          <div className={styles.buyerAddressTitle}>Adres nabywcy (KSeF)</div>
+      {showAddressEditor && (
+        <div
+          className={`${styles.buyerAddressBlock}${addressIncomplete ? ` ${styles.buyerAddressBlockIncomplete}` : ''}`}
+          id="buyer-address-edit"
+        >
+          <div className={styles.buyerAddressTitle}>Adres nabywcy</div>
           {addressIncomplete && (
             <div className={`alert alert-error ${styles.buyerAddressHint}`} role="alert">
-              Uzupełnij dane nabywcy — REGON nie zwrócił pełnego adresu.
-              Dopisz ulicę lub numer, aby powstała poprawna linia AdresL1.
+              REGON nie zwrócił pełnego adresu. Uzupełnij poniższe pola (nr budynku wystarczy
+              przy adresie bez ulicy), aby powstała poprawna linia AdresL1 dla KSeF.
             </div>
           )}
           <div className={styles.buyerAddressGrid}>
             <div className={`form-group ${styles.compactField}`}>
-              <label className="form-label">Ulica</label>
+              <label className="form-label">Kod pocztowy *</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.postal_code}
+                onChange={(e) => updateAddress('postal_code', e.target.value)}
+                autoComplete="postal-code"
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Miejscowość *</label>
+              <input
+                className="input"
+                type="text"
+                value={buyerAddress.city}
+                onChange={(e) => updateAddress('city', e.target.value)}
+                autoComplete="address-level2"
+              />
+            </div>
+            <div className={`form-group ${styles.compactField}`}>
+              <label className="form-label">Ulica / miejscowość</label>
               <input
                 className="input"
                 type="text"
                 value={buyerAddress.street}
                 onChange={(e) => updateAddress('street', e.target.value)}
-                placeholder="opcjonalnie (nie wymagane przy adresie wiejskim)"
+                placeholder="opcjonalnie — nie wymagane przy adresie wiejskim"
+                autoComplete="street-address"
               />
             </div>
             <div className={`form-group ${styles.compactField}`}>
@@ -602,26 +633,8 @@ function BuyerFields({
                 onChange={(e) => updateAddress('apartment_no', e.target.value)}
               />
             </div>
-            <div className={`form-group ${styles.compactField}`}>
-              <label className="form-label">Kod pocztowy *</label>
-              <input
-                className="input"
-                type="text"
-                value={buyerAddress.postal_code}
-                onChange={(e) => updateAddress('postal_code', e.target.value)}
-              />
-            </div>
-            <div className={`form-group ${styles.compactField}`}>
-              <label className="form-label">Miejscowość *</label>
-              <input
-                className="input"
-                type="text"
-                value={buyerAddress.city}
-                onChange={(e) => updateAddress('city', e.target.value)}
-              />
-            </div>
           </div>
-          {!addressIncomplete && addressPreview && (
+          {addressPreview && (
             <div className={styles.buyerAddressPreview}>
               AdresL1: <strong>{addressPreview}</strong>
             </div>
@@ -1023,8 +1036,35 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
     setBuyerAddress(addressFromSource(buyerInfo));
   }, [buyerInfo, buyerNip]);
 
-  const addressIncomplete = Boolean(buyerInfo) && !canBuildAdresL1(buyerAddress);
+  const addressIncomplete = Boolean(
+    (buyerInfo || buyerNip.length === 10) && !canBuildAdresL1(buyerAddress),
+  );
   const addressPreview = canBuildAdresL1(buyerAddress) ? formatAdresL1(buyerAddress) : '';
+  const showAddressEditor = shouldShowBuyerAddressEditor({
+    buyerInfo,
+    buyerNip,
+    buyerAddress,
+  });
+  const buyerNameFallback = String(initial?.buyer_snapshot?.name || '');
+
+  useEffect(() => {
+    let focusRequested = false;
+    try {
+      focusRequested = sessionStorage.getItem(FOCUS_BUYER_ADDRESS_KEY) === '1';
+      if (focusRequested) sessionStorage.removeItem(FOCUS_BUYER_ADDRESS_KEY);
+    } catch {
+      focusRequested = false;
+    }
+    if (!focusRequested && !addressIncomplete) return undefined;
+    if (!showAddressEditor) return undefined;
+    const timer = window.setTimeout(() => {
+      document.getElementById('buyer-address-edit')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [addressIncomplete, showAddressEditor, initial?.id]);
 
   useEffect(() => {
     if (dueDateSet && dueDateMode === 'preset') {
@@ -1174,10 +1214,12 @@ export default function InvoiceForm({ initial = null, onSubmit, loading = false 
           setBuyerNip={setBuyerNip}
           nipError={nipError}
           buyerInfo={buyerInfo}
+          buyerNameFallback={buyerNameFallback}
           buyerAddress={buyerAddress}
           setBuyerAddress={setBuyerAddress}
           addressIncomplete={addressIncomplete}
           addressPreview={addressPreview}
+          showAddressEditor={showAddressEditor}
           issueDate={issueDate}
           saleDate={saleDate}
           setIssueDate={setIssueDate}

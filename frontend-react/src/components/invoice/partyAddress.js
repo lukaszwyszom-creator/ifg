@@ -54,3 +54,44 @@ export function canBuildAdresL1(snapshot = {}) {
   const line = formatAdresL1(snapshot);
   return Boolean(line && line !== '-');
 }
+
+/** Opis braków pod UI / komunikat KSeF (zgodny z canBuildAdresL1). */
+export function missingAdresL1Hints(snapshot = {}) {
+  if (stripField(snapshot.address) || canBuildAdresL1(snapshot)) return [];
+
+  const street = stripField(snapshot.street);
+  const buildingNo = stripField(snapshot.building_no);
+  const apartmentNo = stripField(snapshot.apartment_no);
+  const postalCode = stripField(snapshot.postal_code);
+  const city = stripField(snapshot.city);
+
+  const hints = [];
+  if (!postalCode || !city) {
+    hints.push('kod pocztowy i miejscowość');
+  }
+  if (!street && !buildingNo && !apartmentNo) {
+    hints.push('ulicę/miejscowość z numerem albo sam nr budynku');
+  }
+  return hints;
+}
+
+export function buyerAddressIncompleteMessage(snapshot = {}) {
+  const hints = missingAdresL1Hints(snapshot);
+  if (!hints.length) {
+    return 'Uzupełnij Adres nabywcy na fakturze — kliknij, aby otworzyć edycję.';
+  }
+  return `Uzupełnij Adres nabywcy (${hints.join('; ')}). Kliknij, aby otworzyć edycję.`;
+}
+
+/** Sekcja adresu ma być widoczna gdy znamy NIP / kontrahenta / jakiekolwiek pola adresu. */
+export function shouldShowBuyerAddressEditor({
+  buyerInfo = null,
+  buyerNip = '',
+  buyerAddress = {},
+} = {}) {
+  if (buyerInfo) return true;
+  if (String(buyerNip || '').replace(/\D/g, '').length === 10) return true;
+  return ['street', 'building_no', 'apartment_no', 'postal_code', 'city'].some(
+    (key) => Boolean(stripField(buyerAddress?.[key])),
+  );
+}

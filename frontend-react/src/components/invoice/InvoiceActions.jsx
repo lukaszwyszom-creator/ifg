@@ -4,7 +4,7 @@ import { ksefApi } from '../../api/ksef';
 import { transmissionsApi } from '../../api/transmissions';
 import { useAppStore } from '../../store/useAppStore';
 import { resolveKsefState } from './invoiceOpenMode';
-import { canBuildAdresL1 } from './partyAddress';
+import { buyerAddressIncompleteMessage, canBuildAdresL1 } from './partyAddress';
 import styles from './InvoiceActions.module.css';
 
 const REFRESH_EVENT = 'ksef:status-refresh';
@@ -12,6 +12,7 @@ const KSEF_STATUS_POLL_MS = 5000;
 const GENERIC_REJECTION_MSG = 'Faktura odrzucona przez KSeF';
 const COMPANY_SETTINGS_MSG = 'Uzupełnij dane sprzedawcy w Ustawieniach firmy.';
 const BUYER_INCOMPLETE_MSG = 'Uzupełnij dane nabywcy na fakturze przed wysyłką do KSeF.';
+const FOCUS_BUYER_ADDRESS_KEY = 'ifgFocusBuyerAddress';
 const KSEF_CONNECT_MSG = 'Połącz KSeF u góry strony, aby wysłać ponownie.';
 const RESUBMIT_HELP_MSG =
   'KSeF odrzucił fakturę. Otwórz ją do edycji, popraw dane i kliknij „Wyślij ponownie” — szczegóły błędu pojawią się po wysyłce.';
@@ -187,8 +188,19 @@ export default function InvoiceActions({ invoice, onRefresh, onRequestEdit }) {
 
   const buyerIssue = useMemo(() => {
     if (!isSaleInvoice || !canSubmitToKsef) return null;
-    return isBuyerSnapshotComplete(invoice.buyer_snapshot) ? null : BUYER_INCOMPLETE_MSG;
+    if (isBuyerSnapshotComplete(invoice.buyer_snapshot)) return null;
+    return buyerAddressIncompleteMessage(invoice.buyer_snapshot) || BUYER_INCOMPLETE_MSG;
   }, [canSubmitToKsef, invoice.buyer_snapshot, isSaleInvoice]);
+
+  const openBuyerAddressEdit = () => {
+    if (!onRequestEdit) return;
+    try {
+      sessionStorage.setItem(FOCUS_BUYER_ADDRESS_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+    onRequestEdit(invoice);
+  };
 
   const getRejectedErrorMessage = () => {
     const fromInvoice = String(invoice?.ksef_last_error || '').trim();
@@ -342,7 +354,7 @@ export default function InvoiceActions({ invoice, onRefresh, onRequestEdit }) {
           onClick={(e) => {
             e.stopPropagation();
             if (isBuyerFixMessage && onRequestEdit) {
-              onRequestEdit(invoice);
+              openBuyerAddressEdit();
             }
           }}
           onKeyDown={(e) => {
@@ -350,7 +362,7 @@ export default function InvoiceActions({ invoice, onRefresh, onRequestEdit }) {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               e.stopPropagation();
-              onRequestEdit(invoice);
+              openBuyerAddressEdit();
             }
           }}
           tabIndex={isBuyerFixMessage && onRequestEdit ? 0 : undefined}
