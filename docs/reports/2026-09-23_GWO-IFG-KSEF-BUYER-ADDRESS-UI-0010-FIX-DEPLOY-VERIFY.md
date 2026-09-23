@@ -3,7 +3,7 @@
 **Date:** 2026-09-23
 **GWO:** GWO-0010 ETAP 6 (selective commit + push; NO deploy yet)
 **Branch:** `production`
-**STATUS:** in progress (code pushed; deploy not started)
+**STATUS:** commit+push done; deploy NOT started
 
 ## SHAs
 
@@ -11,8 +11,8 @@
 |-------|-------|
 | BASE_HEAD (pre-commit) | `e0a53b0bf673f2243fca90d522edf999622224ae` |
 | COMMIT_SHA (feature) | `8259a5491098ad0942c9da82e22e1fd0175323f0` |
-| REMOTE_SHA | TBD after `git push origin production` |
-| DOCS_COMMIT_SHA | TBD (this report commit) |
+| REMOTE_SHA | `79e69ded8e1931c843ad7c63efe9284ef7b8dd1a` |
+| DOCS_COMMIT_SHA | `79e69ded8e1931c843ad7c63efe9284ef7b8dd1a` |
 
 ## ROOT_CAUSE
 
