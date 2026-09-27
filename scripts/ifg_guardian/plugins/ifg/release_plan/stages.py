@@ -5,11 +5,14 @@ from pathlib import Path
 from ifg_guardian.config import DEFAULT_REMOTE_PATH, TARGET_BRANCH
 from ifg_guardian.core.git import git, short_sha
 from ifg_guardian.core.workflow.context import WorkflowContext
+from ifg_guardian.core.workflow.mode import ExecutionMode
 from ifg_guardian.core.workflow.intents import NoOpIntent
 from ifg_guardian.core.workflow.results import StageExecutionResults
 from ifg_guardian.core.workflow.stage import BuildReason, Stage, StagePlan, StageResult, StageStatus
 from ifg_guardian.core.workflow.state import WorkflowState
 from ifg_guardian.core.workflow.transaction import ArtifactRecord
+from ifg_guardian.plugins.ifg.deploy_decision.alembic_scope import build_alembic_deploy_snapshot
+from ifg_guardian.plugins.ifg.deploy_decision.git_scope import list_deploy_changed_files
 from ifg_guardian.plugins.ifg.release_plan.artifacts import build_artifacts
 from ifg_guardian.plugins.ifg.release_plan.build_detector import (
     analyze_repository_from_doctor,
@@ -112,8 +115,22 @@ class RepositoryAnalysisStage(_PlanStage):
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         state = get_plan_state(ctx)
         doctor = ctx.data["doctor_state"]
+        remote_path = str(ctx.data.get("remote_path") or DEFAULT_REMOTE_PATH)
+        dry_run = ctx.mode in (ExecutionMode.DRY_RUN, ExecutionMode.PLAN)
 
-        snapshot = analyze_repository_from_doctor(doctor)
+        deploy_files = list_deploy_changed_files()
+        alembic = build_alembic_deploy_snapshot(
+            remote_host=str(ctx.data.get("remote_host") or ""),
+            remote_path=remote_path,
+            dry_run=dry_run,
+        )
+        ctx.data["alembic_snapshot"] = alembic
+
+        snapshot = analyze_repository_from_doctor(
+            doctor,
+            deploy_changed_files=deploy_files,
+            alembic=alembic,
+        )
         try:
             snapshot.head_sha = git("rev-parse", "HEAD")
             snapshot.head_short = short_sha(snapshot.head_sha)
@@ -143,7 +160,8 @@ class BuildDecisionStage(_PlanStage):
     def interpret(self, ctx: WorkflowContext, results: StageExecutionResults) -> StageResult:
         state = get_plan_state(ctx)
         doctor = ctx.data["doctor_state"]
-        state.build_decisions = detect_build_decisions(doctor, state.repository)
+        alembic = ctx.data.get("alembic_snapshot")
+        state.build_decisions = detect_build_decisions(doctor, state.repository, alembic=alembic)
 
         reasons = [
             BuildReason(

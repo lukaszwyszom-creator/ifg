@@ -9,6 +9,11 @@ from ifg_guardian.plugins.ifg.doctor.models import (
     OverallStatus,
 )
 
+_LOCAL_SOFT_FAIL_IDS = frozenset({
+    "alembic.current",
+    "alembic.head",
+})
+
 # Pre-build signals: pipeline always runs npm ci + build + artifact gate.
 _BUILD_REQUIRED_CHECK_IDS = frozenset({
     "frontend.build_required",
@@ -18,6 +23,11 @@ _BUILD_REQUIRED_CHECK_IDS = frozenset({
 _IMAGE_REBUILD_REQUIRED_IDS = frozenset({
     "backend.build_required",
 })
+
+
+def _is_local_db_unavailable(check: CheckResult) -> bool:
+    message = (check.message or "").lower()
+    return "database_url" in message or "brak database_url" in message
 
 
 def _is_build_required_message(check: CheckResult) -> bool:
@@ -33,6 +43,9 @@ def _is_image_rebuild_required_message(check: CheckResult) -> bool:
 def effective_check_status(check: CheckResult) -> CheckStatus:
     if check.status == CheckStatus.CRITICAL:
         return CheckStatus.CRITICAL
+    if check.scope == "local" and check.check_id in _LOCAL_SOFT_FAIL_IDS:
+        if check.status == CheckStatus.FAIL or _is_local_db_unavailable(check):
+            return CheckStatus.WARN
     if check.check_id in _BUILD_REQUIRED_CHECK_IDS and check.status == CheckStatus.FAIL:
         return CheckStatus.WARN
     if check.check_id in _IMAGE_REBUILD_REQUIRED_IDS and check.status == CheckStatus.FAIL:

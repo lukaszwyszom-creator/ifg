@@ -118,21 +118,43 @@ def test_run_ifg_handoff_latest_writes_journal_handoff(tmp_path: Path):
 def test_cli_ifg_handoff_latest_dispatch(monkeypatch):
     captured: dict[str, object] = {}
 
-    def _fake_run_ifg_handoff_latest(*, limit: int, copy_to_clipboard: bool, include_all: bool, reset_state: bool):
+    def _fake_run_ifg_handoff_latest(
+        *,
+        limit: int,
+        copy_to_clipboard: bool,
+        include_all: bool,
+        reset_state: bool,
+        explicit_report: str | None = None,
+    ):
         captured["limit"] = limit
         captured["copy_to_clipboard"] = copy_to_clipboard
         captured["include_all"] = include_all
         captured["reset_state"] = reset_state
+        captured["explicit_report"] = explicit_report
         return 0
 
     monkeypatch.setattr(cli, "run_ifg_handoff_latest", _fake_run_ifg_handoff_latest)
-    code = cli.main(["ifg", "handoff", "latest", "--limit", "3", "--no-clipboard", "--all", "--reset"])
+    code = cli.main(
+        [
+            "ifg",
+            "handoff",
+            "latest",
+            "--limit",
+            "3",
+            "--no-clipboard",
+            "--all",
+            "--reset",
+            "--report",
+            "docs/reports/example.md",
+        ]
+    )
     assert code == 0
     assert captured == {
         "limit": 3,
         "copy_to_clipboard": False,
         "include_all": True,
         "reset_state": True,
+        "explicit_report": "docs/reports/example.md",
     }
 
 
@@ -212,6 +234,7 @@ def test_handoff_aggregate_preserves_report_order(tmp_path: Path):
 
 
 def test_handoff_pending_first_then_empty_then_new(tmp_path: Path):
+    """After newest is sent, do not fall back to older unsent reports."""
     _init_journal(tmp_path)
     reports = tmp_path / "docs" / "reports"
     _write_report(reports / "2026-07-09_GWO-IFG-1001_A.md", "# GWO-IFG-1001\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
@@ -230,26 +253,20 @@ def test_handoff_pending_first_then_empty_then_new(tmp_path: Path):
 
     code2 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code2 == 0
-    text2 = _latest_handoff_text(tmp_path)
-    assert "Liczba znalezionych raportów: 1" in text2
-    assert "GWO-IFG-1001" in text2
-    assert "HANDOFF-0002" in text2
-
-    code3 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
-    assert code3 == 0
-    assert "HANDOFF-0002" in _latest_handoff_text(tmp_path)
+    assert "HANDOFF-0001" in _latest_handoff_text(tmp_path)
+    assert "GWO-IFG-1001" not in _latest_handoff_text(tmp_path)
 
     _write_report(
         reports / "2026-07-09_GWO-IFG-1003_C.md",
         "# GWO-IFG-1003\n\n## Decyzje dla ChatGPT\n\n- Czy zrobić krok C?\n",
-        mtime_offset_s=1,
+        mtime_offset_s=2,
     )
     code4 = run_ifg_handoff_latest(root=tmp_path, today=dt.date(2026, 7, 9), copy_to_clipboard=False)
     assert code4 == 0
     text4 = _latest_handoff_text(tmp_path)
     assert "Liczba znalezionych raportów: 1" in text4
     assert "GWO-IFG-1003" in text4
-    assert "HANDOFF-0003" in text4
+    assert "HANDOFF-0002" in text4
 
 
 def test_handoff_all_ignores_state(tmp_path: Path):
@@ -414,3 +431,166 @@ def test_handoff_legacy_fallback_without_metadata_still_works(tmp_path: Path):
     selection = select_latest_reports(root=tmp_path, limit=1)
     assert len(selection.reports) == 1
     assert selection.reports[0].name == "2026-07-09_GWO-IFG-0055_LEGACY.md"
+
+
+def test_handoff_single_report(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md",
+        "# MULTI\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert len(selection.reports) == 1
+    assert selection.reports[0].name == "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md"
+    assert selection.conflict is None
+
+
+def test_handoff_many_same_gwo_picks_newest(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-11_GWO-IFG-9001_A.md",
+        "# A\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+    )
+    _write_report(
+        reports / "2026-07-20_GWO-IFG-9001_B.md",
+        "# B\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=5,
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert len(selection.reports) == 1
+    assert selection.reports[0].name == "2026-07-20_GWO-IFG-9001_B.md"
+
+
+def test_handoff_many_different_gwo_picks_newest(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-11_GWO-IFG-9001_A.md",
+        "# 9001\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+    )
+    _write_report(
+        reports / "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md",
+        "# MULTI\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=10,
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports[0].name == "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md"
+
+
+def test_handoff_reports_from_different_dates(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-11_GWO-IFG-0077_OLD.md",
+        "# old\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=1,
+    )
+    _write_report(
+        reports / "2026-07-20_GWO-IFG_NEW.md",
+        "# new\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=20,
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports[0].name == "2026-07-20_GWO-IFG_NEW.md"
+
+
+def test_handoff_similar_names_do_not_override_mtime(tmp_path: Path):
+    """Never pick an older report only because the filename pattern matches."""
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-11_GWO-IFG-9001_A.md",
+        "# similar\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=1,
+    )
+    _write_report(
+        reports / "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md",
+        "# target\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=50,
+    )
+    _write_report(
+        reports / "2026-07-20_GWO-GUARDIAN-0079_ENV_RELOAD.md",
+        "# guardian ops — not legacy IFG\n",
+        mtime_offset_s=100,
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert len(selection.reports) == 1
+    assert selection.reports[0].name == "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md"
+
+
+def test_handoff_no_reports(tmp_path: Path):
+    (tmp_path / "docs" / "reports").mkdir(parents=True)
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports == []
+    assert selection.conflict is None
+
+
+def test_handoff_conflict_same_sort_epoch(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    a = reports / "2026-07-20_GWO-IFG-AAA.md"
+    b = reports / "2026-07-20_GWO-IFG-BBB.md"
+    _write_report(a, "# A\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
+    _write_report(b, "# B\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
+    shared = 1_700_000_000.0
+    os.utime(a, (shared, shared))
+    os.utime(b, (shared, shared))
+
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports == []
+    assert selection.conflict is not None
+    assert "Ambiguous" in selection.conflict
+
+    code = run_ifg_handoff_latest(root=tmp_path, copy_to_clipboard=False)
+    assert code == 1
+
+
+def test_handoff_does_not_fallback_to_older_unsent(tmp_path: Path):
+    """Regression: after newest marked sent, do not emit older July-11 handoff."""
+    _init_journal(tmp_path)
+    reports = tmp_path / "docs" / "reports"
+    old = reports / "2026-07-11_GWO-IFG-9001_A.md"
+    new = reports / "2026-07-20_GWO-IFG_MULTI_RECIPIENT_AND_2000_SYNC_SESSION.md"
+    _write_report(old, "# old\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
+    _write_report(new, "# new\n\n## Decyzje dla ChatGPT\n\nBrak.\n", mtime_offset_s=10)
+
+    assert run_ifg_handoff_latest(root=tmp_path, copy_to_clipboard=False) == 0
+    assert "MULTI_RECIPIENT" in _latest_handoff_text(tmp_path)
+
+    assert run_ifg_handoff_latest(root=tmp_path, copy_to_clipboard=False) == 0
+    assert "9001" not in _latest_handoff_text(tmp_path)
+    assert "HANDOFF-0001" in _latest_handoff_text(tmp_path)
+
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports == []
+
+
+def test_handoff_explicit_report_overrides_discovery(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-20_GWO-IFG_NEWEST.md",
+        "# newest\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=10,
+    )
+    target = reports / "2026-07-11_GWO-IFG-9001_A.md"
+    _write_report(target, "# explicit\n\n## Decyzje dla ChatGPT\n\nBrak.\n")
+
+    selection = select_latest_reports(
+        root=tmp_path,
+        limit=1,
+        explicit_report="docs/reports/2026-07-11_GWO-IFG-9001_A.md",
+    )
+    assert len(selection.reports) == 1
+    assert selection.reports[0].name == "2026-07-11_GWO-IFG-9001_A.md"
+
+
+def test_handoff_excludes_guardian_ops_without_front_matter(tmp_path: Path):
+    reports = tmp_path / "docs" / "reports"
+    _write_report(
+        reports / "2026-07-20_GWO-GUARDIAN-0079_ENV_RELOAD.md",
+        "# env reload",
+        mtime_offset_s=100,
+    )
+    _write_report(
+        reports / "2026-07-11_GWO-IFG-9001_A.md",
+        "# ifg\n\n## Decyzje dla ChatGPT\n\nBrak.\n",
+        mtime_offset_s=1,
+    )
+    selection = select_latest_reports(root=tmp_path, limit=1)
+    assert selection.reports[0].name == "2026-07-11_GWO-IFG-9001_A.md"

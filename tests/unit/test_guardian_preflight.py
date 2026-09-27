@@ -81,7 +81,7 @@ class TestPrecheckReport:
         md = render_precheck_markdown(report, decision=decision, workflow_id="wf-1")
         assert "PRECHECK_REPORT" in md
         assert "| PASS |" in md
-        assert "**GO**" in md
+        assert "| **Decision** | `GO` |" in md
 
 
 class TestGitCleanDirtyTree:
