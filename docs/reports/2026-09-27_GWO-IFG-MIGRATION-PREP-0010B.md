@@ -78,10 +78,11 @@ VERDICT: READY_FOR_REPO_MIGRATION
 |------|---------|
 | Branch | `gwo/ifg-pre-migration-wip-snapshot-0010b` |
 | Base | `d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa` |
-| Commit | `5bde904e4e4cbb3e0f0ccf0f281e8ff4653f2cab` |
+| Payload commit | `5bde904e4e4cbb3e0f0ccf0f281e8ff4653f2cab` |
+| Tip (with report) | `98627fe7b4bf9da583dd45b45a927c3395b81f3e` |
 | Message | `chore(recovery): preserve pre-migration IFG working tree` |
 | Files | 32 (7 M + 25 A) |
-| Remote | `origin/gwo/ifg-pre-migration-wip-snapshot-0010b` @ `5bde904…` |
+| Remote | `origin/gwo/ifg-pre-migration-wip-snapshot-0010b` @ `98627fe…` |
 | Remote verified | **YES** |
 
 ### SECURITY_SCAN: PASS
@@ -158,7 +159,7 @@ PRODUCTION_HEAD: d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa
 ORIGIN_PRODUCTION_HEAD: d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa
 PRODUCTION_WORKTREE_CLEAN: YES
 WIP_SNAPSHOT_BRANCH: gwo/ifg-pre-migration-wip-snapshot-0010b
-WIP_SNAPSHOT_SHA: 5bde904e4e4cbb3e0f0ccf0f281e8ff4653f2cab
+WIP_SNAPSHOT_SHA: 98627fe7b4bf9da583dd45b45a927c3395b81f3e
 WIP_SNAPSHOT_REMOTE_VERIFIED: YES
 STOCK_BRANCH: gwo/ifg-stock-0002c-invoice-warehouse-link
 STOCK_LOCAL_SHA: cde9c7673425452df66453c3ab3b035ff490d4cb
@@ -181,7 +182,7 @@ Added: `docs/gwo/*` (2), `docs/reports/2026-07-20…`–`2026-09-23…` (21), `f
 ### MUTATIONS_PERFORMED
 
 1. Push `gwo/ifg-stock-0002c-invoice-warehouse-link` → origin  
-2. Branch + commit + push `gwo/ifg-pre-migration-wip-snapshot-0010b` @ `5bde904`  
+2. Branch + commit + push `gwo/ifg-pre-migration-wip-snapshot-0010b` payload `@5bde904`, tip `@98627fe` (+ report)  
 3. Checkout `production` @ `d3571ec` + hard reset + clean  
 4. `skip-worktree` na `docs/_archiwum/migracja_mac_mini.md` (lokalnie)  
 5. `git worktree remove --force` + `prune` dla `ifg_standalone_gwo_0002c`
@@ -216,6 +217,11 @@ git ls-remote --heads origin \
 ```
 
 ---
+
+
+### Incident note (0010B)
+
+Accidental local commit of this report onto `production` (`c8b695e`) was **hard-reset** and **never pushed** to `origin/production`. Canonical `production` remains `d3571ec…`.
 
 ## Decyzje dla ChatGPT
 
