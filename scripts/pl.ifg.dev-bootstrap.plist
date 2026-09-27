@@ -8,11 +8,11 @@
     <key>ProgramArguments</key>
     <array>
       <string>/opt/homebrew/bin/node</string>
-      <string>/Users/lukasz/projekty/ifg_standalone/frontend-react/scripts/dev-bootstrap.mjs</string>
+      <string>/Volumes/WorkspaceSSD/projects/ifg_standalone/frontend-react/scripts/dev-bootstrap.mjs</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/lukasz/projekty/ifg_standalone/frontend-react</string>
+    <string>/Volumes/WorkspaceSSD/projects/ifg_standalone/frontend-react</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -27,9 +27,9 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/lukasz/projekty/ifg_standalone/.logs/dev-bootstrap.stdout.log</string>
+    <string>/Volumes/WorkspaceSSD/projects/ifg_standalone/.logs/dev-bootstrap.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/lukasz/projekty/ifg_standalone/.logs/dev-bootstrap.stderr.log</string>
+    <string>/Volumes/WorkspaceSSD/projects/ifg_standalone/.logs/dev-bootstrap.stderr.log</string>
   </dict>
 </plist>
