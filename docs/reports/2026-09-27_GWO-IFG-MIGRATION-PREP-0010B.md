@@ -79,7 +79,7 @@ VERDICT: READY_FOR_REPO_MIGRATION
 | Branch | `gwo/ifg-pre-migration-wip-snapshot-0010b` |
 | Base | `d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa` |
 | Payload commit | `5bde904e4e4cbb3e0f0ccf0f281e8ff4653f2cab` |
-| Tip (with report) | `98627fe7b4bf9da583dd45b45a927c3395b81f3e` |
+| Tip (with report) | `82876d7af8629faba2c4a06556b2082ab93ea89f` |
 | Message | `chore(recovery): preserve pre-migration IFG working tree` |
 | Files | 32 (7 M + 25 A) |
 | Remote | `origin/gwo/ifg-pre-migration-wip-snapshot-0010b` @ `98627fe…` |
@@ -159,7 +159,7 @@ PRODUCTION_HEAD: d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa
 ORIGIN_PRODUCTION_HEAD: d3571ec068f2d83b451ed3cd4cf3c9ae003beaaa
 PRODUCTION_WORKTREE_CLEAN: YES
 WIP_SNAPSHOT_BRANCH: gwo/ifg-pre-migration-wip-snapshot-0010b
-WIP_SNAPSHOT_SHA: 98627fe7b4bf9da583dd45b45a927c3395b81f3e
+WIP_SNAPSHOT_SHA: 82876d7af8629faba2c4a06556b2082ab93ea89f
 WIP_SNAPSHOT_REMOTE_VERIFIED: YES
 STOCK_BRANCH: gwo/ifg-stock-0002c-invoice-warehouse-link
 STOCK_LOCAL_SHA: cde9c7673425452df66453c3ab3b035ff490d4cb
