@@ -2,6 +2,8 @@
 
 **Data:** 2026-09-28  
 **Branch:** `gwo/ifg-invoice-template-polish-0014`  
+**Commit:** `fe16a79b1cf7fef552314563308491b54c0880df`  
+**PR:** https://github.com/lukaszwyszom-creator/ifg/pull/5 (**otwarty, NIE zmergowany**)  
 **Base:** `origin/production` @ `eb5e555ccf767bf63794f917f3710eab530391ff`  
 **Zakres:** polish prezentacji modern A4 (header kind/period + szerokości kolumn tabeli)  
 **Poza zakresem:** KSeF, DB, API, VAT summary, DO ZAPŁATY / remaining_amount, logika fiskalna, deploy
