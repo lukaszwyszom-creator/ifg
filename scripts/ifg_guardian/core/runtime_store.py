@@ -9,7 +9,10 @@ from typing import Any, TypeVar
 
 from ifg_guardian.config import ROOT
 
-STATE_DIR = ROOT / ".state"
+# Managed prod-monitor runtime sets IFG_GUARDIAN_STATE_DIR to a durable path
+# outside immutable releases/ (see prod_monitor_runtime installer).
+_STATE_OVERRIDE = os.environ.get("IFG_GUARDIAN_STATE_DIR", "").strip()
+STATE_DIR = Path(_STATE_OVERRIDE) if _STATE_OVERRIDE else (ROOT / ".state")
 T = TypeVar("T", bound=dict[str, Any])
 
 
