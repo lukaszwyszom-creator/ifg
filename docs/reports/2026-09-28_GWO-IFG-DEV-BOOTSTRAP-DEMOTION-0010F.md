@@ -9,7 +9,7 @@
 STATUS: DEV_BOOTSTRAP_DEMOTED_PR_PENDING
 VERDICT: DEV_BOOTSTRAP_DEMOTED_PR_PENDING
 CANONICAL_REPO: /Volumes/WorkspaceSSD/projects/ifg_standalone
-CANONICAL_HEAD: (branch tip after commit)
+CANONICAL_HEAD: 7ddda51aafda158888f639827bfaa7a3a90bc3c3
 DEV_BOOTSTRAP_PURPOSE: Developer convenience — LaunchAgent KeepAlive running node+Vite (port 3000) from checkout; optional background docker compose up for local db/api/worker if /health fails. Not required by prod-monitor, Guardian supervisor, or DS723 production.
 DEPENDENTS: NONE (no IFG/Guardian LaunchAgent or prod service depends on pl.ifg.dev-bootstrap)
 DECISION: DEMOTE
@@ -24,7 +24,7 @@ OLD_CHECKOUT: /Users/lukasz/projekty/ifg_standalone branch=production HEAD=d3571
 OLD_CHECKOUT_DISPOSITION: READY_FOR_ARCHIVE_OR_REMOVAL
 TRACKED_CHANGES: demoted plist template, DEV_BOOTSTRAP_MANUAL.md, package.json dev:bootstrap, GDD-0021..0023, this report
 BRANCH: gwo/ifg-dev-bootstrap-demotion-0010f
-COMMIT: (filled after commit)
+COMMIT: 7ddda51aafda158888f639827bfaa7a3a90bc3c3
 PR: (filled after open)
 DS723_TOUCHED: NO
 KSEF_TOUCHED: NO
