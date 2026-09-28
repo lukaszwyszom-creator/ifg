@@ -1,0 +1,34 @@
+# Minimal file set for ifg_guardian prod-monitor check (stdlib-only path).
+# Paths are relative to the repository root. Sourced via git archive at SOURCE_SHA.
+# Excludes: .git, .env, credentials, frontend, node_modules, tests, docs, reports, cache.
+
+scripts/ifg_guardian/__init__.py
+scripts/ifg_guardian/config.py
+scripts/ifg_guardian/core/__init__.py
+scripts/ifg_guardian/core/compose.py
+scripts/ifg_guardian/core/execution_guard.py
+scripts/ifg_guardian/core/git.py
+scripts/ifg_guardian/core/prod_health_collector.py
+scripts/ifg_guardian/core/runtime_audit.py
+scripts/ifg_guardian/core/runtime_maintenance.py
+scripts/ifg_guardian/core/runtime_monitor.py
+scripts/ifg_guardian/core/runtime_notify.py
+scripts/ifg_guardian/core/runtime_status.py
+scripts/ifg_guardian/core/runtime_store.py
+scripts/ifg_guardian/core/ssh.py
+scripts/ifg_guardian/core/time_compat.py
+scripts/ifg_guardian/core/workflow/__init__.py
+scripts/ifg_guardian/core/workflow/context.py
+scripts/ifg_guardian/core/workflow/definition.py
+scripts/ifg_guardian/core/workflow/intents.py
+scripts/ifg_guardian/core/workflow/mode.py
+scripts/ifg_guardian/core/workflow/results.py
+scripts/ifg_guardian/core/workflow/stage.py
+scripts/ifg_guardian/core/workflow/state.py
+scripts/ifg_guardian/core/workflow/transaction.py
+scripts/ifg_guardian/modules/__init__.py
+scripts/ifg_guardian/modules/production_monitor.py
+scripts/ifg_guardian/prod_monitor_runtime/__init__.py
+scripts/ifg_guardian/prod_monitor_runtime/MANIFEST.txt
+scripts/ifg_guardian/prod_monitor_runtime/install.py
+scripts/ifg_guardian/prod_monitor_runtime/runner.py

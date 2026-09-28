@@ -18,8 +18,11 @@ from ifg_guardian.core.runtime_status import ProductionRuntimeStatus
 from ifg_guardian.config import DEFAULT_REMOTE_PATH
 
 LAUNCHD_LABEL = "com.ifg.guardian.prod-monitor"
-STATE_DIR = ROOT / ".state"
-MONITOR_LOG = STATE_DIR / "prod_monitor.log"
+_STATE_OVERRIDE = os.environ.get("IFG_GUARDIAN_STATE_DIR", "").strip()
+STATE_DIR = Path(_STATE_OVERRIDE) if _STATE_OVERRIDE else (ROOT / ".state")
+_LOG_OVERRIDE = os.environ.get("IFG_GUARDIAN_LOG_DIR", "").strip()
+LOG_DIR = Path(_LOG_OVERRIDE) if _LOG_OVERRIDE else STATE_DIR
+MONITOR_LOG = LOG_DIR / "prod_monitor.log"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 
 
@@ -31,8 +34,6 @@ def _python_executable() -> str:
 
 
 def _guardian_monitor_command() -> list[str]:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "scripts")
     return [
         _python_executable(),
         "-m",
