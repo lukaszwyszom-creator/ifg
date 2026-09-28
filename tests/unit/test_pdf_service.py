@@ -190,6 +190,48 @@ def test_html_due_to_pay_block() -> None:
     assert "Przelew" in html
 
 
+def _due_amount_from_html(html: str) -> str:
+    marker = '<div class="due-amount">'
+    start = html.index(marker) + len(marker)
+    end = html.index("</div>", start)
+    return html[start:end].strip()
+
+
+def test_do_zaplaty_unpaid_remaining_equals_gross() -> None:
+    invoice = _sample_invoice()
+    invoice.total_gross = Decimal("1000.00")
+    invoice.remaining_amount = Decimal("1000.00")
+    html = render_invoice_html(invoice)
+    assert _due_amount_from_html(html) == "1000.00 PLN"
+
+
+def test_do_zaplaty_partially_paid_uses_remaining() -> None:
+    invoice = _sample_invoice()
+    invoice.total_gross = Decimal("1000.00")
+    invoice.remaining_amount = Decimal("400.00")
+    html = render_invoice_html(invoice)
+    assert _due_amount_from_html(html) == "400.00 PLN"
+    # Brutto totals still show full gross; due box must not reuse it blindly.
+    assert "1000.00 PLN" in html
+    assert _due_amount_from_html(html) != "1000.00 PLN"
+
+
+def test_do_zaplaty_paid_remaining_zero() -> None:
+    invoice = _sample_invoice()
+    invoice.total_gross = Decimal("1000.00")
+    invoice.remaining_amount = Decimal("0.00")
+    html = render_invoice_html(invoice)
+    assert _due_amount_from_html(html) == "0.00 PLN"
+
+
+def test_do_zaplaty_fallback_when_remaining_none() -> None:
+    invoice = _sample_invoice()
+    invoice.total_gross = Decimal("1000.00")
+    invoice.remaining_amount = None
+    html = render_invoice_html(invoice)
+    assert _due_amount_from_html(html) == "1000.00 PLN"
+
+
 def test_html_vat_summary_by_rate() -> None:
     items = [
         _item(name="A", quantity="1", unit_price_net="100", vat_rate="23",
@@ -378,3 +420,26 @@ def test_preview_and_pdf_share_same_template() -> None:
     pdf = render_invoice_pdf(invoice, seller_bank_account=VALID_BANK)
     assert pdf.startswith(b"%PDF")
     assert b"%%EOF" in pdf[-1024:]
+
+
+def test_single_item_invoice_fits_one_pdf_page() -> None:
+    """WeasyPrint must keep a short invoice on one A4 page (no grid blow-up)."""
+    from weasyprint import HTML
+
+    html = render_invoice_html(_sample_invoice(), seller_bank_account=VALID_BANK)
+    pages = HTML(string=html).render().pages
+    assert len(pages) == 1
+
+
+def test_vat_summary_renders_distinguishable_decimal_rates_only() -> None:
+    """InvoiceItemResponse.vat_rate is Decimal — 0% is rendered; zw./np. are not distinguishable."""
+    items = [
+        _item(name="Zero", quantity="1", unit_price_net="100", vat_rate="0",
+              net_total="100.00", vat_total="0.00", gross_total="100.00", sort_order=1),
+    ]
+    html = render_invoice_html(_sample_invoice(items=items))
+    assert ">0%<" in html
+    assert ">zw.<" not in html
+    assert ">zw<" not in html
+    assert ">np.<" not in html
+    assert ">np<" not in html

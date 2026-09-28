@@ -252,14 +252,24 @@ def resolve_seller_bank_account_for_render(
     return company_bank_account
 
 
+def _amount_due_for_display(invoice: InvoiceResponse) -> Decimal | None:
+    """DO ZAPŁATY: prefer remaining_amount from API; fallback to total_gross.
+
+    Does not recompute payment allocations — uses InvoiceResponse fields only.
+    """
+    if invoice.remaining_amount is not None:
+        return _as_decimal(invoice.remaining_amount)
+    return _as_decimal(invoice.total_gross)
+
+
 def _due_pay_section(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None,
 ) -> str:
     currency = invoice.currency or "PLN"
-    total = _as_decimal(invoice.total_gross)
-    amount_html = _esc(_money(total, currency))
+    amount_due = _amount_due_for_display(invoice)
+    amount_html = _esc(_money(amount_due, currency))
 
     details: list[str] = []
     if invoice.due_date:
@@ -385,16 +395,16 @@ def render_invoice_html(
   body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
     font-size: 11pt;
-    line-height: 1.45;
+    line-height: 1.4;
     color: #111111;
     background: #ffffff;
-    padding: 24px;
+    padding: 20px;
     max-width: 210mm;
     margin: 0 auto;
   }}
   .print-btn {{
     display: block;
-    margin: 0 auto 20px;
+    margin: 0 auto 16px;
     padding: 10px 28px;
     background: #1a1a1a;
     color: #ffffff;
@@ -404,16 +414,25 @@ def render_invoice_html(
     font-size: 13px;
   }}
   .header {{
-    display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 24px;
-    margin-bottom: 28px;
-    align-items: start;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 18px;
+    align-items: flex-start;
+  }}
+  .header .seller-compact {{
+    flex: 1.2 1 0;
+    min-width: 0;
+  }}
+  .header .doc-title-block {{
+    flex: 1 1 0;
+    min-width: 0;
   }}
   .seller-compact .party-name {{
-    font-size: 13pt;
+    font-size: 12pt;
     font-weight: 700;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }}
   .seller-compact p {{
     margin-bottom: 2px;
@@ -424,25 +443,30 @@ def render_invoice_html(
     text-align: right;
   }}
   .doc-title {{
-    font-size: 20pt;
+    font-size: 18pt;
     font-weight: 700;
     letter-spacing: 0.02em;
     color: #111111;
     line-height: 1.2;
   }}
   .doc-number {{
-    margin-top: 8px;
-    font-size: 12pt;
+    margin-top: 6px;
+    font-size: 11pt;
     color: #333333;
   }}
   .meta {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px 16px;
-    padding: 14px 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 10px 0;
     border-top: 1px solid #e5e5e5;
     border-bottom: 1px solid #e5e5e5;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
+  }}
+  .meta-item {{
+    flex: 1 1 140px;
+    min-width: 120px;
   }}
   .meta-label {{
     display: block;
@@ -450,7 +474,7 @@ def render_invoice_html(
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #777777;
-    margin-bottom: 3px;
+    margin-bottom: 2px;
   }}
   .meta-value {{
     font-size: 10.5pt;
@@ -458,23 +482,27 @@ def render_invoice_html(
     font-weight: 600;
   }}
   .parties {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 28px;
-    margin-bottom: 26px;
+    display: flex;
+    flex-direction: row;
+    gap: 24px;
+    margin-bottom: 16px;
+  }}
+  .parties .party {{
+    flex: 1 1 0;
+    min-width: 0;
   }}
   .party h3 {{
     font-size: 8.5pt;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #777777;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     font-weight: 600;
   }}
   .party .party-name {{
     font-weight: 700;
     font-size: 11pt;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }}
   .party p {{
     margin-bottom: 2px;
@@ -487,7 +515,7 @@ def render_invoice_html(
   table.items {{
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
     table-layout: fixed;
   }}
   table.items thead {{
@@ -495,11 +523,12 @@ def render_invoice_html(
   }}
   table.items th,
   table.items td {{
-    padding: 7px 6px;
+    padding: 6px 5px;
     vertical-align: top;
     border-bottom: 1px solid #e8e8e8;
     color: #111111;
     background: #ffffff;
+    font-size: 9.5pt;
   }}
   table.items th {{
     font-size: 8pt;
@@ -521,11 +550,11 @@ def render_invoice_html(
   table.items td.name {{
     word-wrap: break-word;
     overflow-wrap: anywhere;
-    width: 32%;
+    width: 34%;
   }}
   table.items .item-sub {{
     color: #666666;
-    font-size: 9pt;
+    font-size: 8.5pt;
     margin-top: 2px;
   }}
   table.items tbody tr {{
@@ -534,12 +563,16 @@ def render_invoice_html(
   }}
   .bold {{ font-weight: 700; }}
   .summary-wrap {{
-    display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 24px;
-    margin-bottom: 20px;
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+    margin-bottom: 14px;
     break-inside: avoid;
     page-break-inside: avoid;
+  }}
+  .summary-wrap > div {{
+    flex: 1 1 0;
+    min-width: 0;
   }}
   table.vat-summary {{
     width: 100%;
@@ -547,9 +580,9 @@ def render_invoice_html(
   }}
   table.vat-summary th,
   table.vat-summary td {{
-    padding: 6px 8px;
+    padding: 5px 6px;
     border-bottom: 1px solid #e8e8e8;
-    font-size: 10pt;
+    font-size: 9.5pt;
   }}
   table.vat-summary th {{
     text-align: left;
@@ -568,8 +601,8 @@ def render_invoice_html(
   .totals-row {{
     display: flex;
     justify-content: flex-end;
-    gap: 24px;
-    margin-bottom: 6px;
+    gap: 20px;
+    margin-bottom: 4px;
     font-size: 10.5pt;
   }}
   .totals-row span {{
@@ -582,14 +615,14 @@ def render_invoice_html(
     text-align: right;
   }}
   .totals-row.grand {{
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1.5px solid #111111;
     font-size: 12pt;
   }}
   .due-box {{
-    margin: 8px 0 22px;
-    padding: 18px 20px;
+    margin: 4px 0 14px;
+    padding: 12px 14px;
     border: 1.5px solid #111111;
     break-inside: avoid;
     page-break-inside: avoid;
@@ -599,24 +632,30 @@ def render_invoice_html(
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #555555;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }}
   .due-amount {{
-    font-size: 22pt;
+    font-size: 18pt;
     font-weight: 700;
     color: #111111;
     line-height: 1.2;
   }}
   .pay-details {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px 18px;
-    margin-top: 14px;
-    padding-top: 12px;
+    display: block;
+    margin-top: 10px;
+    padding-top: 10px;
     border-top: 1px solid #dddddd;
   }}
+  .pay-detail {{
+    display: inline-block;
+    vertical-align: top;
+    width: 48%;
+    margin: 0 1% 8px 0;
+  }}
   .pay-detail-wide {{
-    grid-column: 1 / -1;
+    display: block;
+    width: 100%;
+    margin-bottom: 0;
   }}
   .pay-label {{
     display: block;
@@ -627,8 +666,8 @@ def render_invoice_html(
     margin-bottom: 2px;
   }}
   .correction-box {{
-    margin: 16px 0;
-    padding: 12px 0;
+    margin: 12px 0;
+    padding: 10px 0;
     border-top: 1px solid #e5e5e5;
     break-inside: avoid;
     page-break-inside: avoid;
@@ -641,7 +680,7 @@ def render_invoice_html(
     margin-bottom: 6px;
   }}
   .ksef-box {{
-    margin-top: 18px;
+    margin-top: 12px;
     font-size: 9.5pt;
     color: #444444;
   }}
@@ -669,10 +708,11 @@ def render_invoice_html(
     }}
   }}
   @media screen and (max-width: 720px) {{
-    .header, .parties, .summary-wrap, .meta, .pay-details {{
-      grid-template-columns: 1fr;
+    .header, .parties, .summary-wrap {{
+      flex-direction: column;
     }}
     .doc-title-block {{ text-align: left; }}
+    .pay-detail {{ width: 100%; }}
   }}
 </style>
 </head>
