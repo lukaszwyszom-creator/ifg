@@ -42,9 +42,9 @@ KSEF_TOUCHED: NO
 DB_TOUCHED: NO
 PR1: SUPERSEDED
 BRANCH: gwo/ifg-prod-monitor-managed-runtime-0010e
-COMMIT: d370b4322d10ce683cf0d4c57e8fbec7846d0aff
+COMMIT: a5a2bc0 (branch tip); DEPLOYED runtime SHA 4b1df45
 PR: https://github.com/lukaszwyszom-creator/ifg/pull/2
-TESTS: test_prod_monitor_managed_runtime_0010e.py + test_production_runtime_gwo_0072.py PASS
+TESTS: test_prod_monitor_managed_runtime_0010e.py + test_production_runtime_gwo_0072.py PASS (20)
 RISKS: Homebrew python path used only to create venv; runtime uses venv copy. install.py docstring mentions SSD/OLD paths as operator examples only.
 NEXT_GWO: GWO-IFG-DEV-BOOTSTRAP-DEMOTION-0010F
 ```
