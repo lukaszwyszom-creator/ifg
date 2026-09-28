@@ -7,29 +7,28 @@ import { dirname, join } from 'node:path';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(__dir, 'dev-bootstrap.mjs'), 'utf-8');
 
-test('dev bootstrap: HTTP handler czeka tylko na frontend, backend rozgrzewa w tle', () => {
-  assert.match(source, /function warmServices\(\) \{\s+void ensureServices\(\);\s+\}/s);
-  assert.match(source, /const server = http\.createServer\(async \(req, res\) => \{\s+warmServices\(\);\s+\s+const requestPath = req\.url/s);
-  assert.match(source, /const frontendReady = await ensureFrontend\(\);/);
-  assert.doesNotMatch(source, /const server = http\.createServer\(async \(req, res\) => \{\s+const ready = await ensureServices\(\);/s);
+test('dev bootstrap: starts Vite on PORT (default 3000) under /ui/login', () => {
+  assert.match(source, /const devPort = Number\(process\.env\.PORT \|\| 3000\);/);
+  assert.match(source, /const loginUrl = `http:\/\/127\.0\.0\.1:\$\{devPort\}\/ui\/login`;/);
+  assert.match(source, /spawn\(viteBin, \['--host', '0\.0\.0\.0', '--port', String\(devPort\)\]/);
+  assert.match(source, /await ensurePortAvailable\(\);\s*startVite\(\);/s);
 });
 
-test('dev bootstrap: sprawdza gotowość pod ścieżką zgodną z basename /ui', () => {
-  assert.match(source, /const frontendReadyPath = '\/ui\/login';/);
-  assert.match(source, /function isLanSafeLoginHtml\(html\)/);
-  assert.match(source, /!html\.includes\('@vite\/client'\)/);
+test('dev bootstrap: optional local docker warm-up when API health fails', () => {
+  assert.match(source, /function warmBackend\(\)/);
+  assert.match(source, /docker\/docker-compose\.yml/);
+  assert.match(source, /'up', '-d', 'db', 'api', 'worker'/);
+  assert.match(source, /warmBackend\(\);/);
 });
 
-test('dev bootstrap: przekierowuje stare lokalne ścieżki na /ui', () => {
-  assert.match(source, /function normalizeUiPath\(requestPath\) \{/);
-  assert.match(source, /return `\/ui\$\{requestPath\.startsWith\('\/'\) \? requestPath : `\/\$\{requestPath\}`\}`;/);
-  assert.match(source, /res\.writeHead\(302, \{ Location: targetPath, 'Cache-Control': 'no-store' \}\);/);
+test('dev bootstrap: no KeepAlive HTTP proxy / VITE_BEHIND_BOOTSTRAP architecture', () => {
+  assert.doesNotMatch(source, /http\.createServer/);
+  assert.doesNotMatch(source, /VITE_BEHIND_BOOTSTRAP/);
+  assert.doesNotMatch(source, /apiProxy\.web/);
+  assert.doesNotMatch(source, /frontendProxy\.ws/);
 });
 
-test('dev bootstrap: API idzie bezpośrednio do backendu, Vite wyłącza HMR za proxy', () => {
-  assert.match(source, /if \(requestPath\.startsWith\('\/api'\)\)/);
-  assert.match(source, /apiProxy\.web\(req, res\)/);
-  assert.match(source, /VITE_BEHIND_BOOTSTRAP: '1'/);
-  assert.doesNotMatch(source, /frontendProxy\.ws\(/);
-  assert.match(source, /restartDevServers\(\)/);
+test('dev bootstrap: --restart frees the port before spawn', () => {
+  assert.match(source, /process\.argv\.includes\('--restart'\)/);
+  assert.match(source, /killPort\(devPort\)/);
 });
