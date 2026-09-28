@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "next_id": 21,
+  "next_id": 24,
   "items": [
     {
       "id": "GDD-0001",
@@ -301,6 +301,48 @@
       "review_when": "Przed dalszą rozbudową Capability Registry / po ustabilizowaniu kolejnych capability (np. Zestawienia UX_CLOSED) — najpierw analiza ADR, potem ewentualne GWO implementacyjne.",
       "source": "GWO-GUARDIAN GDD-0020 registration; linked GDD-0018/0019; example Capability Zestawienia (GWO-IFG-0023/0024)",
       "created_at": "2026-07-20",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0021",
+      "project": "IFG",
+      "module": "Prod-monitor managed runtime",
+      "type": "Reliability",
+      "priority": "Medium",
+      "status": "OPEN",
+      "defer_reason": "LAMUS po 0010E/0010F: cutover live już zweryfikowany; edge case rollback runner nie blokuje demotion/dev workflow. Nie zmieniać kodu 0010E w 0010F.",
+      "description": "Prod-monitor: przy rollbacku `current` → previous release zweryfikować/przepisać top-level `runner.py` z Git object poprzedniego SHA (LaunchAgent wskazuje na stały runner poza immutable release).",
+      "review_when": "Po GWO-IFG-DEV-BOOTSTRAP-DEMOTION-0010F / przy kolejnym GWO hardeningu prod-monitor installer.",
+      "source": "Codex review PR #2 + LAMUS GWO-0010F preamble",
+      "created_at": "2026-09-28",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0022",
+      "project": "IFG",
+      "module": "Prod-monitor managed runtime",
+      "type": "Reliability",
+      "priority": "Medium",
+      "status": "OPEN",
+      "defer_reason": "LAMUS po 0010E/0010F: materializacja w praktyce PASS; wzmocnienie atomic staging nie jest wymagane do demotion bootstrap.",
+      "description": "Prod-monitor: wzmocnić atomic materialize (`releases/<SHA>` — stage do katalogu tymczasowego, dopiero potem rename; uniknąć reuse częściowo zapisanego SHA).",
+      "review_when": "Przy kolejnym GWO hardeningu `prod_monitor_runtime.install`.",
+      "source": "Codex review PR #2 + LAMUS GWO-0010F preamble",
+      "created_at": "2026-09-28",
+      "closed_at": null
+    },
+    {
+      "id": "GDD-0023",
+      "project": "IFG",
+      "module": "Prod-monitor managed runtime",
+      "type": "Observability",
+      "priority": "Low",
+      "status": "OPEN",
+      "defer_reason": "LAMUS po 0010E/0010F: deployed_sha na dysku jest źródłem prawdy operacyjnej; semantyka audit commit w archiwum bez .git jest debt, nie blocker.",
+      "description": "Prod-monitor: doprecyzować/audytować semantykę SOURCE_SHA vs deployed_sha w managed runtime (audit records bez .git w release; jawne pole z deployed_sha).",
+      "review_when": "Przy kolejnym GWO observability / audit trail prod-monitor.",
+      "source": "Codex review PR #2 + LAMUS GWO-0010F preamble",
+      "created_at": "2026-09-28",
       "closed_at": null
     }
   ]
