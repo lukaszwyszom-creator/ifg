@@ -27,6 +27,8 @@
 | DB_CHANGED | **NO** |
 | API_CONTRACT_CHANGED | **NO** |
 | WORKTREE | **PRESERVED_PENDING_REVIEW** |
+| PR | https://github.com/lukaszwyszom-creator/ifg/pull/4 |
+| FINAL_HEAD | `5ebd8e68ae1be02dd114c20f8861ab3c38e85eb0` |
 | NEXT_GWO | GWO-IFG-INVOICE-TEMPLATE-MODERN-0012-MERGE-GATE |
 
 ---
