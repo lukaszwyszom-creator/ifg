@@ -1,8 +1,9 @@
 # GWO-IFG-SALES-INVOICE-ELEGANT-TEMPLATE-0015
 
 **Data:** 2026-09-30  
-**FINAL_HEAD:** `84db52be59420227b92ac0f0df5267d748459991`  
+**FINAL_HEAD:** `40c75bc4a236e67f7737fa373344ceb80642c97b`  
 **PR:** https://github.com/lukaszwyszom-creator/ifg/pull/6 (**otwarty, NIE zmergowany**)  
+**FEATURE_HEAD:** `84db52be59420227b92ac0f0df5267d748459991`  
 **BASE_SHA:** `45cfacf828efd125a2028f83152b9654bbfea404` (`origin/production`)  
 **BRANCH:** `gwo/ifg-sales-invoice-elegant-0015`  
 **WORKTREE:** `/Volumes/WorkspaceSSD/projects/_worktrees/ifg-sales-invoice-elegant-0015`  
@@ -17,7 +18,7 @@
 |-------|-------|
 | **VERDICT** | **PR_READY_WITH_ASSET_GATES** |
 | BASE_SHA | `45cfacf828efd125a2028f83152b9654bbfea404` |
-| FINAL_HEAD | `84db52be59420227b92ac0f0df5267d748459991` |
+| FINAL_HEAD | `40c75bc4a236e67f7737fa373344ceb80642c97b` |
 | BRANCH | `gwo/ifg-sales-invoice-elegant-0015` |
 | PR | https://github.com/lukaszwyszom-creator/ifg/pull/6 |
 | FILES_CHANGED | `app/services/pdf_service.py`, `app/services/pdf_sale_elegant.py`, `app/assets/invoice/README.md`, `tests/unit/test_pdf_service.py`, ten raport |
