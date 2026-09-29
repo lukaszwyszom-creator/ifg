@@ -606,13 +606,11 @@ def render_invoice_html(
   }}
   table.items th.unit,
   table.items td.unit {{
-    width: 2.4em;
-    max-width: 2.6em;
+    width: 5ch;
+    min-width: 5ch;
     padding-left: 2px;
     padding-right: 2px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: clip;
   }}
   table.items th.vat-rate,
   table.items td.vat-rate {{
@@ -812,10 +810,10 @@ def render_invoice_html(
 <table class="items">
   <thead>
     <tr>
-      <th class="lp">Lp.</th>
+      <th class="lp">LP</th>
       <th class="name">Nazwa</th>
       <th class="num qty">Ilość</th>
-      <th class="unit">Jm.</th>
+      <th class="unit">JM</th>
       <th class="num">Cena netto</th>
       <th class="num vat-rate">VAT</th>
       <th class="num">Netto</th>
