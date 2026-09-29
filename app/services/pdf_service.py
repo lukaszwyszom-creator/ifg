@@ -367,6 +367,30 @@ def render_invoice_html(
     *,
     seller_bank_account: str | None = None,
 ) -> str:
+    """Dispatch presentation variant.
+
+    Sale invoices use the elegant Wydawnictwo Ikona sheet (GWO-0015).
+    Purchase (and other non-sale) keep the classic modern template — no regression.
+    """
+    direction = (invoice.direction or "sale").strip().lower()
+    if direction == "sale":
+        from app.services.pdf_sale_elegant import render_sale_elegant_html
+
+        return render_sale_elegant_html(
+            invoice,
+            seller_bank_account=seller_bank_account,
+        )
+    return _render_classic_modern_html(
+        invoice,
+        seller_bank_account=seller_bank_account,
+    )
+
+
+def _render_classic_modern_html(
+    invoice: InvoiceResponse,
+    *,
+    seller_bank_account: str | None = None,
+) -> str:
     seller = invoice.seller_snapshot or {}
     buyer = invoice.buyer_snapshot or {}
     number = _strip_display(invoice.number_local) or "—"
