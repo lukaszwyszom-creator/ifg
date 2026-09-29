@@ -15,7 +15,7 @@
 |-------|-------|
 | **STATUS** | QR implemented; stained-glass asset still missing |
 | **VERDICT** | **ASSET_BLOCKED** |
-| **FINAL_HEAD** | *(filled after push)* |
+| **FINAL_HEAD** | `066e28a9b6191a9c8e35babb284f0ac4762f9ca8` |
 | **STAINED_GLASS_ASSET** | **STAINED_GLASS_ASSET_REQUIRED** (no operator file found in repo / Downloads / AgentStores) |
 | **QR_SOURCE_DATA** | **AVAILABLE** via `transmissions.xml_content` (exact FA(3) bytes submitted to KSeF) |
 | **QR_MECHANISM** | Kod I — `SHA-256(xml) → base64url` + seller NIP + `issue_date` (P_1) |
