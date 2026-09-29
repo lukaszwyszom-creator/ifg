@@ -1,6 +1,8 @@
 # GWO-IFG-SALES-INVOICE-ELEGANT-TEMPLATE-0015
 
 **Data:** 2026-09-30  
+**FINAL_HEAD:** `84db52be59420227b92ac0f0df5267d748459991`  
+**PR:** https://github.com/lukaszwyszom-creator/ifg/pull/6 (**otwarty, NIE zmergowany**)  
 **BASE_SHA:** `45cfacf828efd125a2028f83152b9654bbfea404` (`origin/production`)  
 **BRANCH:** `gwo/ifg-sales-invoice-elegant-0015`  
 **WORKTREE:** `/Volumes/WorkspaceSSD/projects/_worktrees/ifg-sales-invoice-elegant-0015`  
@@ -15,9 +17,9 @@
 |-------|-------|
 | **VERDICT** | **PR_READY_WITH_ASSET_GATES** |
 | BASE_SHA | `45cfacf828efd125a2028f83152b9654bbfea404` |
-| FINAL_HEAD | *(wypełnione po push)* |
+| FINAL_HEAD | `84db52be59420227b92ac0f0df5267d748459991` |
 | BRANCH | `gwo/ifg-sales-invoice-elegant-0015` |
-| PR | *(wypełnione po utworzeniu)* |
+| PR | https://github.com/lukaszwyszom-creator/ifg/pull/6 |
 | FILES_CHANGED | `app/services/pdf_service.py`, `app/services/pdf_sale_elegant.py`, `app/assets/invoice/README.md`, `tests/unit/test_pdf_service.py`, ten raport |
 | TESTS | **38 PASS** |
 | VISUAL_SMOKE | **PASS** (`/tmp/ifg-0015-smoke/`) |
