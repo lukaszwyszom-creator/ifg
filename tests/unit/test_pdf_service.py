@@ -20,6 +20,7 @@ def _item(
     *,
     name: str = "Książka",
     quantity: str = "60",
+    unit: str = "szt.",
     unit_price_net: str = "114.29",
     vat_rate: str = "5",
     net_total: str = "6857.14",
@@ -32,7 +33,7 @@ def _item(
         id=uuid4(),
         name=name,
         quantity=Decimal(quantity),
-        unit="szt.",
+        unit=unit,
         unit_price_net=Decimal(unit_price_net),
         vat_rate=Decimal(vat_rate),
         net_total=Decimal(net_total),
@@ -122,8 +123,83 @@ def test_html_line_numbers() -> None:
               net_total="40.00", vat_total="9.20", gross_total="49.20", sort_order=2),
     ]
     html = render_invoice_html(_sample_invoice(items=items))
-    assert '<td class="num lp">1</td>' in html
-    assert '<td class="num lp">2</td>' in html
+    assert '<td class="lp">1</td>' in html
+    assert '<td class="lp">2</td>' in html
+
+
+def test_html_header_kind_sale_purchase_correction() -> None:
+    sale = render_invoice_html(_sample_invoice(direction="sale"))
+    assert 'class="doc-kind">SPRZEDAŻ</div>' in sale
+    assert "seller-compact" not in sale
+
+    purchase = render_invoice_html(_sample_invoice(direction="purchase"))
+    assert 'class="doc-kind">ZAKUP</div>' in purchase
+
+    kor = render_invoice_html(
+        _sample_invoice(direction="sale", invoice_type="KOR", correction_reason="korekta")
+    )
+    assert 'class="doc-kind">KOREKTA</div>' in kor
+    # Korekta ma pierwszeństwo przed kierunkiem.
+    kor_purchase = render_invoice_html(
+        _sample_invoice(direction="purchase", invoice_type="KOR", correction_reason="korekta")
+    )
+    assert 'class="doc-kind">KOREKTA</div>' in kor_purchase
+
+
+def test_html_header_period_from_sale_date_with_issue_fallback() -> None:
+    html = render_invoice_html(_sample_invoice())
+    assert 'class="doc-period">maj 2026</div>' in html
+
+    invoice = _sample_invoice()
+    invoice.sale_date = date(2026, 3, 15)
+    invoice.issue_date = date(2026, 5, 22)
+    html_sale = render_invoice_html(invoice)
+    assert 'class="doc-period">marzec 2026</div>' in html_sale
+
+    invoice_fallback = _sample_invoice()
+    invoice_fallback.sale_date = None  # type: ignore[assignment]
+    invoice_fallback.issue_date = date(2026, 11, 1)
+    html_fallback = render_invoice_html(invoice_fallback)
+    assert 'class="doc-period">listopad 2026</div>' in html_fallback
+
+
+def test_html_table_column_layout_prefers_name_width() -> None:
+    html = render_invoice_html(_sample_invoice())
+    assert "table.items th.lp" in html
+    assert "text-align: left" in html
+    assert "table.items th.unit" in html
+    assert "width: 5ch" in html
+    assert "overflow: hidden" not in html.split("table.items th.unit")[1].split("table.items th.vat-rate")[0]
+    assert "table.items th.vat-rate" in html
+    assert "width: 2.8em" in html
+    assert "table.items th.name" in html
+    assert "width: 42%" in html
+    assert 'th class="lp">LP</th>' in html
+    assert 'th class="unit">JM</th>' in html
+    assert 'th class="num vat-rate">VAT</th>' in html
+    assert 'th class="name">Nazwa</th>' in html
+
+
+def test_html_jm_units_not_clipped_in_output() -> None:
+    """JM column must render full unit labels (no CSS overflow clipping)."""
+    units = ("szt.", "godz.", "opak.", "doba")
+    items = [
+        _item(
+            name=f"Pozycja {u}",
+            unit=u,
+            quantity="1",
+            unit_price_net="10",
+            vat_rate="23",
+            net_total="10.00",
+            vat_total="2.30",
+            gross_total="12.30",
+            sort_order=i,
+        )
+        for i, u in enumerate(units, start=1)
+    ]
+    html = render_invoice_html(_sample_invoice(items=items))
+    for unit in units:
+        assert f'<td class="unit">{unit}</td>' in html
 
 
 def test_html_seller_buyer_present() -> None:
@@ -406,8 +482,8 @@ def test_html_many_items_still_has_repeated_thead_css() -> None:
         for i in range(1, 55)
     ]
     html = render_invoice_html(_sample_invoice(items=items))
-    assert '<td class="num lp">1</td>' in html
-    assert '<td class="num lp">54</td>' in html
+    assert '<td class="lp">1</td>' in html
+    assert '<td class="lp">54</td>' in html
     assert "display: table-header-group" in html
     assert "break-inside: avoid" in html
 

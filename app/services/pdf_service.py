@@ -38,6 +38,22 @@ _DOC_TITLES: dict[str, str] = {
 
 _CORRECTION_TYPES = frozenset({"KOR", "KOR_ZAL", "KOR_ROZ"})
 
+_PL_MONTHS = (
+    "",
+    "styczeń",
+    "luty",
+    "marzec",
+    "kwiecień",
+    "maj",
+    "czerwiec",
+    "lipiec",
+    "sierpień",
+    "wrzesień",
+    "październik",
+    "listopad",
+    "grudzień",
+)
+
 _CONTACT_KEY_RE = re.compile(
     r"^(phone|telefon|tel|mobile|komorka|komórka|email|e[_-]?mail|mail)$",
     re.IGNORECASE,
@@ -104,6 +120,25 @@ def _document_title(invoice: InvoiceResponse) -> str:
 def _is_correction(invoice: InvoiceResponse) -> bool:
     raw = (invoice.invoice_type or "").strip().upper()
     return raw in _CORRECTION_TYPES
+
+
+def _invoice_kind_label(invoice: InvoiceResponse) -> str:
+    """Górny lewy blok: ZAKUP / SPRZEDAŻ / KOREKTA (prezentacja only)."""
+    if _is_correction(invoice):
+        return "KOREKTA"
+    direction = (invoice.direction or "sale").strip().lower()
+    if direction == "purchase":
+        return "ZAKUP"
+    return "SPRZEDAŻ"
+
+
+def _period_label(invoice: InvoiceResponse) -> str:
+    """Miesiąc + rok z sale_date, fallback issue_date."""
+    period_date = invoice.sale_date or invoice.issue_date
+    if period_date is None:
+        return ""
+    month = _PL_MONTHS[period_date.month]
+    return f"{month} {period_date.year}"
 
 
 def _party_address_lines(snapshot: dict | None) -> list[str]:
@@ -336,6 +371,8 @@ def render_invoice_html(
     buyer = invoice.buyer_snapshot or {}
     number = _strip_display(invoice.number_local) or "—"
     title = _document_title(invoice)
+    kind_label = _invoice_kind_label(invoice)
+    period = _period_label(invoice)
     currency = invoice.currency or "PLN"
 
     item_rows = ""
@@ -348,12 +385,12 @@ def render_invoice_html(
             )
         item_rows += f"""
         <tr>
-          <td class="num lp">{index}</td>
+          <td class="lp">{index}</td>
           <td class="name">{_esc(item.name)}{isbn_line}</td>
-          <td class="num">{_esc(_format_quantity(item.quantity))}</td>
-          <td>{_esc(_strip_display(item.unit))}</td>
+          <td class="num qty">{_esc(_format_quantity(item.quantity))}</td>
+          <td class="unit">{_esc(_strip_display(item.unit))}</td>
           <td class="num">{_esc(_amount(_as_decimal(item.unit_price_net)))}</td>
-          <td class="num">{_esc(_format_vat_rate(item.vat_rate))}</td>
+          <td class="num vat-rate">{_esc(_format_vat_rate(item.vat_rate))}</td>
           <td class="num">{_esc(_amount(_as_decimal(item.net_total)))}</td>
           <td class="num">{_esc(_amount(_as_decimal(item.vat_total)))}</td>
           <td class="num bold">{_esc(_amount(_as_decimal(item.gross_total)))}</td>
@@ -421,7 +458,7 @@ def render_invoice_html(
     margin-bottom: 18px;
     align-items: flex-start;
   }}
-  .header .seller-compact {{
+  .header .kind-block {{
     flex: 1.2 1 0;
     min-width: 0;
   }}
@@ -429,15 +466,19 @@ def render_invoice_html(
     flex: 1 1 0;
     min-width: 0;
   }}
-  .seller-compact .party-name {{
-    font-size: 12pt;
+  .kind-block .doc-kind {{
+    font-size: 14pt;
     font-weight: 700;
-    margin-bottom: 4px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #111111;
+    line-height: 1.2;
   }}
-  .seller-compact p {{
-    margin-bottom: 2px;
+  .kind-block .doc-period {{
+    margin-top: 4px;
+    font-size: 11pt;
     color: #333333;
-    font-size: 10pt;
+    font-weight: 500;
   }}
   .doc-title-block {{
     text-align: right;
@@ -543,14 +584,41 @@ def render_invoice_html(
   table.items td.num {{
     text-align: right;
   }}
+  table.items th.lp,
   table.items td.lp {{
-    width: 28px;
+    width: 1.5em;
+    max-width: 1.8em;
+    text-align: left;
+    padding-left: 0;
+    padding-right: 2px;
     color: #666666;
+    white-space: nowrap;
   }}
+  table.items th.name,
   table.items td.name {{
+    width: 42%;
     word-wrap: break-word;
     overflow-wrap: anywhere;
-    width: 34%;
+  }}
+  table.items th.qty,
+  table.items td.qty {{
+    width: 3.2em;
+  }}
+  table.items th.unit,
+  table.items td.unit {{
+    width: 5ch;
+    min-width: 5ch;
+    padding-left: 2px;
+    padding-right: 2px;
+    white-space: nowrap;
+  }}
+  table.items th.vat-rate,
+  table.items td.vat-rate {{
+    width: 2.8em;
+    max-width: 3em;
+    padding-left: 2px;
+    padding-right: 2px;
+    white-space: nowrap;
   }}
   table.items .item-sub {{
     color: #666666;
@@ -720,8 +788,9 @@ def render_invoice_html(
 <button class="print-btn" type="button" onclick="window.print()">Drukuj / Zapisz jako PDF</button>
 
 <header class="header">
-  <div class="seller-compact party">
-    {_party_inner(seller, include_contact=True)}
+  <div class="kind-block">
+    <div class="doc-kind">{_esc(kind_label)}</div>
+    <div class="doc-period">{_esc(period)}</div>
   </div>
   <div class="doc-title-block">
     <div class="doc-title">{_esc(title)}</div>
@@ -741,12 +810,12 @@ def render_invoice_html(
 <table class="items">
   <thead>
     <tr>
-      <th class="num">Lp.</th>
-      <th>Nazwa</th>
-      <th class="num">Ilość</th>
-      <th>Jm.</th>
+      <th class="lp">LP</th>
+      <th class="name">Nazwa</th>
+      <th class="num qty">Ilość</th>
+      <th class="unit">JM</th>
       <th class="num">Cena netto</th>
-      <th class="num">VAT</th>
+      <th class="num vat-rate">VAT</th>
       <th class="num">Netto</th>
       <th class="num">VAT kwota</th>
       <th class="num">Brutto</th>
