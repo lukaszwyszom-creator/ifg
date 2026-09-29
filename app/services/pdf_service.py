@@ -366,6 +366,34 @@ def render_invoice_html(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None = None,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
+) -> str:
+    """Dispatch presentation variant.
+
+    Sale invoices use the elegant Wydawnictwo Ikona sheet (GWO-0015).
+    Purchase (and other non-sale) keep the classic modern template — no regression.
+    """
+    direction = (invoice.direction or "sale").strip().lower()
+    if direction == "sale":
+        from app.services.pdf_sale_elegant import render_sale_elegant_html
+
+        return render_sale_elegant_html(
+            invoice,
+            seller_bank_account=seller_bank_account,
+            ksef_xml_bytes=ksef_xml_bytes,
+            ksef_environment=ksef_environment,
+        )
+    return _render_classic_modern_html(
+        invoice,
+        seller_bank_account=seller_bank_account,
+    )
+
+
+def _render_classic_modern_html(
+    invoice: InvoiceResponse,
+    *,
+    seller_bank_account: str | None = None,
 ) -> str:
     seller = invoice.seller_snapshot or {}
     buyer = invoice.buyer_snapshot or {}
@@ -863,6 +891,8 @@ def render_invoice_pdf(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None = None,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
 ) -> bytes:
     """Generuje binarny PDF z WeasyPrint na podstawie szablonu HTML.
 
@@ -881,6 +911,8 @@ def render_invoice_pdf(
     html_content = render_invoice_html(
         invoice,
         seller_bank_account=seller_bank_account,
+        ksef_xml_bytes=ksef_xml_bytes,
+        ksef_environment=ksef_environment,
     )
     logger.debug("Generowanie PDF dla faktury %s przez WeasyPrint", invoice.id)
     pdf_bytes: bytes = HTML(string=html_content, base_url=None).write_pdf()
