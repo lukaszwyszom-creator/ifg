@@ -197,7 +197,7 @@ def test_html_sale_elegant_table_headers() -> None:
     assert "Wartość brutto" in html
     assert "--layout-axis-x: 50%" in html
     assert 'data-layout-axis-x="50%"' in html
-    assert 'data-qr-status="MISSING_MECHANISM"' in html
+    assert 'data-qr-status="INCOMPLETE"' in html
     assert "STAINED_GLASS_ASSET_REQUIRED" in html
 
 
@@ -593,3 +593,122 @@ def test_vat_summary_renders_distinguishable_decimal_rates_only() -> None:
     assert ">zw<" not in html
     assert ">np.<" not in html
     assert ">np<" not in html
+
+
+def test_ksef_qr_renders_only_with_complete_fa3_xml() -> None:
+    from app.services.ksef_qr import build_invoice_verification_url, sha256_digest_base64url
+
+    xml = b'<?xml version="1.0"?><Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/"><P_1>2026-05-22</P_1></Faktura>'
+    invoice = _sample_invoice()
+    invoice.ksef_reference_number = "9670402857-20260522-ABCDEF000001-11"
+
+    incomplete = render_invoice_html(invoice)
+    assert 'data-qr-status="INCOMPLETE"' in incomplete
+    assert "data:image/png;base64," not in incomplete
+    assert "qr.ksef.mf.gov.pl" not in incomplete
+    # Must never encode bare KSeF number as QR payload
+    assert f'data-qr-url="{invoice.ksef_reference_number}"' not in incomplete
+
+    complete = render_invoice_html(
+        invoice,
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    expected = build_invoice_verification_url(
+        seller_nip="9670402857",
+        issue_date=invoice.issue_date,
+        xml_bytes=xml,
+        environment="test",
+    )
+    assert expected is not None
+    assert 'data-qr-status="ok"' in complete
+    assert f'data-qr-url="{expected.url}"' in complete
+    assert "data:image/png;base64," in complete
+    assert "https://qr-test.ksef.mf.gov.pl/invoice/9670402857/22-05-2026/" in complete
+    assert sha256_digest_base64url(xml) in complete
+    assert invoice.ksef_reference_number not in complete.split("data-qr-url=")[1].split('"')[1]
+
+
+def test_ksef_qr_absent_when_nip_or_date_missing() -> None:
+    xml = b"<Faktura>hash-source</Faktura>"
+    no_nip = _sample_invoice(seller_snapshot={"name": "Ikona", "nip": ""})
+    html = render_invoice_html(no_nip, ksef_xml_bytes=xml, ksef_environment="prod")
+    assert 'data-qr-status="INCOMPLETE"' in html
+    assert "data:image/png;base64," not in html
+
+    no_date = _sample_invoice()
+    no_date.issue_date = None  # type: ignore[assignment]
+    html2 = render_invoice_html(no_date, ksef_xml_bytes=xml, ksef_environment="prod")
+    assert 'data-qr-status="INCOMPLETE"' in html2
+
+
+def test_ksef_qr_payload_matches_official_kod_i_shape() -> None:
+    from app.services.ksef_qr import build_invoice_verification_url
+
+    xml = b"<root>official-kod-i</root>"
+    payload = build_invoice_verification_url(
+        seller_nip="1111111111",
+        issue_date=date(2026, 2, 1),
+        xml_bytes=xml,
+        environment="test",
+    )
+    assert payload is not None
+    assert payload.url.startswith("https://qr-test.ksef.mf.gov.pl/invoice/1111111111/01-02-2026/")
+    assert "+" not in payload.hash_base64url
+    assert "/" not in payload.hash_base64url
+    assert "=" not in payload.hash_base64url
+
+
+def test_stained_glass_asset_loads_when_file_present(tmp_path, monkeypatch) -> None:
+    from app.services import pdf_sale_elegant as elegant
+
+    asset_dir = tmp_path / "invoice"
+    asset_dir.mkdir()
+    # Minimal valid 1x1 PNG
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    (asset_dir / "stained_glass.png").write_bytes(png)
+    monkeypatch.setattr(elegant, "_ASSET_DIR", asset_dir)
+
+    html = elegant.render_sale_elegant_html(_sample_invoice())
+    assert 'data-stained-glass="provided"' in html
+    assert "STAINED_GLASS_ASSET_REQUIRED" not in html
+    assert "data:image/png;base64," in html
+    assert 'class="stained-glass has-asset"' in html
+    assert 'class="stained-glass missing-asset"' not in html
+
+
+def test_stained_glass_placeholder_when_asset_missing() -> None:
+    html = render_invoice_html(_sample_invoice(direction="sale"))
+    assert "STAINED_GLASS_ASSET_REQUIRED" in html
+    assert 'data-stained-glass="provided"' not in html
+
+
+def test_sale_pdf_smoke_with_real_qr() -> None:
+    xml = b'<?xml version="1.0"?><Faktura>smoke-qr</Faktura>'
+    invoice = _sample_invoice()
+    invoice.ksef_reference_number = "9670402857-20260522-SMOKE0000001-11"
+    pdf = render_invoice_pdf(
+        invoice,
+        seller_bank_account=VALID_BANK,
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    assert pdf.startswith(b"%PDF")
+    assert b"%%EOF" in pdf[-1024:]
+
+
+def test_purchase_regression_ignores_ksef_xml_qr_args() -> None:
+    xml = b"<Faktura>should-not-appear-on-purchase</Faktura>"
+    html = render_invoice_html(
+        _sample_invoice(direction="purchase"),
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    assert 'data-invoice-template="sale-elegant"' not in html
+    assert "data-qr-status" not in html
+    assert "qr-test.ksef.mf.gov.pl" not in html
+    assert "Cena brutto" not in html

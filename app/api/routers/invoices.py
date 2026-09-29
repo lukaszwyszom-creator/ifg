@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db_session, get_idempotency_service, get_invoice_service, get_payment_service, get_settings_service
+from app.core.config import settings
 from app.core.exceptions import ConflictError
 from app.core.security import AuthenticatedUser
 from app.domain.exceptions import InvalidInvoiceError, InvalidStatusTransitionError
@@ -23,6 +24,7 @@ from app.schemas.invoice import (
 )
 from app.services.idempotency_service import DuplicateRequestError, IdempotencyService
 from app.services.invoice_service import InvoiceService
+from app.services.ksef_qr import resolve_submitted_fa3_xml
 from app.services.payment_service import PaymentService
 from app.services.pdf_service import (
     render_invoice_html,
@@ -32,6 +34,12 @@ from app.services.pdf_service import (
 from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+
+def _ksef_xml_bytes_for_invoice(session: Session, invoice_id: UUID) -> bytes | None:
+    """Durable FA(3) XML from successful/submitted transmission — no DB schema change."""
+    rows = TransmissionRepository(session).list_for_invoice(invoice_id)
+    return resolve_submitted_fa3_xml(rows)
 
 
 def _invoice_response(
@@ -252,6 +260,7 @@ def update_invoice(
 @router.get("/{invoice_id}/preview", response_class=HTMLResponse)
 def get_invoice_preview(
     invoice_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)] = ...,
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
     settings_service: Annotated[SettingsService, Depends(get_settings_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
@@ -265,13 +274,19 @@ def get_invoice_preview(
         schema,
         company_bank_account=company_bank,
     )
-    html = render_invoice_html(schema, seller_bank_account=bank_account)
+    html = render_invoice_html(
+        schema,
+        seller_bank_account=bank_account,
+        ksef_xml_bytes=_ksef_xml_bytes_for_invoice(session, invoice_id),
+        ksef_environment=settings.ksef_environment,
+    )
     return HTMLResponse(content=html)
 
 
 @router.get("/{invoice_id}/pdf")
 def get_invoice_pdf(
     invoice_id: UUID,
+    session: Annotated[Session, Depends(get_db_session)] = ...,
     invoice_service: Annotated[InvoiceService, Depends(get_invoice_service)] = ...,
     settings_service: Annotated[SettingsService, Depends(get_settings_service)] = ...,
     _: Annotated[AuthenticatedUser, Depends(get_current_user)] = ...,
@@ -285,7 +300,12 @@ def get_invoice_pdf(
         schema,
         company_bank_account=company_bank,
     )
-    pdf_bytes = render_invoice_pdf(schema, seller_bank_account=bank_account)
+    pdf_bytes = render_invoice_pdf(
+        schema,
+        seller_bank_account=bank_account,
+        ksef_xml_bytes=_ksef_xml_bytes_for_invoice(session, invoice_id),
+        ksef_environment=settings.ksef_environment,
+    )
     filename = f"faktura-{schema.number_local or schema.id}.pdf"
     return Response(
         content=pdf_bytes,

@@ -96,14 +96,53 @@ def _stained_glass_markup() -> str:
     )
 
 
-def _ksef_footer(invoice: InvoiceResponse) -> str:
-    """KSeF number when present. QR intentionally omitted — no verified QR builder in IFG."""
+def _ksef_footer(
+    invoice: InvoiceResponse,
+    *,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
+) -> str:
+    """KSeF number + Kod I QR when FA(3) XML + seller NIP + issue_date are complete."""
+    from app.services.ksef_qr import (
+        build_invoice_verification_url,
+        render_qr_png_data_uri,
+        resolve_seller_nip_for_qr,
+    )
+
     ref = _strip_display(invoice.ksef_reference_number)
-    ksef_text = f'<div class="ksef-text">KSEF: {_esc(ref)}</div>' if ref else '<div class="ksef-text"></div>'
+    ksef_text = (
+        f'<div class="ksef-text">KSEF: {_esc(ref)}</div>' if ref else '<div class="ksef-text"></div>'
+    )
+
+    qr_markup = '<div class="qr-slot" data-qr-status="INCOMPLETE" aria-hidden="true"></div>'
+    nip = resolve_seller_nip_for_qr(invoice.seller_snapshot)
+    payload = None
+    if ksef_xml_bytes and nip and invoice.issue_date:
+        payload = build_invoice_verification_url(
+            seller_nip=nip,
+            issue_date=invoice.issue_date,
+            xml_bytes=ksef_xml_bytes,
+            environment=ksef_environment,
+        )
+    if payload is not None:
+        data_uri = render_qr_png_data_uri(payload.url)
+        if data_uri:
+            qr_markup = (
+                f'<div class="qr-slot" data-qr-status="ok" '
+                f'data-qr-url="{_esc(payload.url)}">'
+                f'<img src="{data_uri}" alt="Kod weryfikujący KSeF" />'
+                f"</div>"
+            )
+        else:
+            qr_markup = (
+                '<div class="qr-slot" data-qr-status="LIBRARY_MISSING" '
+                'aria-hidden="true"></div>'
+            )
+
     return f"""
 <footer class="ksef-footer">
   {ksef_text}
-  <div class="qr-slot" data-qr-status="MISSING_MECHANISM" aria-hidden="true"></div>
+  {qr_markup}
 </footer>"""
 
 
@@ -130,6 +169,8 @@ def render_sale_elegant_html(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None = None,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
 ) -> str:
     seller = invoice.seller_snapshot or {}
     buyer = invoice.buyer_snapshot or {}
@@ -570,7 +611,11 @@ def render_sale_elegant_html(
   .qr-slot {{
     width: 22mm;
     height: 22mm;
-    /* Reserved — no fake QR rendered */
+  }}
+  .qr-slot img {{
+    width: 22mm;
+    height: 22mm;
+    display: block;
   }}
   @media print {{
     .print-btn {{ display: none !important; }}
@@ -675,7 +720,11 @@ def render_sale_elegant_html(
   </div>
 
   {_correction_section(invoice)}
-  {_ksef_footer(invoice)}
+  {_ksef_footer(
+    invoice,
+    ksef_xml_bytes=ksef_xml_bytes,
+    ksef_environment=ksef_environment,
+  )}
 </div>
 </body>
 </html>"""

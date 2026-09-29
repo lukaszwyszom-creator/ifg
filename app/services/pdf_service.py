@@ -366,6 +366,8 @@ def render_invoice_html(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None = None,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
 ) -> str:
     """Dispatch presentation variant.
 
@@ -379,6 +381,8 @@ def render_invoice_html(
         return render_sale_elegant_html(
             invoice,
             seller_bank_account=seller_bank_account,
+            ksef_xml_bytes=ksef_xml_bytes,
+            ksef_environment=ksef_environment,
         )
     return _render_classic_modern_html(
         invoice,
@@ -887,6 +891,8 @@ def render_invoice_pdf(
     invoice: InvoiceResponse,
     *,
     seller_bank_account: str | None = None,
+    ksef_xml_bytes: bytes | None = None,
+    ksef_environment: str | None = None,
 ) -> bytes:
     """Generuje binarny PDF z WeasyPrint na podstawie szablonu HTML.
 
@@ -905,6 +911,8 @@ def render_invoice_pdf(
     html_content = render_invoice_html(
         invoice,
         seller_bank_account=seller_bank_account,
+        ksef_xml_bytes=ksef_xml_bytes,
+        ksef_environment=ksef_environment,
     )
     logger.debug("Generowanie PDF dla faktury %s przez WeasyPrint", invoice.id)
     pdf_bytes: bytes = HTML(string=html_content, base_url=None).write_pdf()
