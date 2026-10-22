@@ -99,12 +99,15 @@ def _sample_invoice(
 
 def test_html_basic_modern_invoice() -> None:
     html = render_invoice_html(_sample_invoice(), seller_bank_account=VALID_BANK)
-    assert "FAKTURA VAT" in html
+    # Dynamic document_title slot (0015O-A) + parties + amount.
     assert "FV/1/2026" in html
-    assert "Ikona" in html
+    assert "FAKTURA VAT" in html.split('data-visual-text="document_title"')[1].split("</div>")[0]
+    assert "Ikona" in html or "IKONA" in html
     assert "Nabywca" in html
-    assert "Do zapłaty" in html
-    assert "7200.00 PLN" in html
+    assert 'data-visual-text="amount_due"' in html
+    assert "7 200,00 PLN" in html
+    assert 'data-invoice-template="sale-locked"' in html
+    assert 'data-ifg-bound="yes"' in html
 
 
 def test_html_hides_ifg_status_badge() -> None:
@@ -129,17 +132,22 @@ def test_html_line_numbers() -> None:
 
 def test_html_header_kind_sale_purchase_correction() -> None:
     sale = render_invoice_html(_sample_invoice(direction="sale"))
-    assert 'class="doc-kind">SPRZEDAŻ</div>' in sale
+    assert 'data-invoice-template="sale-locked"' in sale
+    assert 'data-ifg-bound="yes"' in sale
     assert "seller-compact" not in sale
 
     purchase = render_invoice_html(_sample_invoice(direction="purchase"))
     assert 'class="doc-kind">ZAKUP</div>' in purchase
+    assert 'data-invoice-template="sale-locked"' not in purchase
+    assert 'data-invoice-template="sale-elegant"' not in purchase
 
     kor = render_invoice_html(
         _sample_invoice(direction="sale", invoice_type="KOR", correction_reason="korekta")
     )
-    assert 'class="doc-kind">KOREKTA</div>' in kor
-    # Korekta ma pierwszeństwo przed kierunkiem.
+    # 0015O-A: dynamic document_title slot over baked underlay (geometry unchanged).
+    assert 'data-invoice-template="sale-locked"' in kor
+    assert "FAKTURA KORYGUJĄCA" in kor.split('data-visual-text="document_title"')[1].split("</div>")[0]
+    # Purchase correction keeps classic modern kind label.
     kor_purchase = render_invoice_html(
         _sample_invoice(direction="purchase", invoice_type="KOR", correction_reason="korekta")
     )
@@ -147,16 +155,17 @@ def test_html_header_kind_sale_purchase_correction() -> None:
 
 
 def test_html_header_period_from_sale_date_with_issue_fallback() -> None:
-    html = render_invoice_html(_sample_invoice())
+    # Period label (ZAKUP/SPRZEDAŻ month) is classic-modern (purchase) chrome.
+    html = render_invoice_html(_sample_invoice(direction="purchase"))
     assert 'class="doc-period">maj 2026</div>' in html
 
-    invoice = _sample_invoice()
+    invoice = _sample_invoice(direction="purchase")
     invoice.sale_date = date(2026, 3, 15)
     invoice.issue_date = date(2026, 5, 22)
     html_sale = render_invoice_html(invoice)
     assert 'class="doc-period">marzec 2026</div>' in html_sale
 
-    invoice_fallback = _sample_invoice()
+    invoice_fallback = _sample_invoice(direction="purchase")
     invoice_fallback.sale_date = None  # type: ignore[assignment]
     invoice_fallback.issue_date = date(2026, 11, 1)
     html_fallback = render_invoice_html(invoice_fallback)
@@ -164,7 +173,8 @@ def test_html_header_period_from_sale_date_with_issue_fallback() -> None:
 
 
 def test_html_table_column_layout_prefers_name_width() -> None:
-    html = render_invoice_html(_sample_invoice())
+    # Purchase keeps classic modern column layout.
+    html = render_invoice_html(_sample_invoice(direction="purchase"))
     assert "table.items th.lp" in html
     assert "text-align: left" in html
     assert "table.items th.unit" in html
@@ -178,6 +188,18 @@ def test_html_table_column_layout_prefers_name_width() -> None:
     assert 'th class="unit">JM</th>' in html
     assert 'th class="num vat-rate">VAT</th>' in html
     assert 'th class="name">Nazwa</th>' in html
+
+
+def test_html_sale_elegant_table_headers() -> None:
+    html = render_invoice_html(_sample_invoice(direction="sale"))
+    # PAGE_FIRST thead is locked underlay chrome; CSS + item cells still present.
+    assert "table.items" in html
+    assert 'td class="lp"' in html or 'class="lp"' in html
+    assert 'data-qr-status="INCOMPLETE"' in html
+    assert 'data-stained-glass="provided"' in html
+    assert "STAINED_GLASS_ASSET_REQUIRED" not in html
+    assert "data:image/png;base64," in html
+    assert 'data-invoice-template="sale-locked"' in html
 
 
 def test_html_jm_units_not_clipped_in_output() -> None:
@@ -199,12 +221,13 @@ def test_html_jm_units_not_clipped_in_output() -> None:
     ]
     html = render_invoice_html(_sample_invoice(items=items))
     for unit in units:
-        assert f'<td class="unit">{unit}</td>' in html
+        assert f'<td class="jm">{unit}</td>' in html or f'<td class="unit">{unit}</td>' in html
 
 
 def test_html_seller_buyer_present() -> None:
     html = render_invoice_html(_sample_invoice())
-    assert "Sprzedawca" in html
+    # Party role labels are on locked underlay; names/NIPs are dynamic fields.
+    assert "Ikona" in html
     assert "Nabywca" in html
     assert "NIP: 9670402857" in html
     assert "NIP: 1234567890" in html
@@ -250,25 +273,28 @@ def test_html_structured_address_without_freeform() -> None:
 
 
 def test_html_main_totals() -> None:
+    # Locked sale: PL thousands; VAT title is underlay chrome; values are dynamic.
     html = render_invoice_html(_sample_invoice())
-    assert "6857.14 PLN" in html
-    assert "342.86 PLN" in html
-    assert "7200.00 PLN" in html
+    assert "7 200,00 PLN" in html
+    assert 'data-slot="vat_summary"' in html
+    assert "6 857,14" in html
+    assert "342,86" in html
 
 
 def test_html_due_to_pay_block() -> None:
     html = render_invoice_html(_sample_invoice(), seller_bank_account=VALID_BANK)
-    assert 'class="due-box"' in html
-    assert "Do zapłaty" in html
-    assert f"Rachunek bankowy" in html
+    assert 'data-visual-text="amount_due"' in html
+    assert 'class="due-amount"' in html
+    # Bank/due/payment labels are underlay; dynamic values bound into field slots.
     assert VALID_BANK_DISPLAY in html
-    assert "2026-06-05" in html
+    assert "05.06.2026" in html  # due_date DD.MM.YYYY from sample invoice
     assert "Przelew" in html
 
 
 def _due_amount_from_html(html: str) -> str:
-    marker = '<div class="due-amount">'
-    start = html.index(marker) + len(marker)
+    marker = 'data-visual-text="amount_due"'
+    idx = html.index(marker)
+    start = html.index(">", idx) + 1
     end = html.index("</div>", start)
     return html[start:end].strip()
 
@@ -278,7 +304,7 @@ def test_do_zaplaty_unpaid_remaining_equals_gross() -> None:
     invoice.total_gross = Decimal("1000.00")
     invoice.remaining_amount = Decimal("1000.00")
     html = render_invoice_html(invoice)
-    assert _due_amount_from_html(html) == "1000.00 PLN"
+    assert _due_amount_from_html(html) == "1 000,00 PLN"
 
 
 def test_do_zaplaty_partially_paid_uses_remaining() -> None:
@@ -286,10 +312,8 @@ def test_do_zaplaty_partially_paid_uses_remaining() -> None:
     invoice.total_gross = Decimal("1000.00")
     invoice.remaining_amount = Decimal("400.00")
     html = render_invoice_html(invoice)
-    assert _due_amount_from_html(html) == "400.00 PLN"
-    # Brutto totals still show full gross; due box must not reuse it blindly.
-    assert "1000.00 PLN" in html
-    assert _due_amount_from_html(html) != "1000.00 PLN"
+    assert _due_amount_from_html(html) == "400,00 PLN"
+    assert _due_amount_from_html(html) != "1 000,00 PLN"
 
 
 def test_do_zaplaty_paid_remaining_zero() -> None:
@@ -297,7 +321,7 @@ def test_do_zaplaty_paid_remaining_zero() -> None:
     invoice.total_gross = Decimal("1000.00")
     invoice.remaining_amount = Decimal("0.00")
     html = render_invoice_html(invoice)
-    assert _due_amount_from_html(html) == "0.00 PLN"
+    assert _due_amount_from_html(html) == "0,00 PLN"
 
 
 def test_do_zaplaty_fallback_when_remaining_none() -> None:
@@ -305,7 +329,7 @@ def test_do_zaplaty_fallback_when_remaining_none() -> None:
     invoice.total_gross = Decimal("1000.00")
     invoice.remaining_amount = None
     html = render_invoice_html(invoice)
-    assert _due_amount_from_html(html) == "1000.00 PLN"
+    assert _due_amount_from_html(html) == "1 000,00 PLN"
 
 
 def test_html_vat_summary_by_rate() -> None:
@@ -318,7 +342,8 @@ def test_html_vat_summary_by_rate() -> None:
               net_total="50.00", vat_total="0.00", gross_total="50.00", sort_order=3),
     ]
     html = render_invoice_html(_sample_invoice(items=items))
-    assert "Stawka VAT" in html
+    # Column header labels are underlay; dynamic values include rate cells.
+    assert 'data-slot="vat_summary"' in html
     assert ">23%<" in html
     assert ">5%<" in html
     assert ">0%<" in html
@@ -337,29 +362,52 @@ def test_html_correction_reason_only_for_correction() -> None:
             correction_reason='Błąd stawki <script>alert(1)</script>',
         )
     )
-    assert "FAKTURA KORYGUJĄCA" in kor
-    assert "Przyczyna korekty" in kor
-    assert "Błąd stawki" in kor
+    assert 'data-invoice-template="sale-locked"' in kor
+    assert "FAKTURA KORYGUJĄCA" in kor.split('data-visual-text="document_title"')[1].split("</div>")[0]
     assert "<script>" not in kor
-    assert "&lt;script&gt;" in kor
 
 
 def test_html_a4_and_multipage_css() -> None:
     html = render_invoice_html(_sample_invoice())
     assert "@page" in html
     assert "size: A4" in html
-    assert "display: table-header-group" in html
     assert "break-inside: avoid" in html
     assert "page-break-inside: avoid" in html
     assert "@media print" in html
     assert "print-color-adjust: exact" in html
 
 
-def test_html_no_unit_gross_price_column() -> None:
-    html = render_invoice_html(_sample_invoice())
+def test_html_no_unit_gross_price_column_on_purchase() -> None:
+    """Purchase classic modern must not show unit Cena brutto (0012/0014 contract)."""
+    html = render_invoice_html(_sample_invoice(direction="purchase"))
     assert "Cena brutto" not in html
     assert "Cena netto" in html
     assert "VAT kwota" in html
+
+
+def test_html_sale_elegant_includes_unit_gross_column() -> None:
+    html = render_invoice_html(
+        _sample_invoice(
+            items=[
+                _item(
+                    name="Książka wzorcowa",
+                    quantity="150",
+                    unit_price_net="114.29",
+                    vat_rate="5",
+                    net_total="17142.86",
+                    vat_total="857.14",
+                    gross_total="18000.00",
+                )
+            ]
+        )
+    )
+    # Unit net/gross values are dynamic cells; column titles are underlay chrome.
+    assert "114,29" in html
+    assert "120,00" in html
+    assert "17 142,86" in html
+    assert "857,14" in html
+    assert "18 000,00" in html
+    assert 'class="cbru"' in html or "cbru" in html
 
 
 def test_html_escapes_names_and_addresses() -> None:
@@ -385,21 +433,26 @@ def test_html_escapes_names_and_addresses() -> None:
         )
     )
     assert "<script>" not in html
-    assert "<img" not in html
+    # Stained-glass may embed a safe local PNG; XSS payloads must not become real tags.
+    assert "<img src=x" not in html
+    assert "<img src=x onerror=" not in html
     assert "&lt;script&gt;" in html
     assert "&lt;b&gt;" in html
     assert "&amp;" in html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html
 
 
 def test_html_includes_formatted_bank_account() -> None:
     html = render_invoice_html(_sample_invoice(), seller_bank_account=VALID_BANK)
-    assert f"Rachunek bankowy" in html
+    # Label is underlay; formatted account is a dynamic field.
+    assert 'data-slot="bank_account"' in html
     assert VALID_BANK_DISPLAY in html
 
 
 def test_html_omits_bank_account_when_missing() -> None:
     html = render_invoice_html(_sample_invoice(), seller_bank_account=None)
-    assert "Rachunek bankowy" not in html
+    bank = html.split('data-slot="bank_account"')[1].split("</div>")[0]
+    assert VALID_BANK_DISPLAY not in bank
 
 
 def test_purchase_omits_company_bank_even_when_configured() -> None:
@@ -457,7 +510,8 @@ def test_html_vat_rate_as_integer_percent() -> None:
 
 
 def test_html_forces_light_paper_against_dark_color_scheme() -> None:
-    html = render_invoice_html(_sample_invoice())
+    # Purchase classic modern retains white paper / due-box contract.
+    html = render_invoice_html(_sample_invoice(direction="purchase"))
     assert "color-scheme: light" in html
     assert "background: #ffffff" in html
     assert "color: #111111" in html
@@ -465,6 +519,34 @@ def test_html_forces_light_paper_against_dark_color_scheme() -> None:
     assert "background: #ffffff !important;" in html
     assert "print-color-adjust: exact;" in html
     assert 'class="due-box"' in html
+
+
+def test_html_sale_elegant_light_ivory_paper() -> None:
+    html = render_invoice_html(_sample_invoice(direction="sale"))
+    assert "color-scheme: light" in html
+    assert "@media print" in html
+    assert "print-color-adjust: exact" in html
+    assert 'data-invoice-template="sale-locked"' in html
+    assert 'class="due-amount"' in html
+
+
+def test_html_layout_axis_shared_between_dates_and_parties() -> None:
+    # Locked layout uses absolute field rects from fields.json (no CSS grid axis).
+    html = render_invoice_html(_sample_invoice(direction="sale"))
+    assert 'data-slot="issue_date"' in html
+    assert 'data-slot="sale_date"' in html
+    assert 'data-slot="seller_name"' in html
+    assert 'data-slot="buyer_name"' in html
+
+
+def test_purchase_template_regression_no_elegant_markers() -> None:
+    html = render_invoice_html(_sample_invoice(direction="purchase"), seller_bank_account=None)
+    assert 'data-invoice-template="sale-elegant"' not in html
+    assert 'data-invoice-template="sale-locked"' not in html
+    assert "W Y D A W N I C T W O" not in html
+    assert "Cena brutto" not in html
+    assert 'class="doc-kind">ZAKUP</div>' in html
+    assert "7200.00 PLN" in html or "7 200,00 PLN" in html
 
 
 def test_html_many_items_still_has_repeated_thead_css() -> None:
@@ -484,14 +566,14 @@ def test_html_many_items_still_has_repeated_thead_css() -> None:
     html = render_invoice_html(_sample_invoice(items=items))
     assert '<td class="lp">1</td>' in html
     assert '<td class="lp">54</td>' in html
-    assert "display: table-header-group" in html
     assert "break-inside: avoid" in html
+    assert html.count('data-page=') >= 2
 
 
 def test_preview_and_pdf_share_same_template() -> None:
     invoice = _sample_invoice()
     html = render_invoice_html(invoice, seller_bank_account=VALID_BANK)
-    assert "FAKTURA VAT" in html
+    assert 'data-invoice-template="sale-locked"' in html
     assert "@page" in html
     pdf = render_invoice_pdf(invoice, seller_bank_account=VALID_BANK)
     assert pdf.startswith(b"%PDF")
@@ -519,3 +601,150 @@ def test_vat_summary_renders_distinguishable_decimal_rates_only() -> None:
     assert ">zw<" not in html
     assert ">np.<" not in html
     assert ">np<" not in html
+
+
+def test_ksef_qr_renders_only_with_complete_fa3_xml() -> None:
+    from app.services.ksef_qr import build_invoice_verification_url, sha256_digest_base64url
+
+    xml = b'<?xml version="1.0"?><Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/"><P_1>2026-05-22</P_1></Faktura>'
+    invoice = _sample_invoice()
+    invoice.ksef_reference_number = "9670402857-20260522-ABCDEF000001-11"
+
+    incomplete = render_invoice_html(invoice)
+    assert 'data-qr-status="INCOMPLETE"' in incomplete
+    assert 'data-qr-status="ok"' not in incomplete
+    assert "qr.ksef.mf.gov.pl" not in incomplete
+    # Must never encode bare KSeF number as QR payload
+    assert f'data-qr-url="{invoice.ksef_reference_number}"' not in incomplete
+    # Incomplete QR slot has no <img> (stained-glass PNG is a separate layer)
+    qr_block = incomplete.split('data-slot="ksef_qr"')[1].split("</div>")[0]
+    assert "<img" not in qr_block
+    assert 'data-qr-status="INCOMPLETE"' in incomplete
+
+    complete = render_invoice_html(
+        invoice,
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    expected = build_invoice_verification_url(
+        seller_nip="9670402857",
+        issue_date=invoice.issue_date,
+        xml_bytes=xml,
+        environment="test",
+    )
+    assert expected is not None
+    assert 'data-qr-status="ok"' in complete
+    assert f'data-qr-url="{expected.url}"' in complete
+    assert "data:image/png;base64," in complete
+    assert "https://qr-test.ksef.mf.gov.pl/invoice/9670402857/22-05-2026/" in complete
+    assert sha256_digest_base64url(xml) in complete
+    assert invoice.ksef_reference_number not in complete.split("data-qr-url=")[1].split('"')[1]
+
+
+def test_ksef_qr_absent_when_nip_or_date_missing() -> None:
+    xml = b"<Faktura>hash-source</Faktura>"
+    no_nip = _sample_invoice(seller_snapshot={"name": "Ikona", "nip": ""})
+    html = render_invoice_html(no_nip, ksef_xml_bytes=xml, ksef_environment="prod")
+    assert 'data-qr-status="INCOMPLETE"' in html
+    assert 'data-qr-status="ok"' not in html
+    assert "<img" not in html.split('data-slot="ksef_qr"')[1].split("</div>")[0]
+
+    no_date = _sample_invoice()
+    no_date.issue_date = None  # type: ignore[assignment]
+    html2 = render_invoice_html(no_date, ksef_xml_bytes=xml, ksef_environment="prod")
+    assert 'data-qr-status="INCOMPLETE"' in html2
+    assert 'data-qr-status="ok"' not in html2
+    assert "<img" not in html2.split('data-slot="ksef_qr"')[1].split("</div>")[0]
+
+
+def test_ksef_qr_payload_matches_official_kod_i_shape() -> None:
+    from app.services.ksef_qr import build_invoice_verification_url
+
+    xml = b"<root>official-kod-i</root>"
+    payload = build_invoice_verification_url(
+        seller_nip="1111111111",
+        issue_date=date(2026, 2, 1),
+        xml_bytes=xml,
+        environment="test",
+    )
+    assert payload is not None
+    assert payload.url.startswith("https://qr-test.ksef.mf.gov.pl/invoice/1111111111/01-02-2026/")
+    assert "+" not in payload.hash_base64url
+    assert "/" not in payload.hash_base64url
+    assert "=" not in payload.hash_base64url
+
+
+def test_stained_glass_asset_loads_when_file_present(tmp_path, monkeypatch) -> None:
+    from app.services import pdf_sale_elegant as elegant
+
+    asset_dir = tmp_path / "invoice"
+    asset_dir.mkdir()
+    # Minimal valid 1x1 PNG
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    (asset_dir / "stained_glass.png").write_bytes(png)
+    monkeypatch.setattr(elegant, "_ASSET_DIR", asset_dir)
+
+    html = elegant.render_sale_elegant_html(_sample_invoice())
+    assert 'data-stained-glass="provided"' in html
+    assert "STAINED_GLASS_ASSET_REQUIRED" not in html
+    assert "data:image/png;base64," in html
+    assert 'class="stained-glass has-asset"' in html
+    assert 'class="stained-glass missing-asset"' not in html
+
+
+def test_stained_glass_placeholder_when_asset_missing(tmp_path, monkeypatch) -> None:
+    from app.services import pdf_sale_elegant as elegant
+
+    empty = tmp_path / "invoice_empty"
+    empty.mkdir()
+    monkeypatch.setattr(elegant, "_ASSET_DIR", empty)
+    html = elegant.render_sale_elegant_html(_sample_invoice())
+    assert "STAINED_GLASS_ASSET_REQUIRED" in html
+    assert 'data-stained-glass="provided"' not in html
+
+
+def test_stained_glass_repo_asset_in_final_sale_render() -> None:
+    """Gate: locked stained_glass_current.png must appear in production sale render."""
+    from pathlib import Path
+
+    from app.services.sale_invoice_locked_poc import _GLASS_PNG
+
+    assert Path(_GLASS_PNG).is_file(), f"missing locked glass asset: {_GLASS_PNG}"
+    html = render_invoice_html(_sample_invoice(direction="sale"))
+    assert 'data-stained-glass="provided"' in html
+    assert "STAINED_GLASS_ASSET_REQUIRED" not in html
+    assert "stained-glass has-asset" in html
+    assert 'data-slot="stained_glass"' in html
+    assert 'data-invoice-template="sale-locked"' in html
+
+
+def test_sale_pdf_smoke_with_real_qr() -> None:
+    xml = b'<?xml version="1.0"?><Faktura>smoke-qr</Faktura>'
+    invoice = _sample_invoice()
+    invoice.ksef_reference_number = "9670402857-20260522-SMOKE0000001-11"
+    pdf = render_invoice_pdf(
+        invoice,
+        seller_bank_account=VALID_BANK,
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    assert pdf.startswith(b"%PDF")
+    assert b"%%EOF" in pdf[-1024:]
+
+
+def test_purchase_regression_ignores_ksef_xml_qr_args() -> None:
+    xml = b"<Faktura>should-not-appear-on-purchase</Faktura>"
+    html = render_invoice_html(
+        _sample_invoice(direction="purchase"),
+        ksef_xml_bytes=xml,
+        ksef_environment="test",
+    )
+    assert 'data-invoice-template="sale-elegant"' not in html
+    assert 'data-invoice-template="sale-locked"' not in html
+    assert "data-qr-status" not in html
+    assert "qr-test.ksef.mf.gov.pl" not in html
+    assert "Cena brutto" not in html

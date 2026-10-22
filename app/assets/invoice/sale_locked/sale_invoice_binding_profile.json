@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "gwo": "0015N",
+  "source": {
+    "background": "sale_invoice_background_locked.png",
+    "fields": "sale_invoice_fields.json",
+    "stained_glass_module": "stained_glass_module.json"
+  },
+  "MASTER_WIDTH_PX": 1024,
+  "MASTER_HEIGHT_PX": 1536,
+  "A4_MAPPING": {
+    "MASTER_HEIGHT_MM": 297,
+    "MASTER_WIDTH_MM": 198,
+    "MASTER_OFFSET_X_MM": 6,
+    "SCALE_MM_PER_PX": 0.193359375
+  },
+  "TABLE_LEFT_PX": 118,
+  "TABLE_RIGHT_PX": 999,
+  "TABLE_WIDTH_PX": 881,
+  "TABLE_HEADER_TOP_PX": 942,
+  "TABLE_ITEMS_TOP_PX": 990,
+  "SUMMARY_TOP_PX": 1216,
+  "SUMMARY_BOTTOM_PX": 1278,
+  "AMOUNT_DUE_RECT": [780, 1222, 987, 1272],
+  "VAT_SUMMARY_RECT": [118, 1216, 633, 1278],
+  "KSEF_TOP_PX": 1360,
+  "KSEF_NUMBER_RECT": [208, 1410, 800, 1460],
+  "QR_RECT": [820, 1360, 990, 1518],
+  "PAGE_CONTENT_BOTTOM_PX": 1360,
+  "CREAM_RGB": [247, 243, 232],
+  "FIRST_PAGE_ITEMS_HEIGHT": {
+    "final": 226,
+    "normal": 370,
+    "note": "Body-only budgets: underlay already paints thead above TABLE_ITEMS_TOP. final=SUMMARY_TOP-ITEMS_TOP; normal=KSEF_TOP-ITEMS_TOP."
+  },
+  "CONTINUATION": {
+    "TABLE_TOP_CONTINUATION_PX": 124,
+    "THEAD_HEIGHT_PX": 28,
+    "NORMAL_ITEMS_HEIGHT": 1208,
+    "FINAL_ITEMS_HEIGHT": 1064,
+    "note": "0015M-C continuation top retained; heights recalculated to underlay SUMMARY_TOP/KSEF_TOP."
+  }
+}
