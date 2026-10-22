@@ -376,9 +376,10 @@ def render_invoice_html(
     """
     direction = (invoice.direction or "sale").strip().lower()
     if direction == "sale":
-        from app.services.pdf_sale_elegant import render_sale_elegant_html
+        # GWO-0015O: production sale PDF/preview → locked underlay binder (0015N-D SoT)
+        from app.services.sale_invoice_locked_bind import render_sale_locked_html
 
-        return render_sale_elegant_html(
+        return render_sale_locked_html(
             invoice,
             seller_bank_account=seller_bank_account,
             ksef_xml_bytes=ksef_xml_bytes,

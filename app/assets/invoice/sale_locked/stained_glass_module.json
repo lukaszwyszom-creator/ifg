@@ -1,0 +1,21 @@
+{
+  "editable": true,
+  "coordinate_space": "MASTER_1024x1536",
+  "anchor": {
+    "center_x_px": 83,
+    "center_y_px": 194
+  },
+  "viewport": {
+    "shape": "circle",
+    "diameter_px": 232
+  },
+  "asset_path": "stained_glass_current.png",
+  "crop_x": 0.5,
+  "crop_y": 0.5,
+  "scale": 1.0,
+  "rotation_deg": 0.0,
+  "local_offset_x_px": 0,
+  "local_offset_y_px": 0,
+  "z_index": 20,
+  "rule": "Asset/crop/scale/rotation/local offsets may change later; invoice geometry must not."
+}

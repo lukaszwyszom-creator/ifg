@@ -172,6 +172,7 @@ def render_sale_elegant_html(
     ksef_xml_bytes: bytes | None = None,
     ksef_environment: str | None = None,
 ) -> str:
+    """A4 elegant sales sheet — presentation rebuilt to MASTER visual reference (0015I)."""
     seller = invoice.seller_snapshot or {}
     buyer = invoice.buyer_snapshot or {}
     number = _strip_display(invoice.number_local) or "—"
@@ -238,38 +239,46 @@ def render_sale_elegant_html(
   :root {{
     --ink: #1a2744;
     --gold: #8a7348;
-    --gold-soft: #c4a574;
+    --gold-soft: #b8956a;
+    --sand: #e8d9c0;
+    --sand-soft: #f3e8d6;
     --ivory: #f7f1e6;
     --paper: #faf6ee;
-    --line: #c9b896;
-    --muted: #5c6578;
+    --line: #d2c2a4;
+    --muted: #6b5e4a;
     --layout-axis-x: {axis};
-    --ornament-x: 10mm;
-    --date-sep-height: 1.1em;
+    /* MASTER geometry (projektfv_master) — single source */
+    --ornament-x: 30mm;
+    --content-left: 40mm;
+    --stained-glass-size: 78mm;
+    --stained-glass-top: -32mm;
+    --horizon-y: calc(var(--stained-glass-top) + var(--stained-glass-size) / 2);
+    --date-sep-height: 1.25em;
   }}
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   @page {{
     size: A4;
-    margin: 14mm 14mm 16mm 18mm;
+    margin: 10mm 12mm 12mm 10mm;
   }}
   html {{
     color-scheme: light;
     background: var(--ivory);
   }}
   body {{
-    font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-    font-size: 10pt;
-    line-height: 1.45;
+    font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+    font-size: 11pt;
+    line-height: 1.5;
     color: var(--ink);
     background: var(--paper);
-    padding: 18px 22px 22px 28px;
+    padding: 0;
     max-width: 210mm;
     margin: 0 auto;
     position: relative;
+    overflow: hidden;
   }}
   .print-btn {{
     display: block;
-    margin: 0 auto 14px;
+    margin: 8px auto 12px;
     padding: 8px 22px;
     background: var(--ink);
     color: #fff;
@@ -281,50 +290,60 @@ def render_sale_elegant_html(
   }}
   .sheet {{
     position: relative;
-    padding-left: 8mm;
+    padding: 4mm var(--content-left) 8mm var(--content-left);
+    min-height: 277mm;
   }}
-  /* Left binder ornament — fixed X; do not shift during layout tweaks */
   .ornament {{
     position: absolute;
     left: var(--ornament-x);
     top: 0;
-    bottom: 0;
+    bottom: 8mm;
     width: 0;
-    border-left: 0.6pt solid var(--gold);
-    z-index: 0;
+    border-left: 0.7pt solid var(--gold);
+    z-index: 2;
     pointer-events: none;
   }}
   .ornament .diamond {{
     position: absolute;
-    left: -3.5px;
-    width: 7px;
-    height: 7px;
+    left: -4px;
+    width: 8px;
+    height: 8px;
     background: var(--paper);
-    border: 0.6pt solid var(--gold);
+    border: 0.7pt solid var(--gold);
     transform: rotate(45deg);
   }}
-  .ornament .diamond.d1 {{ top: 42mm; }}
-  .ornament .diamond.d2 {{ top: 78mm; }}
-  .ornament .diamond.d3 {{ top: 118mm; }}
+  .ornament .diamond.d1 {{ top: 58mm; }}
+  .ornament .diamond.d2 {{ top: 108mm; }}
+  .ornament .diamond.d3 {{ top: 168mm; }}
+  .ornament .diamond.d4 {{ bottom: 22mm; top: auto; }}
+  .horizon {{
+    position: absolute;
+    left: var(--ornament-x);
+    right: 8mm;
+    top: var(--horizon-y);
+    height: 0;
+    border-top: 0.65pt solid var(--gold);
+    z-index: 2;
+    pointer-events: none;
+  }}
   .stained-glass {{
     position: absolute;
-    left: calc(var(--ornament-x) - 9mm);
-    top: 8mm;
-    width: 18mm;
-    height: 18mm;
+    left: calc(var(--ornament-x) - (var(--stained-glass-size) / 2));
+    top: var(--stained-glass-top);
+    width: var(--stained-glass-size);
+    height: var(--stained-glass-size);
     border-radius: 50%;
-    border: 0.7pt solid var(--gold-soft);
+    border: 0.8pt solid var(--gold-soft);
     background: radial-gradient(circle at 40% 35%, #f3e7d0 0%, #e8d5b0 45%, #d4b87a 100%);
     overflow: hidden;
     z-index: 1;
   }}
-  .stained-glass.has-asset {{
-    background: var(--paper);
-  }}
+  .stained-glass.has-asset {{ background: var(--paper); }}
   .stained-glass img {{
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
     display: block;
   }}
   .stained-glass.missing-asset::after {{
@@ -339,182 +358,206 @@ def render_sale_elegant_html(
   }}
   .brand {{
     text-align: center;
-    margin: 6mm 0 8mm;
+    margin: 14mm 0 10mm;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .brand-name {{
-    font-size: 22pt;
+    font-size: 34pt;
     font-weight: 700;
-    letter-spacing: 0.28em;
-    color: var(--ink);
-    line-height: 1.1;
+    letter-spacing: 0.04em;
+    color: #3d2f1c;
+    line-height: 1.05;
   }}
   .brand-sub {{
-    margin-top: 4px;
-    font-size: 9pt;
-    letter-spacing: 0.55em;
+    margin-top: 6px;
+    font-size: 11pt;
+    letter-spacing: 0.18em;
     color: var(--gold);
     font-weight: 600;
+    font-family: "Segoe UI", Arial, sans-serif;
   }}
   .doc-head {{
-    margin: 4mm 0 3mm;
+    margin: 8mm 0 7mm;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .doc-title {{
-    font-size: 14pt;
+    font-size: 22pt;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.04em;
     color: var(--ink);
+    line-height: 1.15;
   }}
   .doc-number {{
-    margin-top: 2px;
-    font-size: 11pt;
+    margin-top: 4px;
+    font-size: 13pt;
     color: var(--ink);
   }}
   .doc-rule {{
-    margin-top: 6px;
+    margin-top: 8px;
     height: 0;
-    border-top: 0.7pt solid var(--gold);
-    width: 42%;
+    border-top: 0.8pt solid var(--gold);
+    width: 48%;
   }}
-  /* Shared axis grid: 4 date cols → mid separator at 50%; parties 2 cols → separator at 50% */
   .meta-dates {{
     display: grid;
     grid-template-columns: 1fr 1fr 1fr 1fr;
     column-gap: 0;
-    margin: 8px 0 6px;
+    margin: 10px 0 8px;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .meta-dates .meta-cell {{
-    padding: 2px 10px;
+    padding: 4px 12px;
     min-width: 0;
   }}
   .meta-dates .meta-cell:not(:last-child) {{
-    border-right: 0.6pt solid var(--gold-soft);
+    border-right: 0.7pt solid var(--gold-soft);
   }}
   .meta-dates .meta-cell .meta-label,
   .bank-row .meta-label,
-  .party h3 {{
+  .party h3,
+  .vat-block h3,
+  .due-quiet .due-label {{
     display: block;
-    font-size: 7.5pt;
+    font-size: 8.5pt;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     color: var(--muted);
     font-family: "Segoe UI", Arial, sans-serif;
     font-weight: 600;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }}
   .meta-dates .meta-cell .meta-value {{
-    font-size: 10pt;
-    font-weight: 600;
+    font-size: 12pt;
+    font-weight: 700;
     color: var(--ink);
-    /* Short separator height locked via line-box — equals --date-sep-height */
     line-height: var(--date-sep-height);
     min-height: var(--date-sep-height);
   }}
-  .meta-dates .meta-cell:nth-child(2) {{
-    /* middle date separator sits on --layout-axis-x (50%) via 4-col grid */
-  }}
   .bank-row {{
-    margin: 2px 0 10px;
-    padding: 0 10px;
+    margin: 4px 0 14px;
+    padding: 0 12px;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .bank-row .meta-value.bank {{
-    font-size: 10.5pt;
-    font-weight: 600;
+    font-size: 12.5pt;
+    font-weight: 700;
     letter-spacing: 0.02em;
   }}
   .parties {{
     display: grid;
     grid-template-columns: 1fr 1fr;
     column-gap: 0;
-    margin: 4px 0 12px;
+    margin: 6px 0 16px;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .parties .party {{
-    padding: 4px 14px;
+    padding: 6px 16px;
     min-width: 0;
   }}
   .parties .party:first-child {{
-    border-right: 0.6pt solid var(--gold);
-    /* separator X = --layout-axis-x (50%) — same as meta mid separator */
+    border-right: 0.7pt solid var(--gold);
   }}
   .party .party-name {{
     font-weight: 700;
-    font-size: 10.5pt;
-    margin-bottom: 2px;
+    font-size: 12.5pt;
+    margin-bottom: 4px;
   }}
   .party p {{
-    margin-bottom: 1px;
+    margin-bottom: 2px;
     color: var(--ink);
-    font-size: 9.5pt;
+    font-size: 11pt;
   }}
   table.items {{
     width: 100%;
     border-collapse: collapse;
-    margin: 6px 0 12px;
+    margin: 8px 0 16px;
     table-layout: fixed;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   table.items thead {{ display: table-header-group; }}
   table.items th,
   table.items td {{
-    padding: 5px 3px;
+    padding: 8px 5px;
     vertical-align: top;
-    border-bottom: 0.5pt solid var(--line);
-    font-size: 8.5pt;
+    border-bottom: 0.55pt solid var(--line);
+    font-size: 10pt;
     color: var(--ink);
     background: transparent;
   }}
   table.items th {{
-    font-size: 7pt;
+    font-size: 7.5pt;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-weight: 600;
-    color: var(--muted);
+    font-weight: 700;
+    color: #4a3d2c;
     border-bottom: 0.9pt solid var(--gold);
+    border-right: 0.45pt solid var(--line);
     text-align: left;
     font-family: "Segoe UI", Arial, sans-serif;
+    line-height: 1.2;
+    background: var(--sand);
   }}
+  table.items th:last-child {{ border-right: none; }}
+  table.items td {{ border-right: 0.35pt solid #eadfcd; }}
+  table.items td:last-child {{ border-right: none; }}
   table.items th.num,
   table.items td.num {{ text-align: right; }}
   table.items th.lp,
   table.items td.lp {{
-    width: 1.6em;
+    width: 3%;
     text-align: left;
-    padding-left: 0;
+    padding-left: 6px;
     padding-right: 2px;
     white-space: nowrap;
   }}
   table.items th.name,
   table.items td.name {{
-    width: 28%;
+    width: 24%;
     word-wrap: break-word;
     overflow-wrap: anywhere;
   }}
   table.items th.qty,
-  table.items td.qty {{ width: 3em; }}
+  table.items td.qty {{
+    width: 6%;
+    padding-left: 6px;
+    padding-right: 8px;
+    white-space: nowrap;
+  }}
   table.items th.unit,
   table.items td.unit {{
-    width: 5ch;
+    width: 5%;
+    padding-left: 8px;
+    padding-right: 6px;
     white-space: nowrap;
+    text-align: left;
   }}
+  table.items th:nth-child(5),
+  table.items td:nth-child(5) {{ width: 10%; padding-left: 6px; padding-right: 6px; }}
+  table.items th:nth-child(6),
+  table.items td:nth-child(6) {{ width: 10%; padding-left: 6px; padding-right: 8px; }}
   table.items th.vat-rate,
   table.items td.vat-rate {{
-    width: 2.8em;
+    width: 5%;
+    padding-left: 8px;
+    padding-right: 8px;
     white-space: nowrap;
   }}
+  table.items th:nth-child(8),
+  table.items td:nth-child(8) {{ width: 11%; padding-left: 6px; padding-right: 6px; }}
+  table.items th:nth-child(9),
+  table.items td:nth-child(9) {{ width: 10%; padding-left: 6px; padding-right: 6px; }}
+  table.items th:nth-child(10),
+  table.items td:nth-child(10) {{ width: 11%; padding-left: 6px; padding-right: 6px; }}
   table.items .item-sub {{
     color: var(--muted);
-    font-size: 7.5pt;
-    margin-top: 1px;
+    font-size: 8.5pt;
+    margin-top: 2px;
   }}
   table.items tbody tr {{
     break-inside: avoid;
@@ -523,21 +566,16 @@ def render_sale_elegant_html(
   .bold {{ font-weight: 700; }}
   .summary-wrap {{
     display: grid;
-    grid-template-columns: 1.4fr 0.9fr;
-    gap: 16px;
-    margin: 4px 0 10px;
+    grid-template-columns: 1.35fr 0.95fr;
+    gap: 18px;
+    margin: 8px 0 14px;
     break-inside: avoid;
     page-break-inside: avoid;
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .vat-block h3 {{
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    margin-bottom: 4px;
-    font-family: "Segoe UI", Arial, sans-serif;
+    margin-bottom: 8px;
   }}
   table.vat-summary {{
     width: 100%;
@@ -545,50 +583,46 @@ def render_sale_elegant_html(
   }}
   table.vat-summary th,
   table.vat-summary td {{
-    padding: 4px 5px;
-    border-bottom: 0.5pt solid var(--line);
-    font-size: 8.5pt;
+    padding: 7px 8px;
+    border-bottom: 0.55pt solid var(--line);
+    font-size: 10pt;
   }}
   table.vat-summary th {{
     text-align: left;
-    font-size: 7pt;
+    font-size: 7.5pt;
     text-transform: uppercase;
-    color: var(--muted);
-    border-bottom: 0.8pt solid var(--gold);
+    color: #4a3d2c;
+    border-bottom: 0.9pt solid var(--gold);
     font-family: "Segoe UI", Arial, sans-serif;
+    background: var(--sand);
   }}
   table.vat-summary th.num,
   table.vat-summary td.num {{ text-align: right; }}
   .due-quiet {{
-    text-align: right;
     align-self: start;
-    padding-top: 18px;
-  }}
-  .due-quiet .due-label {{
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--muted);
-    font-family: "Segoe UI", Arial, sans-serif;
+    margin-top: 22px;
+    padding: 14px 16px;
+    background: var(--sand-soft);
+    border: 0.6pt solid var(--line);
   }}
   .due-quiet .due-amount {{
-    margin-top: 2px;
-    font-size: 14pt;
+    margin-top: 4px;
+    font-size: 20pt;
     font-weight: 700;
     color: var(--ink);
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
   }}
   .correction-box {{
-    margin: 10px 0;
-    padding: 8px 0;
-    border-top: 0.5pt solid var(--line);
+    margin: 12px 0;
+    padding: 10px 0;
+    border-top: 0.55pt solid var(--line);
     break-inside: avoid;
     page-break-inside: avoid;
   }}
   .correction-box h3 {{
-    font-size: 8pt;
+    font-size: 8.5pt;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--muted);
     margin-bottom: 4px;
   }}
@@ -596,25 +630,27 @@ def render_sale_elegant_html(
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: end;
-    gap: 12px;
-    margin-top: 14px;
-    padding-top: 8px;
-    border-top: 0.5pt solid var(--line);
+    gap: 16px;
+    margin-top: 22px;
+    padding-top: 12px;
+    border-top: 0.55pt solid var(--line);
     position: relative;
-    z-index: 1;
+    z-index: 3;
   }}
   .ksef-text {{
-    font-size: 8.5pt;
-    color: var(--muted);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11pt;
+    color: var(--gold);
+    font-family: "Palatino Linotype", Palatino, Georgia, serif;
+    font-weight: 600;
+    letter-spacing: 0.02em;
   }}
   .qr-slot {{
-    width: 22mm;
-    height: 22mm;
+    width: 28mm;
+    height: 28mm;
   }}
   .qr-slot img {{
-    width: 22mm;
-    height: 22mm;
+    width: 28mm;
+    height: 28mm;
     display: block;
   }}
   @media print {{
@@ -626,6 +662,7 @@ def render_sale_elegant_html(
       print-color-adjust: exact;
       padding: 0;
       max-width: none;
+      overflow: hidden;
     }}
   }}
 </style>
@@ -637,11 +674,13 @@ def render_sale_elegant_html(
     <span class="diamond d1"></span>
     <span class="diamond d2"></span>
     <span class="diamond d3"></span>
+    <span class="diamond d4"></span>
   </div>
+  <div class="horizon" aria-hidden="true"></div>
   {stained}
 
   <header class="brand">
-    <div class="brand-name">IKONA</div>
+    <div class="brand-name">Ikona</div>
     <div class="brand-sub">W Y D A W N I C T W O</div>
   </header>
 

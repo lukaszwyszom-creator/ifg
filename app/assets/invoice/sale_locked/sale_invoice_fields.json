@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "coordinate_space": {
+    "width": 1024,
+    "height": 1536
+  },
+  "layout_locked": true,
+  "fields": {
+    "invoice_number": {
+      "rect": [
+        118,
+        444,
+        330,
+        481
+      ],
+      "style": "serif_26_navy"
+    },
+    "issue_date": {
+      "rect": [
+        118,
+        562,
+        280,
+        590
+      ],
+      "style": "serif_bold_20_navy"
+    },
+    "sale_date": {
+      "rect": [
+        332,
+        562,
+        492,
+        590
+      ],
+      "style": "serif_bold_20_navy"
+    },
+    "due_date": {
+      "rect": [
+        552,
+        562,
+        712,
+        590
+      ],
+      "style": "serif_bold_20_navy"
+    },
+    "payment_method": {
+      "rect": [
+        760,
+        562,
+        930,
+        590
+      ],
+      "style": "serif_bold_20_navy"
+    },
+    "bank_account": {
+      "rect": [
+        118,
+        632,
+        500,
+        662
+      ],
+      "style": "serif_bold_19_navy"
+    },
+    "seller_name": {
+      "rect": [
+        118,
+        745,
+        455,
+        807
+      ],
+      "style": "serif_bold_21_navy",
+      "max_lines": 2
+    },
+    "seller_address": {
+      "rect": [
+        118,
+        811,
+        455,
+        862
+      ],
+      "style": "serif_19_navy",
+      "max_lines": 2
+    },
+    "seller_nip": {
+      "rect": [
+        118,
+        866,
+        455,
+        898
+      ],
+      "style": "serif_19_navy"
+    },
+    "buyer_name": {
+      "rect": [
+        546,
+        745,
+        986,
+        808
+      ],
+      "style": "serif_bold_20_navy",
+      "max_lines": 2
+    },
+    "buyer_address": {
+      "rect": [
+        546,
+        811,
+        986,
+        862
+      ],
+      "style": "serif_19_navy",
+      "max_lines": 2
+    },
+    "buyer_nip": {
+      "rect": [
+        546,
+        866,
+        986,
+        898
+      ],
+      "style": "serif_19_navy"
+    },
+    "items": {
+      "rect": [
+        118,
+        990,
+        999,
+        1094
+      ],
+      "type": "table_rows"
+    },
+    "vat_summary": {
+      "rect": [
+        118,
+        1216,
+        633,
+        1278
+      ],
+      "type": "vat_rows"
+    },
+    "amount_due": {
+      "rect": [
+        780,
+        1222,
+        987,
+        1272
+      ],
+      "style": "serif_bold_28_navy",
+      "align": "right"
+    },
+    "ksef_number": {
+      "rect": [
+        208,
+        1410,
+        800,
+        1460
+      ],
+      "style": "serif_bold_18_brown"
+    },
+    "ksef_qr": {
+      "rect": [
+        820,
+        1360,
+        990,
+        1518
+      ],
+      "type": "image"
+    }
+  }
+}

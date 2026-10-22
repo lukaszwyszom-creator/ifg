@@ -1,14 +1,14 @@
 # Invoice presentation assets
 
-## stained_glass.* — STAINED_GLASS_ASSET_REQUIRED
+## stained_glass.png
 
-Canonical path expected by the elegant sales invoice template:
+Canonical brand slot for the elegant sales invoice template:
 
 - `app/assets/invoice/stained_glass.png` (preferred), or
 - `app/assets/invoice/stained_glass.svg` / `.jpg`
 
-Until the operator-approved Wydawnictwo Ikona stained-glass artwork is placed here,
-the template keeps an empty circular ornament slot (`data-stained-glass="STAINED_GLASS_ASSET_REQUIRED"`).
+When the file is present, the template embeds it in a circular viewport
+(`data-stained-glass="provided"`, CSS `object-fit: cover`).
 
-Do not treat CSS-only placeholders as final brand assets.
-Gate: **ASSET_BLOCKED** until the file is committed.
+When absent, the slot stays empty with
+`data-stained-glass="STAINED_GLASS_ASSET_REQUIRED"`.

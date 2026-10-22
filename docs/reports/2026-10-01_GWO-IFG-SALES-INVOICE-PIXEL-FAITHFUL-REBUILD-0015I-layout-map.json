@@ -1,0 +1,112 @@
+{
+  "PAGE": {
+    "w_px": 1024,
+    "h_px": 1536,
+    "aspect": 0.6667
+  },
+  "ORNAMENT_X": {
+    "x_px": 84,
+    "x_pct": 8.2,
+    "score": 603
+  },
+  "STAINED_GLASS_BBOX": {
+    "x_pct": 0.0,
+    "y_pct": 0.0,
+    "w_pct": 37.89,
+    "h_pct": 21.88,
+    "x_px": 0,
+    "y_px": 0,
+    "w_px": 388,
+    "h_px": 336
+  },
+  "BRAND_BBOX": {
+    "x_pct": 29.98,
+    "y_pct": 5.47,
+    "w_pct": 39.94,
+    "h_pct": 8.46,
+    "x_px": 307,
+    "y_px": 84,
+    "w_px": 409,
+    "h_px": 130
+  },
+  "INVOICE_TITLE_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 15.49,
+    "w_pct": 39.94,
+    "h_pct": 6.45,
+    "x_px": 204,
+    "y_px": 238,
+    "w_px": 409,
+    "h_px": 99
+  },
+  "META_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 23.44,
+    "w_pct": 69.92,
+    "h_pct": 10.48,
+    "x_px": 204,
+    "y_px": 360,
+    "w_px": 716,
+    "h_px": 161
+  },
+  "PARTIES_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 35.48,
+    "w_pct": 69.92,
+    "h_pct": 14.45,
+    "x_px": 204,
+    "y_px": 545,
+    "w_px": 716,
+    "h_px": 222
+  },
+  "ITEM_TABLE_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 51.5,
+    "w_pct": 69.92,
+    "h_pct": 14.45,
+    "x_px": 204,
+    "y_px": 791,
+    "w_px": 716,
+    "h_px": 222
+  },
+  "VAT_SUMMARY_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 68.49,
+    "w_pct": 39.94,
+    "h_pct": 11.98,
+    "x_px": 204,
+    "y_px": 1052,
+    "w_px": 409,
+    "h_px": 184
+  },
+  "PAYABLE_BBOX": {
+    "x_pct": 61.91,
+    "y_pct": 68.49,
+    "w_pct": 27.93,
+    "h_pct": 11.98,
+    "x_px": 634,
+    "y_px": 1052,
+    "w_px": 286,
+    "h_px": 184
+  },
+  "KSEF_BBOX": {
+    "x_pct": 19.92,
+    "y_pct": 87.5,
+    "w_pct": 50.0,
+    "h_pct": 5.99,
+    "x_px": 204,
+    "y_px": 1344,
+    "w_px": 512,
+    "h_px": 92
+  },
+  "TARGET_CSS_HINTS": {
+    "ornament_x_mm": 17.2,
+    "glass_size_mm": 79.6,
+    "content_left_mm": 29.2
+  },
+  "NOTES": {
+    "master_file": "docs/design_refs/projektfv_master.jpg",
+    "source_alias": "projektfv.jpg",
+    "semantics_override": "CENA NETTO+CENA BRUTTO; DO ZAP\u0141ATY+Kod I QR"
+  }
+}
