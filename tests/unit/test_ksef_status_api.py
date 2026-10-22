@@ -129,7 +129,8 @@ class TestKSeFConnectionStatusService:
         )
         orm = MagicMock()
         orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
-        service._get_active_db_session = MagicMock(return_value=orm)
+        # Runtime seam is _get_active_online_session (not legacy _get_active_db_session).
+        service._get_active_online_session = MagicMock(return_value=orm)
 
         result = service.get_connection_status("1234567890")
 
@@ -146,7 +147,7 @@ class TestKSeFConnectionStatusService:
         )
         orm = MagicMock()
         orm.expires_at = datetime.now(UTC) - timedelta(minutes=1)
-        service._get_active_db_session = MagicMock(return_value=orm)
+        service._get_active_online_session = MagicMock(return_value=orm)
 
         result = service.get_connection_status("1234567890")
 
@@ -161,7 +162,8 @@ class TestKSeFConnectionStatusService:
             ksef_client=MagicMock(),
             audit_service=MagicMock(),
         )
-        service._get_active_db_session = MagicMock(return_value=None)
+        service._get_active_online_session = MagicMock(return_value=None)
+        service.purchase_auth._find_purchase_auth_record = MagicMock(return_value=None)
 
         result = service.get_connection_status("1234567890")
 
@@ -181,7 +183,7 @@ class TestKSeFConnectionStatusService:
             "KSeF: błąd połączenia",
             transient=True,
         )
-        service._get_active_db_session = MagicMock(return_value=orm)
+        service._get_active_online_session = MagicMock(return_value=orm)
 
         result = service.get_connection_status("1234567890")
 
@@ -199,7 +201,9 @@ class TestKSeFConnectionStatusService:
             "KSeF: błąd połączenia",
             transient=True,
         )
-        service._get_active_db_session = MagicMock(return_value=MagicMock())
+        orm = MagicMock()
+        orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
+        service._get_active_online_session = MagicMock(return_value=orm)
 
         service.get_connection_status("1234567890")
         service.get_connection_status("1234567890")
@@ -218,7 +222,7 @@ class TestKSeFConnectionStatusService:
             )
             orm = MagicMock()
             orm.expires_at = datetime.now(UTC) + timedelta(hours=1)
-            service._get_active_db_session = MagicMock(return_value=orm)
+            service._get_active_online_session = MagicMock(return_value=orm)
             service.ksef_client.check_connectivity.side_effect = side_effect
             service.ksef_client._base_url = "https://api-test.ksef.mf.gov.pl/v2"
             service._probe_cache_key = service.ksef_client._base_url
